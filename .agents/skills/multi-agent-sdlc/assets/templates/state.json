@@ -1,0 +1,13 @@
+{
+  "task_id": "",
+  "state": "requirements_draft",
+  "requirements_approved": false,
+  "acceptance_frozen": false,
+  "generator_plan_status": "not_started",
+  "generator_plan_planner_approved": false,
+  "generator_plan_user_approved": false,
+  "generator_revisions": 0,
+  "evaluator_revalidations": 0,
+  "blocked_reason": null,
+  "latest_summary": null
+}

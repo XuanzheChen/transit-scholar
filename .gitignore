@@ -1,0 +1,43 @@
+temp/
+output/
+developing/
+data/
+doc/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/multi-agent-sdlc/
+!.agents/skills/multi-agent-sdlc/**
+AGENTS.md
+CLAUDE.md
+reminders/
+.env
+.env.*
+!.env.example
+
+# Multi-agent SDLC runtime artifacts
+tasks/
+.agentic-sdlc/active-task.json
+.agentic-sdlc/init.json
+.agentic-sdlc/model-probes/
+.agentic-sdlc/
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.egg-info/
+
+# Code graph runtime artifact
+.codegraph/
+
+# Historical workflow handoff archives
+2CC/
+oldAGENTS.md
+
+# Local accounting notes
+token开销.txt
+
+# PDF fixtures must be explicitly reviewed before commit
+tests/fixtures/**/*.pdf

@@ -1,0 +1,11 @@
+{
+  "path_compliance": "valid",
+  "output_protocol": "valid",
+  "invocation_evidence": "verified",
+  "result_file": "result.md",
+  "raw_stdout": "raw_stdout.json",
+  "raw_stderr": "raw_stderr.log",
+  "decision": null,
+  "blocking_count": 0,
+  "requires_user_decision": false
+}

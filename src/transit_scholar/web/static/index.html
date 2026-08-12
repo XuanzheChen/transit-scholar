@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TransitScholar &mdash; Stage 7 Acceptance Panel</title>
+  <link rel="stylesheet" href="/static/styles.css?v=ac-web-007-responsive" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <strong>TransitScholar</strong>
+      <span class="muted">Stage 7 &mdash; Local Acceptance Panel</span>
+    </div>
+    <div class="topbar-meta">
+      <span id="data-root-badge" class="badge badge-warn" title="Current data root">data root: &hellip;</span>
+      <span id="health-badge" class="badge">health: &hellip;</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Left column: import + results + paper list -->
+    <section class="col">
+      <div class="card" id="card-import">
+        <h2>1. Import PDF</h2>
+        <form id="import-form">
+          <input type="file" id="import-file" accept="application/pdf" />
+          <button type="submit" id="import-run">Upload &amp; Run Pipeline</button>
+        </form>
+        <p class="hint">
+          Uploads are streamed in bounded chunks with a hard 100&nbsp;MiB cap;
+          oversized files are rejected with <code>UPLOAD_TOO_LARGE</code> and
+          never reach the pipeline. The per-request staging copy under
+          <code>temp/stage7_uploads/</code> is removed after processing. This
+          panel only uses the data root shown above &mdash; never the formal
+          library.
+        </p>
+      </div>
+
+      <div class="card" id="card-last-result">
+        <h2>2. Last Pipeline Result</h2>
+        <div id="last-result" class="empty">No import run yet in this session.</div>
+      </div>
+
+      <div class="card" id="card-papers">
+        <h2>3. Papers</h2>
+        <div class="toolbar">
+          <label>Status:
+            <select id="papers-status">
+              <option value="">(any)</option>
+              <option value="active">active</option>
+              <option value="duplicate_pending">duplicate_pending</option>
+              <option value="archived">archived</option>
+            </select>
+          </label>
+          <label class="checkbox"><input type="checkbox" id="papers-include-deleted" /> include deleted</label>
+          <button type="button" id="papers-refresh">Refresh</button>
+        </div>
+        <div id="papers-list" class="empty">No papers loaded.</div>
+      </div>
+    </section>
+
+    <!-- Middle column: paper detail + gate + metadata + citations -->
+    <section class="col">
+      <div class="card" id="card-detail">
+        <h2>4. Paper Detail</h2>
+        <div id="paper-detail" class="empty">Select a paper from the list.</div>
+      </div>
+
+      <div class="card" id="card-enrichment">
+        <h2>Provider Enrichment</h2>
+        <div class="toolbar">
+          <button type="button" id="enrichment-refresh" disabled>Refresh Enrichment</button>
+        </div>
+        <div id="enrichment" class="empty">Select a paper to inspect provider enrichment.</div>
+        <p class="hint">
+          Provider facts are read from persisted records; refresh re-runs the
+          provider cascade for the selected paper only. Network access, API
+          keys, and rate limits are governed by server configuration &mdash;
+          keys are never shown here.
+        </p>
+      </div>
+
+      <div class="card" id="card-gate">
+        <h2>5. Second-Layer Gate</h2>
+        <div id="gate" class="empty">Select a paper to inspect the gate.</div>
+      </div>
+
+      <div class="card" id="card-metadata">
+        <h2>6. Metadata Candidates</h2>
+        <div id="metadata-candidates" class="empty">Select a paper to list candidates.</div>
+      </div>
+
+      <div class="card" id="card-citations">
+        <h2>7. Citations</h2>
+        <div id="citations" class="empty">Select a paper to list citations.</div>
+      </div>
+
+      <div class="card" id="card-trace">
+        <h2>10. Data Flow Trace</h2>
+        <div id="trace" class="empty">Select a paper to inspect its data flow.</div>
+      </div>
+    </section>
+
+    <!-- Right column: maintenance -->
+    <section class="col">
+      <div class="card" id="card-maintenance">
+        <h2>8. Maintenance List</h2>
+        <div class="toolbar">
+          <button type="button" id="maintenance-refresh">Refresh</button>
+        </div>
+        <div id="maintenance-list" class="empty">No maintenance items.</div>
+      </div>
+
+      <div class="card" id="card-preview">
+        <h2>9. Maintenance Action Preview</h2>
+        <div id="maintenance-preview" class="empty">
+          Select a maintenance item and a recommended action to preview.
+        </div>
+        <p class="hint">
+          Previews are read-only. No action here executes a delete, move, or
+          database write.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span id="footer-msg" class="muted">Loading health&hellip;</span>
+  </footer>
+
+  <script src="/static/app.js?v=stage7-web-upload-enrichment"></script>
+</body>
+</html>

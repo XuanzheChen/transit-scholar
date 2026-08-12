@@ -1,0 +1,212 @@
+/* Stage 7 acceptance panel — restrained, information-dense, no network assets. */
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --border: #d8dce3;
+  --text: #1c2128;
+  --muted: #6a737d;
+  --accent: #0b5fff;
+  --accent-soft: #e6efff;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --ok: #1a7f37;
+  --ok-soft: #e6f4ea;
+  --danger: #cf222e;
+  --danger-soft: #fde8e8;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.muted { color: var(--muted); }
+code, .mono { font-family: var(--mono); font-size: 12px; }
+
+/* Top bar */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.topbar-title { display: flex; gap: 10px; align-items: baseline; }
+.topbar-meta { display: flex; gap: 8px; align-items: center; }
+.badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #f0f2f5;
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+}
+.badge-warn { background: var(--warn-soft); border-color: #e0c988; color: var(--warn); }
+.badge-ok { background: var(--ok-soft); border-color: #a7d5b5; color: var(--ok); }
+.badge-err { background: var(--danger-soft); border-color: #f0b5b5; color: var(--danger); }
+
+/* Layout: three columns. minmax(0, 1fr) lets each track shrink below the
+ * max-content width of its tables so no column can stretch the document. */
+.layout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 16px;
+  align-items: start;
+}
+.col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+
+/* Forms / toolbar */
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.toolbar label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.toolbar select { padding: 3px 6px; }
+form { display: flex; flex-direction: column; gap: 8px; }
+input[type="file"] { font-size: 13px; }
+button {
+  font: inherit;
+  padding: 5px 12px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+button.secondary {
+  background: #fff;
+  color: var(--accent);
+  border-color: var(--border);
+}
+button:hover { filter: brightness(0.97); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+.checkbox { gap: 3px; }
+
+.empty { color: var(--muted); font-size: 13px; font-style: italic; padding: 4px 0; }
+
+/* Tables: display as a block so a wide table scrolls inside its own card
+ * instead of expanding the page. The inner table formatting is preserved by
+ * the anonymous table box, so cells keep their grid alignment. */
+table { display: block; overflow-x: auto; width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; background: #fafbfc; position: sticky; top: 0; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: var(--accent-soft); }
+tr.selected { background: var(--accent-soft); }
+.nowrap { white-space: nowrap; }
+.scroll { max-height: 320px; overflow: auto; }
+
+/* Key/value grids: the value track can shrink below content width so long
+ * values wrap instead of pushing the grid (and the page) wider. */
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; font-size: 12px; }
+.kv .k { color: var(--muted); white-space: nowrap; }
+.kv .v { word-break: break-word; }
+
+/* Status pills */
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: #f0f2f5;
+  white-space: nowrap;
+}
+.pill-completed, .pill-ready, .pill-active { background: var(--ok-soft); border-color: #a7d5b5; color: var(--ok); }
+.pill-duplicate, .pill-duplicate_pending, .pill-awaiting_user_review { background: var(--warn-soft); border-color: #e0c988; color: var(--warn); }
+.pill-partial, .pill-blocked { background: var(--danger-soft); border-color: #f0b5b5; color: var(--danger); }
+.pill-failed, .pill-deleted { background: var(--danger-soft); border-color: #f0b5b5; color: var(--danger); }
+.pill-info { background: #eef1f4; color: var(--muted); }
+.pill-critical { background: var(--danger-soft); border-color: #f0b5b5; color: var(--danger); }
+.pill-warning { background: var(--warn-soft); border-color: #e0c988; color: var(--warn); }
+/* Enrichment provider statuses */
+.pill-fetched { background: var(--ok-soft); border-color: #a7d5b5; color: var(--ok); }
+.pill-pending, .pill-running, .pill-skipped, .pill-not_found,
+.pill-retry_scheduled, .pill-rate_limited { background: var(--warn-soft); border-color: #e0c988; color: var(--warn); }
+
+/* Provider enrichment facts: long fields/errors wrap inside the value column
+ * (overflow-wrap) without ever overlapping the fixed label column. */
+.provider-fact {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.provider-fact .kv { font-size: 12px; }
+.provider-fact .v { overflow-wrap: anywhere; word-break: break-word; }
+
+/* Result block */
+.result-block { font-size: 12px; }
+.result-block .row { display: flex; gap: 8px; margin-bottom: 3px; }
+.result-block .row .label { color: var(--muted); min-width: 150px; }
+.result-block .row .value { word-break: break-word; min-width: 0; }
+
+/* Preview block */
+.preview-action-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.blocker-list, .path-list { margin: 4px 0; padding-left: 18px; font-size: 12px; }
+.blocker-list { color: var(--danger); }
+.path-list { font-family: var(--mono); font-size: 11px; color: var(--text); }
+/* Long blocker codes and file paths must wrap inside their card. */
+.blocker-list, .path-list, .trace-step-list, .trace-step-details { overflow-wrap: anywhere; }
+
+/* Trace */
+.trace-identity { margin-bottom: 6px; }
+.trace-steps { margin: 4px 0; padding-left: 18px; }
+.trace-step { margin-bottom: 10px; }
+.trace-step-head { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.trace-step-name { font-weight: 600; min-width: 160px; }
+.trace-step-details { font-size: 12px; color: var(--muted); margin: 2px 0; }
+.trace-step-list { margin: 2px 0; padding-left: 18px; font-size: 11px; font-family: var(--mono); }
+.trace-step-blockers { margin: 2px 0; padding-left: 18px; font-size: 12px; color: var(--danger); }
+
+.footer {
+  padding: 8px 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  position: sticky;
+  bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Narrow screens: wrap the top bar and badges, compact the paddings, and keep
+ * every panel on a single full-width column without horizontal page scroll. */
+@media (max-width: 800px) {
+  .topbar { flex-wrap: wrap; gap: 8px 12px; padding: 8px 10px; }
+  .topbar-title, .topbar-meta { flex-wrap: wrap; min-width: 0; }
+  .badge { max-width: 100%; }
+  .layout { padding: 8px 10px; gap: 10px; }
+  .card { padding: 10px; }
+  .footer { padding: 6px 10px 16px; }
+}

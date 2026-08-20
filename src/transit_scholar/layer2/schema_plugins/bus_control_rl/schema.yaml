@@ -1,0 +1,399 @@
+schema_id: bus_control_rl
+version: "1.0"
+name: Bus Control Reinforcement Learning Paper
+description: Official TransitScholar schema for papers on deep-reinforcement-learning-based bus dispatch and real-time bus control.
+
+# Frozen field status 口径 (AC-T001-F14). Documentation for prompts/reports
+# only; the extraction runtime never reads gold expected_status.
+status_semantics:
+  explicit: 原文存在直接陈述、直接等价术语、表格/图注/实验设置中的直接事实。
+  inferred: 需要跨句归纳、领域分类映射、由多个事实综合推出。
+  not_found: 候选证据中没有足够支持。
+  not_applicable: 该字段对论文研究对象不适用。
+  unclear: 候选证据不足、LLM 输出矛盾、或系统无法安全判定。
+  conflicting: 候选证据存在相互矛盾信息。
+
+sections:
+  - id: research_problem
+    label: Research Problem
+    fields:
+      - id: research_problem.control_type
+        label: Control Type
+        description: The category of bus control strategy studied by the paper.
+        question: What control strategy category does the proposed method use?
+        type: enum
+        options:
+          - holding
+          - scheduling
+          - speed control
+          - stop skipping
+          - mixed control
+          - other
+        evidence_required: true
+        allow_inference: true
+      - id: research_problem.control_objective
+        label: Control Objective
+        description: The primary objective the control method optimizes for.
+        question: What is the primary objective of the proposed control method?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: research_problem.network_scope
+        label: Network Scope
+        description: The scale of the public transit network considered by the study.
+        question: At what network scale does the paper evaluate its method?
+        type: enum
+        options:
+          - single line
+          - multi-line corridor
+          - small network
+          - large network
+          - unspecified
+        evidence_required: true
+        allow_inference: true
+      - id: research_problem.line_scope
+        label: Line Scope
+        description: The specific bus lines or corridors the study covers.
+        question: Which bus lines or corridors are studied in the paper?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: research_problem.problem_description
+        label: Problem Description
+        description: A short description of the real-world bus operation problem addressed.
+        question: What real-world bus operation problem does the paper address?
+        type: string
+        evidence_required: true
+        allow_inference: true
+
+  - id: rl_formulation
+    label: RL Formulation
+    fields:
+      - id: rl_formulation.rl_paradigm
+        label: RL Paradigm
+        description: The reinforcement learning paradigm of the proposed method.
+        question: What reinforcement learning paradigm does the paper use?
+        type: enum
+        options:
+          - SARL
+          - MARL
+          - Hierarchical RL
+          - Other
+        evidence_required: true
+        allow_inference: true
+      - id: rl_formulation.algorithm
+        label: Algorithm
+        description: The concrete RL algorithm (for example PPO, DQN, SAC, TD3, DDPG).
+        question: Which concrete RL algorithm does the paper use?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: rl_formulation.agent_definition
+        label: Agent Definition
+        description: What entity acts as an agent and what it controls.
+        question: What is defined as an RL agent and what does it control?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: rl_formulation.agent_granularity
+        label: Agent Granularity
+        description: The granularity at which agents are defined.
+        question: At what granularity are agents defined?
+        type: enum
+        options:
+          - bus level
+          - stop level
+          - line level
+          - network level
+          - other
+        evidence_required: true
+        allow_inference: true
+      - id: rl_formulation.centralized_or_decentralized
+        label: Centralization
+        description: Whether training and execution are centralized or decentralized.
+        question: Is the method centralized, decentralized, or centralized training with decentralized execution?
+        type: enum
+        options:
+          - centralized
+          - decentralized
+          - centralized training decentralized execution
+          - other
+        evidence_required: true
+        allow_inference: true
+      - id: rl_formulation.training_execution_paradigm
+        label: Training and Execution Paradigm
+        description: How training and execution are organized in practice.
+        question: How are training and execution organized in the paper?
+        type: string
+        evidence_required: true
+        allow_inference: true
+
+  - id: decision_model
+    label: Decision Model
+    fields:
+      - id: decision_model.state
+        label: State
+        description: Structured description of the state features observed by the agent.
+        question: What information composes the agent state?
+        type: object
+        evidence_required: true
+        allow_inference: true
+        output_guidance:
+          skeleton:
+            type: object
+            instruction: >-
+              Return a JSON object whose keys are semantic members of the state
+              description (for example observation features and their meaning).
+              Never use natural-language paragraphs inside the object.
+            suggested_keys:
+              - features
+              - description
+      - id: decision_model.action
+        label: Action
+        description: Structured description of the action space of the agent.
+        question: What actions can the agent take?
+        type: object
+        evidence_required: true
+        allow_inference: true
+        output_guidance:
+          skeleton:
+            type: object
+            instruction: >-
+              Return a JSON object whose keys are semantic members of the
+              action-space description (for example action variable and its
+              domain). Never use natural-language paragraphs inside the object.
+            suggested_keys:
+              - action_variable
+              - domain
+      - id: decision_model.reward
+        label: Reward
+        description: Structured description of the reward function.
+        question: How is the reward function designed?
+        type: object
+        evidence_required: true
+        allow_inference: true
+        output_guidance:
+          skeleton:
+            type: object
+            instruction: >-
+              Return a JSON object whose keys are semantic members of the reward
+              function (for example shaping terms, weights and the objective).
+              Never use natural-language paragraphs inside the object; provide
+              a structured, machine-readable summary instead.
+            suggested_keys:
+              - terms
+              - weights
+              - objective
+      - id: decision_model.decision_timing
+        label: Decision Timing
+        description: When decisions are made relative to bus operation.
+        question: At what moments does the agent make decisions?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: decision_model.decision_interval
+        label: Decision Interval
+        description: The time interval between successive decisions.
+        question: How frequently does the agent make decisions?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: decision_model.action_constraints
+        label: Action Constraints
+        description: Constraints imposed on the action space.
+        question: What constraints are imposed on the actions?
+        type: list
+        evidence_required: true
+        allow_inference: true
+
+  - id: control_constraints
+    label: Control Constraints
+    fields:
+      - id: control_constraints.holding_upper_bound
+        label: Holding Upper Bound
+        description: The maximum holding time allowed at control points.
+        question: What is the upper bound on holding time?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: control_constraints.holding_lower_bound
+        label: Holding Lower Bound
+        description: The minimum holding time allowed at control points.
+        question: What is the lower bound on holding time?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: control_constraints.holding_location
+        label: Holding Location
+        description: Where holding control is applied.
+        question: Where can holding be applied in the network?
+        type: enum
+        options:
+          - at stops
+          - at route start
+          - at route end
+          - at transfer stops
+          - other
+        evidence_required: true
+        allow_inference: true
+      - id: control_constraints.operational_constraints
+        label: Operational Constraints
+        description: Operational constraints considered by the control method.
+        question: What operational constraints does the method respect?
+        type: list
+        evidence_required: true
+        allow_inference: true
+      - id: control_constraints.other_constraints
+        label: Other Constraints
+        description: Additional constraints not covered by other fields.
+        question: What other constraints apply to the control method?
+        type: list
+        evidence_required: true
+        allow_inference: true
+
+  - id: baselines
+    label: Baselines
+    fields:
+      - id: baselines.baselines
+        label: Baselines
+        description: Structured list of baseline methods compared against.
+        question: Which baselines does the paper compare against?
+        type: list
+        evidence_required: true
+        allow_inference: true
+
+  - id: experimental_setup
+    label: Experimental Setup
+    fields:
+      - id: experimental_setup.simulator
+        label: Simulator
+        description: The simulator or test environment used for evaluation.
+        question: Which simulator or environment is used for experiments?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: experimental_setup.route_or_network
+        label: Route or Network
+        description: The specific route or network used in the experiments.
+        question: What route or network is used in the experiments?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: experimental_setup.demand_setting
+        label: Demand Setting
+        description: How passenger demand is modeled in the experiments.
+        question: How is passenger demand modeled?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: experimental_setup.scenario_setting
+        label: Scenario Setting
+        description: The scenarios under which the method is evaluated.
+        question: What scenarios are evaluated in the paper?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: experimental_setup.training_setting
+        label: Training Setting
+        description: Training configuration details of the RL agent.
+        question: How is the RL agent trained in the experiments?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: experimental_setup.random_seed
+        label: Random Seed
+        description: Random seed settings used for reproducibility.
+        question: What random seed configuration is used?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: experimental_setup.evaluation_protocol
+        label: Evaluation Protocol
+        description: How the method is evaluated against baselines.
+        question: What evaluation protocol is followed?
+        type: string
+        evidence_required: true
+        allow_inference: true
+
+  - id: metrics
+    label: Metrics
+    fields:
+      - id: metrics.metrics
+        label: Metrics
+        description: Structured list of performance metrics reported in the paper.
+        question: Which performance metrics does the paper report?
+        type: list
+        evidence_required: true
+        allow_inference: true
+
+  - id: results
+    label: Results
+    fields:
+      - id: results.main_results
+        label: Main Results
+        description: The most important quantitative results of the proposed method.
+        question: What are the main quantitative results of the paper?
+        type: list
+        evidence_required: true
+        allow_inference: true
+        output_guidance:
+          value_guidance: >-
+            Qualitative comparative findings are valid main results. Report the
+            paper's headline findings as stated: how the proposed method compares
+            with baselines, on which metrics, and under which conditions —
+            including purely qualitative claims when concrete numeric figures
+            are not reported. Use not_found only when the candidate evidence
+            contains no finding at all about the proposed method's results.
+      - id: results.baseline_comparisons
+        label: Baseline Comparisons
+        description: Results comparing the proposed method against baselines.
+        question: How does the proposed method compare with the baselines?
+        type: list
+        evidence_required: true
+        allow_inference: true
+      - id: results.ablation_results
+        label: Ablation Results
+        description: Results of ablation studies performed by the paper.
+        question: What do the ablation studies show?
+        type: list
+        evidence_required: true
+        allow_inference: true
+      - id: results.main_conclusions
+        label: Main Conclusions
+        description: The main conclusions the authors draw from the results.
+        question: What are the main conclusions of the paper?
+        type: string
+        evidence_required: true
+        allow_inference: true
+
+  - id: comparability
+    label: Comparability
+    fields:
+      - id: comparability.comparable_dimensions
+        label: Comparable Dimensions
+        description: Dimensions along which this paper can be compared with others.
+        question: Along which dimensions can this paper be compared with other papers?
+        type: list
+        evidence_required: true
+        allow_inference: true
+      - id: comparability.important_differences
+        label: Important Differences
+        description: Notable differences from other studies in the same area.
+        question: What differences from related studies matter for comparison?
+        type: list
+        evidence_required: true
+        allow_inference: true
+      - id: comparability.comparison_caveats
+        label: Comparison Caveats
+        description: Caveats that limit direct comparison with other papers.
+        question: What caveats should be considered when comparing with other papers?
+        type: list
+        evidence_required: true
+        allow_inference: true
+      - id: comparability.comparability_summary
+        label: Comparability Summary
+        description: A summary of how comparable this paper is with the rest of the literature.
+        question: How comparable is this paper with the rest of the literature?
+        type: string
+        evidence_required: true
+        allow_inference: true

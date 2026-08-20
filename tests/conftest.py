@@ -123,3 +123,100 @@ def _cleanup(request):
     """Remove the temporary data root at the end of the session."""
     yield
     shutil.rmtree(_TMP_ROOT, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Layer2 fixtures (task-2026-08-12-002)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _l2_offline_guard(monkeypatch):
+    """Offline guard for the Layer2 suite.
+
+    When ``TRANSIT_SCHOLAR_BLOCK_NETWORK=1`` is set (self-test command #3), any
+    outbound socket connect is blocked and the embedding/reranker API key env
+    vars are cleared, proving the suite runs green with no network and no keys.
+    """
+    if os.environ.get("TRANSIT_SCHOLAR_BLOCK_NETWORK", "0").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+    import socket as _socket
+
+    def _is_loopback(address) -> bool:
+        """Allow loopback so internal machinery (asyncio proactor self-pipes,
+        local servers) keeps working while real outbound network is blocked."""
+        if not isinstance(address, tuple):
+            return False
+        host = address[0]
+        return host in ("127.0.0.1", "::1", "localhost")
+
+    class _GuardedSocket(_socket.socket):
+        def connect(self, address, *args, **kwargs):
+            if _is_loopback(address):
+                return super().connect(address, *args, **kwargs)
+            raise OSError("network blocked by TRANSIT_SCHOLAR_BLOCK_NETWORK")
+
+        def connect_ex(self, address, *args, **kwargs):
+            if _is_loopback(address):
+                return super().connect_ex(address, *args, **kwargs)
+            raise OSError("network blocked by TRANSIT_SCHOLAR_BLOCK_NETWORK")
+
+    def _guarded_create_connection(address, *args, **kwargs):
+        if _is_loopback(address):
+            return _socket.create_connection(address, *args, **kwargs)
+        raise OSError("network blocked by TRANSIT_SCHOLAR_BLOCK_NETWORK")
+
+    monkeypatch.setattr(_socket, "socket", _GuardedSocket)
+    monkeypatch.setattr(_socket, "create_connection", _guarded_create_connection)
+    os.environ["TRANSIT_SCHOLAR_EMBEDDING_API_KEY"] = ""
+    os.environ["TRANSIT_SCHOLAR_RERANKER_API_KEY"] = ""
+    os.environ["JINA_API_KEY"] = ""
+
+
+@pytest.fixture
+def l2_settings(project_tmp_path):
+    """A Settings object pointed at a fresh per-test data root (no API keys)."""
+    from transit_scholar.config import Settings
+
+    s = Settings(data_root=project_tmp_path)
+    s.init_directories()
+    s.layer2_embedding_provider = None
+    s.layer2_embedding_api_key = None
+    s.layer2_embedding_model = None
+    s.layer2_embedding_dimension = None
+    s.jina_api_key = None
+    s.layer2_reranker_provider = None
+    s.layer2_reranker_api_key = None
+    s.layer2_reranker_model = None
+    s.layer2_block_network = True
+    s.layer2_retrieval_allow_network = False
+    return s
+
+
+@pytest.fixture
+def l2_config(l2_settings):
+    """Default Layer2 test config pinned to the deterministic local store.
+
+    Automated tests must be deterministic and independent of whether LanceDB
+    is installed, so they explicitly opt into the pure-Python ``local`` store.
+    The LanceDB-specific tests use ``l2_lancedb_config`` instead. The V1
+    *default* ``Layer2Config.store`` remains ``"lancedb"`` (asserted in
+    ``test_l2s1_config.py``).
+    """
+    from transit_scholar.layer2.config import Layer2Config
+
+    config = Layer2Config.from_settings(l2_settings)
+    object.__setattr__(config, "store", "local")
+    return config
+
+
+@pytest.fixture
+def l2_lancedb_config(l2_settings):
+    """Config that requests the real LanceDB store (production default)."""
+    from transit_scholar.layer2.config import Layer2Config
+
+    return Layer2Config.from_settings(l2_settings)

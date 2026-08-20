@@ -1,0 +1,43 @@
+{
+  "benchmark_id": "l2s2-bus-control-rl-seed-clean-v1",
+  "description": "L2S2 Package E 测试 clean seed gold：所有字段与预测实例完全一致、evidence 合法、无任何 error 级 issue。用于 CLI 退出码 0 与 freeze_suggestion=ready 的确定性用例。",
+  "gold_version": "1.0",
+  "papers": [
+    {
+      "paper_id": "seed-clean-001",
+      "title": "Synthetic Clean Seed Paper",
+      "pdf_relative_path": "tests/fixtures/l2s2_schema_acceptance/seed_paper.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "evaluated",
+      "notes": "clean seed：预测实例见 tests/test_l2s2_schema_acceptance_evaluate.py 中的 _clean_instance()",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": ["holding"],
+          "value_judgement": "correct",
+          "evidence_expectation": "required",
+          "notes": "预测 holding + 合法 evidence ref：全通过"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "minimize passenger waiting time",
+          "value_judgement": "correct",
+          "evidence_expectation": "optional",
+          "notes": "预测一致，无 evidence 要求：全通过"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": ["MARL"],
+          "value_judgement": "correct",
+          "evidence_expectation": "required",
+          "notes": "预测 MARL + 合法 evidence ref：全通过"
+        }
+      ]
+    }
+  ]
+}

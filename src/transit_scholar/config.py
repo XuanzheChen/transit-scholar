@@ -41,6 +41,22 @@ def _load_project_dotenv() -> None:
                 os.environ[key] = value.strip()
 
 
+def _env_bool(name: str, default: str = "false") -> bool:
+    """Read a boolean-style env var (``true/1/yes``) with a default."""
+    return os.environ.get(name, default).strip().lower() in ("true", "1", "yes")
+
+
+def _env_int(name: str) -> int | None:
+    """Read an integer env var, returning ``None`` when unset or invalid."""
+    raw = os.environ.get(name)
+    if not raw or not raw.strip():
+        return None
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return None
+
+
 _load_project_dotenv()
 
 
@@ -88,6 +104,27 @@ class Settings:
     def logs_dir(self) -> Path:
         return self.data_root / "logs"
 
+    # --- Layer2 paths --------------------------------------------------------
+    @property
+    def layer2_dir(self) -> Path:
+        return self.data_root / "layer2"
+
+    @property
+    def layer2_parsed_dir(self) -> Path:
+        return self.layer2_dir / "parsed"
+
+    @property
+    def layer2_retrieval_dir(self) -> Path:
+        return self.layer2_dir / "retrieval"
+
+    @property
+    def layer2_schema_dir(self) -> Path:
+        """L2S2 schema run storage root (created on demand by the storage layer)."""
+        return self.layer2_dir / "schemas"
+
+    def layer2_parsed_paper_dir(self, paper_id: str) -> Path:
+        return self.layer2_parsed_dir / paper_id
+
     # --- import / parsing configuration ------------------------------------
     allowed_mime_types: list[str] = field(
         default_factory=lambda: ["application/pdf"]
@@ -121,6 +158,39 @@ class Settings:
     crossref_mailto: str | None = field(
         default_factory=lambda: os.environ.get("CROSSREF_MAILTO") or None)
 
+    # --- Layer2 cloud provider configuration -----------------------------------
+    # Read via the project-root ``.env`` / process environment (override=False),
+    # never written to manifests or logs. ``layer2_block_network`` is an
+    # explicit offline gate for tests and smoke runs.
+    layer2_embedding_provider: str | None = field(
+        default_factory=lambda: os.environ.get(
+            "TRANSIT_SCHOLAR_EMBEDDING_PROVIDER") or None)
+    layer2_embedding_api_key: str | None = field(
+        default_factory=lambda: os.environ.get(
+            "TRANSIT_SCHOLAR_EMBEDDING_API_KEY") or None)
+    layer2_embedding_model: str | None = field(
+        default_factory=lambda: os.environ.get(
+            "TRANSIT_SCHOLAR_EMBEDDING_MODEL") or None)
+    layer2_embedding_dimension: int | None = field(
+        default_factory=lambda: _env_int("TRANSIT_SCHOLAR_EMBEDDING_DIMENSION"))
+    jina_api_key: str | None = field(
+        default_factory=lambda: os.environ.get("JINA_API_KEY") or None)
+    layer2_reranker_provider: str | None = field(
+        default_factory=lambda: os.environ.get(
+            "TRANSIT_SCHOLAR_RERANKER_PROVIDER") or None)
+    layer2_reranker_api_key: str | None = field(
+        default_factory=lambda: os.environ.get(
+            "TRANSIT_SCHOLAR_RERANKER_API_KEY") or None)
+    layer2_reranker_model: str | None = field(
+        default_factory=lambda: os.environ.get(
+            "TRANSIT_SCHOLAR_RERANKER_MODEL") or None)
+    layer2_retrieval_allow_network: bool = field(
+        default_factory=lambda: _env_bool(
+            "TRANSIT_SCHOLAR_RETRIEVAL_ALLOW_NETWORK", "false"))
+    layer2_block_network: bool = field(
+        default_factory=lambda: _env_bool(
+            "TRANSIT_SCHOLAR_BLOCK_NETWORK", "false"))
+
     # --- directory initialisation ------------------------------------------
     def init_directories(self) -> None:
         """Create every data directory if it does not exist yet."""
@@ -130,6 +200,9 @@ class Settings:
             self.temporary_dir,
             self.trash_dir,
             self.logs_dir,
+            self.layer2_dir,
+            self.layer2_parsed_dir,
+            self.layer2_retrieval_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 

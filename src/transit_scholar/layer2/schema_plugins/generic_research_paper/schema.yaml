@@ -1,0 +1,44 @@
+schema_id: generic_research_paper
+version: "1.0"
+name: Generic Research Paper
+description: Minimal custom schema proving that adding a new plugin directory requires no engine core change.
+
+sections:
+  - id: overview
+    label: Overview
+    fields:
+      - id: research_question
+        label: Research Question
+        description: The main research question addressed by the paper.
+        question: What research question does the paper address?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: method
+        label: Method
+        description: The method proposed or used by the paper.
+        question: What method does the paper propose or use?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: dataset
+        label: Dataset
+        description: The dataset used for evaluation.
+        question: What dataset does the paper use?
+        type: string
+        evidence_required: true
+        allow_inference: true
+      - id: metrics
+        label: Metrics
+        description: Performance metrics reported by the paper.
+        question: What metrics does the paper report?
+        type: list
+        evidence_required: true
+        allow_inference: true
+      - id: main_findings
+        label: Main Findings
+        description: The main findings of the paper.
+        question: What are the main findings of the paper?
+        type: string
+        evidence_required: true
+        allow_inference: true

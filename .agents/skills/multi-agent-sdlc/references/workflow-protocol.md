@@ -19,6 +19,13 @@ Runner, Adapter, Contract Compiler, and Git Guard handle mechanical work. Do not
 
 Adapter saves raw stdout/stderr, extracts the final Markdown response, writes `result.md`, parses the status header, and writes `status.json`. A parse failure becomes `invalid_output`; P must not repair or reinterpret it.
 
+When the configured executor is OpenCode or OpenCode Go, Runner invokes the
+adapter outside the Codex sandbox and preserves the user's normal local
+environment. OpenCode configuration and opt-in state live under the user's home
+directories, so sandboxed calls are not considered authoritative failures. If a
+sandboxed OpenCode call fails but the local terminal command is available, rerun
+the same configured adapter unsandboxed before changing workflow state.
+
 Contract Compiler combines approved scope, G plan files, acceptance-mentioned files, and deterministic test-impact expansion. If G needs an unapproved file, G must stop with `CONTRACT_UPDATE_REQUIRED`.
 
 E proposes validation commands; Runner executes approved commands with the unified command runner and stores stdout/stderr/exit code evidence. E reviews those artifacts instead of relying on an interactive shell permission loop.

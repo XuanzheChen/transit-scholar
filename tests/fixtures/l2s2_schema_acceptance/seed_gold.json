@@ -1,0 +1,195 @@
+{
+  "benchmark_id": "l2s2-bus-control-rl-seed-v1",
+  "description": "L2S2 Package E 测试 seed gold（人工可逐条核对的确定性内容）。覆盖 correct / partially_correct / incorrect / not_evaluated / not_found / not_applicable / missing_prediction / schema_mismatch / template 全部判定态。仅用于 deterministic 测试，不代表任何真实论文。",
+  "gold_version": "1.0",
+  "papers": [
+    {
+      "paper_id": "seed-eval-001",
+      "title": "Synthetic Seed Paper for Package E Evaluation",
+      "pdf_relative_path": "tests/fixtures/l2s2_schema_acceptance/seed_paper.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "evaluated",
+      "notes": "人工 seed gold：预测实例见 tests/test_l2s2_schema_acceptance_evaluate.py 中的 _seed_instance()。",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": ["holding"],
+          "value_judgement": "correct",
+          "evidence_expectation": "required",
+          "notes": "预测 holding + 1 条合法 evidence ref：应全部通过"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "minimize passenger waiting time",
+          "value_judgement": "correct",
+          "evidence_expectation": "optional",
+          "notes": "简单 string 标量 acceptable_values，预测一致：value_match true"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": ["MARL"],
+          "value_judgement": "incorrect",
+          "evidence_expectation": "optional",
+          "notes": "预测 SARL：value_mismatch（error），effective_judgement=incorrect"
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": "explicit",
+          "acceptable_values": ["PPO"],
+          "value_judgement": "correct",
+          "evidence_expectation": "optional",
+          "notes": "预测 DQN：自动 value_match=false 与人工 correct 冲突 -> judgement_conflict（warning），统计以人工判定为准"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": "explicit",
+          "acceptable_values": null,
+          "value_judgement": "partially_correct",
+          "evidence_expectation": "optional",
+          "notes": "object 字段 value_match=null；预测 status=inferred -> status_mismatch（error）"
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": "explicit",
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "optional",
+          "notes": "object 字段 not_evaluated：计入 value_not_evaluated_count"
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": "explicit",
+          "acceptable_values": null,
+          "value_judgement": "incorrect",
+          "evidence_expectation": "optional",
+          "notes": "list 字段 value_match=null，统计走人工 judgement=incorrect"
+        },
+        {
+          "field_id": "control_constraints.holding_upper_bound",
+          "expected_status": "not_found",
+          "acceptable_values": null,
+          "value_judgement": "correct",
+          "evidence_expectation": "not_required",
+          "notes": "absent 类：预测 not_found + value None -> absent 正确"
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": "not_applicable",
+          "acceptable_values": null,
+          "value_judgement": "correct",
+          "evidence_expectation": "not_required",
+          "notes": "absent 类：预测 not_found -> not_found_not_applicable_confused（error）"
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": "explicit",
+          "acceptable_values": ["SUMO"],
+          "value_judgement": "correct",
+          "evidence_expectation": "required",
+          "notes": "预测 SUMO + 1 条合法 evidence ref：value/status/evidence 全通过"
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": "explicit",
+          "acceptable_values": ["each bus"],
+          "value_judgement": "correct",
+          "evidence_expectation": "required",
+          "notes": "预测 each bus + 3 条坏 evidence ref（空 block_id / 逆序 char range / 空 quote）-> evidence_ref_invalid x3"
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": "explicit",
+          "acceptable_values": "Line 5",
+          "value_judgement": "correct",
+          "evidence_expectation": "required",
+          "notes": "预测 Line 5 但无 evidence -> evidence_missing（error）"
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": "explicit",
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "optional",
+          "notes": "list 字段 not_evaluated：计入 value_not_evaluated_count"
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": "explicit",
+          "acceptable_values": ["single line"],
+          "value_judgement": "correct",
+          "evidence_expectation": "required",
+          "notes": "预测实例中缺失该字段 -> missing_prediction（error），只计入 missing_prediction_count"
+        }
+      ]
+    },
+    {
+      "paper_id": "seed-template-001",
+      "title": "Synthetic Template Entry (never judged)",
+      "pdf_relative_path": "tests/fixtures/l2s2_schema_acceptance/seed_paper.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": false,
+      "gold_status": "template",
+      "notes": "TEMPLATE: human_review_required - 模板条目示例：评估时跳过并产生 template_entry_skipped",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工标注"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工标注"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工标注"
+        }
+      ]
+    },
+    {
+      "paper_id": "seed-mismatch-001",
+      "title": "Synthetic Mismatch Entry (generic schema)",
+      "pdf_relative_path": "tests/fixtures/l2s2_schema_acceptance/seed_paper.pdf",
+      "schema_id": "generic_research_paper",
+      "schema_version": "1.0",
+      "selected_for_v1": false,
+      "gold_status": "evaluated",
+      "notes": "schema_id 与存储中的 bus_control_rl run 不一致：direct 输入 -> schema_mismatch；storage 路径 -> schema_read_failed",
+      "fields": [
+        {
+          "field_id": "research_question",
+          "expected_status": "explicit",
+          "acceptable_values": "How to control buses?",
+          "value_judgement": "correct",
+          "evidence_expectation": "optional",
+          "notes": "generic_research_paper 字段，用于触发 schema 不一致"
+        },
+        {
+          "field_id": "method",
+          "expected_status": "explicit",
+          "acceptable_values": "MARL",
+          "value_judgement": "correct",
+          "evidence_expectation": "optional",
+          "notes": "generic_research_paper 字段，用于触发 schema 不一致"
+        }
+      ]
+    }
+  ]
+}

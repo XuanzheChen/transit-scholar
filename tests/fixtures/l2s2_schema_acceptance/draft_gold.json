@@ -1,0 +1,1264 @@
+{
+  "benchmark_id": "l2s2-bus-control-rl-real-papers-draft-v1",
+  "description": "L2S2 真实公交 DRL 论文 schema 验收 gold 草稿（LLM-assisted draft）：覆盖 6 篇候选论文、每篇 14 个核心字段。本文件是 G（Generator）基于论文 PDF 离线阅读生成的 draft gold / seed gold / candidate gold，不是人工 gold（not_human_gold: true），全部字段 value_judgement 与 evidence_judgement 均为 not_evaluated，review_status 均为 requires_human_review。任何 correct/partially_correct/incorrect 结论都必须由人工审核确认后方可填写；本草稿不得用于宣告 L2S2 V1 冻结。",
+  "gold_version": "1.0-draft",
+  "notes": "draft gold（非人工 gold）：由 Generator 纯离线生成（读取 6 篇 PDF 前8 页 + 摘要），未调用任何真实 LLM API、未发起任何网络请求。候选字段（expected_status/acceptable_values）仅为人工审核起点；读不准的字段保持 not_evaluated。人工审核并确认后才可转换为正式 gold。",
+  "papers": [
+    {
+      "paper_id": "transit-001",
+      "title": "Robust Dynamic Bus Control: A Distributional Multi-agent Reinforcement Learning Approach",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/2021_arXiv_Robust_Dynamic_Bus_Control_Distributional_MARL.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "draft",
+      "notes": "LLM-assisted draft gold entry (draft, not human gold): content candidates derived from an offline read of the paper PDF. Awaiting human review; cannot be used to declare L2S2 V1 frozen.",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "holding"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: bus holding control at stops (holding duration policy)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "avoid bus bunching; maintain consistent headway; improve operational efficiency and reliability under uncertainty and extreme events",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: robust holding control to avoid bus bunching",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "single line"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: route-level bus fleet operation; evaluated on four real-world trunk routes",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": "explicit",
+          "acceptable_values": "four real-world trunk bus routes (R1-R4, >15 km, >40 stops, Asian city, smart-card demand)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: four trunk services covering more than 15 km with over 40 stops",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "MARL"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: distributional MARL",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": "explicit",
+          "acceptable_values": "IQNC-M (distributional MARL with implicit quantile network and meta-learning, actor-critic)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: implicit quantile network + meta-learning module",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": "explicit",
+          "acceptable_values": "each bus is an agent; on arriving at a stop it determines its holding duration based on local observations",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: asynchronous per-bus holding control",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "headway": [
+              "forward headway",
+              "backward headway"
+            ],
+            "passenger_demand": [
+              "number of onboard passengers",
+              "number of waiting passengers at the stop"
+            ]
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: local observation: headways + passenger demand (AVL/APC/AFC)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "holding_duration": "continuous strength parameter in [0,1] times a maximum holding duration"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: action is the holding strength parameter ai,t",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "headway_variability_penalty": "-(1-w)*CV^2 of headway",
+            "intervention_penalty": "-w*ai,t",
+            "balance": "w=0.2"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: balance system stability (headway regularity) with few interventions",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "no control (NC)",
+            "forward headway-based holding control (FH)",
+            "independent actor-critic (IAC)",
+            "CAAC (credit assignment framework)",
+            "IQNC-N",
+            "IQNC-UCF",
+            "IQNC-CF"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: traditional headway-based control + state-of-the-art MARL + ablation variants",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": "explicit",
+          "acceptable_values": "custom bus simulator calibrated with real-world smart-card data on four trunk routes",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: boarding 3.0 s/pax, alighting 1.8 s/pax, capacity 120 pax",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "average holding time (AHT)",
+            "average waiting time (AWT)",
+            "average journey time (AJT)",
+            "average travel time (ATT)",
+            "average occupancy dispersion (AOD)"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: metrics following Wang and Sun (2020)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "best headway regularity (smaller AWT/AOD) vs all baselines under traffic-state perturbations, demand perturbations and anomaly scenarios (demand surges, traffic interruptions), on both trained and untrained routes"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: robust under sigma_s in {0.1,0.2,0.3}, sigma_d in {1,2,3}, and anomaly scenarios",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-002",
+      "title": "RL-MSA: a Reinforcement Learning-based Multi-line bus Scheduling Approach",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/2024_arXiv_RL_MSA_Multi_line_Bus_Scheduling.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "draft",
+      "notes": "LLM-assisted draft gold entry (draft, not human gold): content candidates derived from an offline read of the paper PDF. Awaiting human review; cannot be used to declare L2S2 V1 frozen.",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "scheduling"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: multi-line bus scheduling (bus-to-trip allocation, offline and online phases)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "minimize the bus company's operational cost while guaranteeing service quality (cover all planned departure times)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: MLBSP objective: operational cost + service quality",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "multi-line corridor"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: multiple interdependent bus lines",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": "explicit",
+          "acceptable_values": "multiple interdependent bus lines, each with two control points (CPs)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: each line has two control points marking departure locations",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "SARL"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: single-agent PPO over the multi-line scheduling MDP",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": "explicit",
+          "acceptable_values": "PPO (proximal policy optimization)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: state-of-the-art PPO for policy training",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": "explicit",
+          "acceptable_values": "a single RL agent that makes bus selection and deadhead decisions at each departure-time decision point",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: two decision types: bus selection + deadhead",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "features": [
+              "bus features (constructed via bus priority screening)",
+              "control point features",
+              "bus line features"
+            ]
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: new state features for buses, CPs and bus lines",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "bus_selection": "choose a bus to perform the scheduled trip",
+            "deadhead": "send a bus from its current CP to a CP of a different bus line"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: action space at each decision point",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "final_reward": "considers both bus company and passenger interests",
+            "step_wise_reward": "informative immediate feedback at each decision point"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: final reward combined with a step-wise reward",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "offline optimization approaches (exact methods and heuristics)"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: compared with offline optimization at the offline phase",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": null,
+          "acceptable_values": null,
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: could not be reliably determined from the read material; kept unevaluated on purpose (no fabrication).",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "number of buses used (operational cost)",
+            "departure time coverage (service quality)"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: buses used and coverage of timetable departure times",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "offline phase uses fewer buses than offline optimization approaches",
+            "online phase covers all departure times without increasing the number of buses used"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: summary of the abstract's quantitative claims",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-006",
+      "title": "Deep Reinforcement Learning based Dynamic Optimization of Bus Timetable",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Ai_Zuo_Chen_2022_ASC_DRL_Bus_Timetable_Dynamic_Optimization.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "draft",
+      "notes": "LLM-assisted draft gold entry (draft, not human gold): content candidates derived from an offline read of the paper PDF. Awaiting human review; cannot be used to declare L2S2 V1 frozen.",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "scheduling"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: dynamic bus timetable optimization (real-time departure interval control)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "dynamically adjust departure intervals to match real-time passenger flow, reducing the bus company's operational cost and improving service quality (passenger waiting time)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: timetable optimization with online departure decisions",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "single line"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: one bus line; each direction has a departure control point",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": "explicit",
+          "acceptable_values": "a single bus line (up and down directions, each with a departure control point)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: one direction of a bus line is taken as an example",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "SARL"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: single-agent DRL decision model",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": "explicit",
+          "acceptable_values": "DQN (rule-constrained Deep Q-Network)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: rule-constrained DQN framework",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": "explicit",
+          "acceptable_values": "a controller agent that decides whether to dispatch a bus service at each minute of the service period",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: every minute of the operation period is a decision point",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "load_factor": "load factor of buses",
+            "carrying_capacity_utilization_rate": "carrying capacity utilization rate",
+            "stranding_passengers": "number of stranding passengers"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: newly identified state features",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "departure": "dispatch a bus service",
+            "no_departure": "skip this minute"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: binary action per minute",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "full_load_rate": "full load rate indicator",
+            "empty_load_rate": "empty load rate indicator",
+            "passenger_waiting_time": "passengers' waiting time",
+            "stranding_passengers": "number of stranding passengers"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: reward captures bus company and passenger interests",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "BTOA-MA (memetic-algorithm timetable optimization)",
+            "genetic algorithm (GA)",
+            "manual method"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: state-of-the-art timetable optimization baselines",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": "explicit",
+          "acceptable_values": "experiments on three real datasets",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: results on three real datasets (Section 5)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "number of vehicles used",
+            "passenger waiting time"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: vehicles saved and waiting time reduction",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "saves 8% of vehicles and reduces 17% of passenger waiting time on average compared with the baselines"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: quantitative claim from the abstract",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-010",
+      "title": "Dynamic Bus Holding Control Using Spatial-Temporal Data – A Deep Reinforcement Learning Approach",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Dynamic Bus Holding Control Using Spatial-Temporal Data – A Deep Reinforcement Learning Approach.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "draft",
+      "notes": "LLM-assisted draft gold entry (draft, not human gold): content candidates derived from an offline read of the paper PDF. Awaiting human review; cannot be used to declare L2S2 V1 frozen.",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "holding"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: dynamic bus holding control (dispatch/hold decisions at the starting stop of a high-frequency line)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "balance passenger demand fulfilment and bus operational efficiency via real-time dispatch/holding decisions at the first stop",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: combined objective with realistic constraints (max buses, capacity, headway bounds)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "single line"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: one high-frequency urban bus line (one-way corridor)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": "explicit",
+          "acceptable_values": "one high-frequency urban bus line (one-way corridor) in Xiamen, China",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: single-stop bus holding problem on a high-frequency line",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "SARL"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: single-agent deep Q-learning",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": "explicit",
+          "acceptable_values": "DQN with a self-attention network architecture",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: self-attention state encoding over the state matrix",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": "explicit",
+          "acceptable_values": "a single holding control agent that decides 'dispatch' or 'hold' for the bus at the first stop",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: real-time dispatching decisions at the first stop",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "state_matrix": "M x (3N+1) spatial-temporal state matrix covering the last M-1 trips and the next trip (dispatch headway, bus load, boarding, alighting)"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: spatial and temporal information on fleet and passengers",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "dispatch": "dispatch the bus at the first stop",
+            "hold": "hold the bus at the first stop (headway determined after each dispatch)"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: two-alternative action space",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "demand_fulfilment": "positive reward for boarding (1.0 per alighted passenger)",
+            "operational_cost": "negative reward per dispatched trip (-30)",
+            "waiting_time": "negative reward on total waiting time",
+            "stranding": "negative reward for stranded passengers",
+            "giving_up": "negative reward for passengers who gave up"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: weighted sum of operational cost and passenger satisfaction",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "SH (holding baseline; abbreviation not expanded in the read pages)",
+            "NH (no-holding baseline)",
+            "EH (holding baseline; abbreviation not expanded in the read pages)",
+            "CNN-DQN",
+            "fully connected DQN"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: SH/NH/EH expansions could not be verified from the read material",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": "explicit",
+          "acceptable_values": "custom simulator based on real-world data collected in Xiamen, China (bus capacity limits, stranding and give-up support)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: simulator supports realistic resource constraints",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "total reward",
+            "number of dispatches",
+            "number of boarded passengers",
+            "average waiting time",
+            "stranded passengers",
+            "passengers who gave up"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: comparison tables report these indicators",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "STDH achieves the best total reward with the fewest stranded passengers vs the SH/NH/EH baselines on the original and shifted-peak-hour passenger demand"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: main results from Tables 3-4",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-015",
+      "title": "Integrating Conventional Headway Control with Reinforcement Learning to Avoid Bus Bunching",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Wang_2022_arXiv_Integrating_Conventional_Headway_Control_RL_Bus_Bunching.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "draft",
+      "notes": "LLM-assisted draft gold entry (draft, not human gold): content candidates derived from an offline read of the paper PDF. Awaiting human review; cannot be used to declare L2S2 V1 frozen.",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "holding"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: holding-time control at stops integrated with conventional dual-headway speed control",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "avoid bus bunching while balancing efficiency (lower passenger waiting/travel time) and stability of the system",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: increase passenger satisfaction and keep the system stable",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "single line"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: one two-way route with 16 buses",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": "explicit",
+          "acceptable_values": "one two-way route of 9.21 km with 17 bus stops and 16 buses, geographically similar to a real-world route in a big city",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: route design in Section 4.1",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "MARL"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: multi-agent PPO",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": "explicit",
+          "acceptable_values": "PPO (multi-agent, off-policy) integrated with conventional dual-headway control (IPPO-DH)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: proposed integrated PPO model with dual-headway",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": "explicit",
+          "acceptable_values": "each bus is an agent; it sets its holding time at stations based on its forward and backward headway",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: actors use local information; critic uses global information",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "actor_state": [
+              "forward headway",
+              "backward headway"
+            ],
+            "critic_state": [
+              "headway vector of all buses",
+              "responsibility vector of holding percentages"
+            ]
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: local actor state and global critic state",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "holding_time": "clipped sum of the conventional dual-headway control term and a learned delta in [0, Hmax]"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: action: at = clip(C + delta * Hmax, 0, Hmax)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "headway_equalization": "w1 * exp(-|forward - backward headway|)",
+            "intervention_penalty": "w2 * exp(-holding time)"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: two-term reward following Wang et al. (2020)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "dual-headway control (Daganzo 2011)",
+            "pure multi-agent PPO RL"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: conventional headway control + pure RL baselines",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": "explicit",
+          "acceptable_values": "custom simulation environment (16 buses, 17 stops, 9 intersections, Poisson passenger arrivals; seven environments varying the arrival-rate mean/std)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: Section 4.1 environment setting",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "passenger waiting time (mean and variance)",
+            "passenger travel time (mean and variance)"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: key metrics: efficiency (mean) and stability (variance)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "IPPO-DH combines the stability of the conventional dual-headway method with RL efficiency in stable environments; pure RL has the lowest waiting time for xi<=0.03 but becomes unstable for xi>0.03"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: result analysis in Section 4.3",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-016",
+      "title": "Reducing Bus Bunching with Asynchronous Multi-Agent Reinforcement Learning",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Wang_Sun_2021_IJCAI_Reducing_Bus_Bunching_Async_MARL.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "draft",
+      "notes": "LLM-assisted draft gold entry (draft, not human gold): content candidates derived from an offline read of the paper PDF. Awaiting human review; cannot be used to declare L2S2 V1 frozen.",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "holding"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: bus holding control (asynchronous, only when a bus arrives at a stop)",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": "explicit",
+          "acceptable_values": "reduce bus bunching and maintain headway regularity, improving the reliability and efficiency of bus services",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: route-level bus fleet control as asynchronous MARL",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "single line"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: route-level bus fleet control, evaluated on four real-world routes",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": "explicit",
+          "acceptable_values": "four real-world bus routes (R1-R4, trunk services) with passenger demand from smart card data",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: all four routes are trunk services",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "MARL"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: asynchronous multi-agent reinforcement learning",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": "explicit",
+          "acceptable_values": "CAAC (credit assignment framework for asynchronous control; actor-critic with a graph-attention event critic)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: event critic with upstream/downstream GATs",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": "explicit",
+          "acceptable_values": "each bus is an agent; on arriving at a stop it decides its holding time",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: agents act asynchronously on stop arrival",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "ego": "local state of the ego bus",
+            "event_graph": "upstream and downstream arrival events of other buses within a time window, aggregated by graph attention"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: state plus event-graph augmented information",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "holding_time": "holding time at the stop when the bus arrives"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: holding control action per stop arrival",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": "explicit",
+          "acceptable_values": {
+            "design": "two-term headway-based reward with priority on system stability (w=0.2)"
+          },
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: reward following the headway-equalization scheme",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "no control (NC)",
+            "forward headway-based holding control (FH)",
+            "independent actor-critic (IAC, DDPG)",
+            "MADDPG"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: traditional headway-based control + state-of-the-art MARL baselines",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": "explicit",
+          "acceptable_values": "bus simulator calibrated with real-world smart card data on four routes (R1-R4)",
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: boarding 3.0 s/pax, alighting 1.8 s/pax, capacity 120 pax",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "average holding time (AHT)",
+            "average waiting time (AWT)",
+            "average journey time (AJT)",
+            "average travel time (ATT)",
+            "average occupancy dispersion (AOD)"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: five evaluation indicators from Section 5.2",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": "explicit",
+          "acceptable_values": [
+            "CAAC outperforms traditional headway-based control (FH) and MARL baselines (IAC, MADDPG) on waiting time and occupancy dispersion with lower holding time, on both trained and untrained routes"
+          ],
+          "evidence_expectation": "required",
+          "notes": "DRAFT (llm_assisted_draft, requires_human_review): LLM-assisted candidate from an offline read of the paper; not human gold; awaiting human review. Candidate: execution results on R1 and transfer to R2/R3/R4",
+          "value_judgement": "not_evaluated",
+          "evidence_judgement": "not_evaluated",
+          "review_status": "requires_human_review",
+          "gold_source": "llm_assisted_draft",
+          "not_human_gold": true
+        }
+      ]
+    }
+  ]
+}

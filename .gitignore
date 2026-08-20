@@ -4,6 +4,8 @@ developing/
 data/
 doc/
 .agents/*
+.vscode/
+.codex-local/
 !.agents/skills/
 .agents/skills/*
 !.agents/skills/multi-agent-sdlc/
@@ -23,6 +25,7 @@ tasks/
 .agentic-sdlc/
 
 # Python runtime artifacts
+.venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -36,8 +39,14 @@ __pycache__/
 2CC/
 oldAGENTS.md
 
-# Local accounting notes
-token开销.txt
-
 # PDF fixtures must be explicitly reviewed before commit
 tests/fixtures/**/*.pdf
+
+# Layer2 Step1 benchmark / eval isolated output roots (semantic self-docs;
+# temp/ already ignores everything below)
+temp/l2s1_parser_benchmark/
+temp/l2s1_retrieval_benchmark/
+temp/l2s1_g_evidence_*/
+
+start-codex-local.ps1
+start-codex-local.bat

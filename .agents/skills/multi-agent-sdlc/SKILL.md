@@ -26,10 +26,22 @@ Before starting Workflow Mode:
 
 1. Verify a valid Git worktree. If Git is invalid, stop before invoking G/E. Never copy the project into a staging directory as fallback.
 2. Load or create `.agentic-sdlc/config.yaml`.
-3. Discover local callable agent CLIs when config is missing or stale.
-4. Ask the user to select real G/E executors and the task directory.
-5. Add the task directory to `.gitignore` when it is repository-local.
-6. Record init choices in `.agentic-sdlc/init.json`.
+3. Run `scripts/check_init_consistency.py`. If project config and `init.json` disagree, resynchronize them and rerun the check before invoking G/E.
+4. Discover local callable agent CLIs when config is missing or stale.
+5. Ask the user to select real G/E executors, models, reasoning effort/variant for each role, and the task directory.
+6. Add the task directory to `.gitignore` when it is repository-local.
+7. Record executor, model, reasoning effort/variant, credential source, invocation and task-directory choices in `.agentic-sdlc/init.json` and project config. The invocation adapter must pass the selected effort to the real CLI and record it in execution evidence.
+
+When the selected executor is OpenCode or OpenCode Go, the Runner must invoke it
+outside the Codex filesystem sandbox with the user's normal local environment.
+OpenCode reads credentials, opt-in state, and model configuration from the user's
+home config directories; sandboxed calls may fail even when the same command works
+in the user's terminal. Record this as `requires_unsandboxed: true` in both
+`.agentic-sdlc/config.yaml` and `.agentic-sdlc/init.json`. If a sandboxed
+OpenCode call fails because of user config directory access, do not retry inside
+the sandbox; rerun the configured adapter outside the sandbox and preserve the
+same model, reasoning effort, prompt file, output directory, and working
+directory.
 
 Never simulate G/E with Planner, local subagents, background Codex threads, or ordinary assistant text. If the configured executor cannot be invoked, move to `blocked`.
 
@@ -59,6 +71,9 @@ Do not split a user goal into micro-slices. Split into at most three complete pa
 Runner and adapters must handle these mechanics without asking Planner to interpret logs:
 
 - Adapter must save raw stdout/stderr, extract the final Markdown response from the external CLI response field when available, write it verbatim to `result.md`, parse the stable status header into `status.json`, and mark `invalid_output` if parsing fails.
+- For OpenCode/OpenCode Go executors, Adapter invocation is an unsandboxed local
+  command by default. The adapter must inherit the user's local environment and
+  must not override OpenCode config/cache paths unless the user explicitly asks.
 - Contract Compiler must build allowed write paths from approved scope, G plan files, acceptance-mentioned files, and deterministic test-impact expansion. If G needs an unapproved file, G must stop with `CONTRACT_UPDATE_REQUIRED` before editing it.
 - E should not depend on an interactive shell permission loop. E proposes validation commands; Runner executes approved commands with `scripts/run_validation.py`, saves stdout/stderr/exit codes, and E reviews those artifacts.
 - Workflow edits must run `scripts/workflow_lint.py` before delivery to catch stale phase paths, approval rules, and final-review wording across SKILL.md, references, roles, templates, and config.

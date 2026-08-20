@@ -16,11 +16,25 @@ dependencies = [
     "uvicorn>=0.30",
     "python-multipart>=0.0.9",
     "python-dotenv>=1.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+]
+# Optional heavy production dependencies for Layer2 parsing/retrieval. None are
+# required by the automated offline test suite: the Layer2 code uses adapter /
+# provider boundaries that report an explicit ``dependency_missing`` status when
+# these are absent (docling/mineru/pymupdf4llm/lancedb) or when a cloud API key
+# is not configured (httpx for the provider adapters).
+layer2 = [
+    "docling>=2",
+    "mineru[all]",
+    "pymupdf4llm>=0.1",
+    "lancedb>=0.10",
+    "httpx>=0.27",
 ]
 
 [tool.setuptools.packages.find]

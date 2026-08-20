@@ -23,6 +23,9 @@ workflow:
 init:
   required: true
   init_record_file: ".agentic-sdlc/init.json"
+  require_user_executor_selection: true
+  require_user_model_selection: true
+  require_user_reasoning_effort_selection: true
   discover_agents_command:
     - "python"
     - ".agents/skills/multi-agent-sdlc/scripts/discover_agents.py"
@@ -38,13 +41,18 @@ agents:
     role_file: ".agentic-sdlc/roles/generator.md"
     identity:
       provider: "TO_BE_SELECTED_DURING_INIT"
+      model: "TO_BE_SELECTED_DURING_INIT"
+      reasoning_effort: "TO_BE_SELECTED_DURING_INIT"
       require_external: true
       allow_simulation: false
       allow_local_subagent: false
     invocation:
       type: "external-command"
+      requires_unsandboxed: true
       command:
         - "TO_BE_SELECTED_DURING_INIT"
+        - "{model}"
+        - "{reasoning_effort}"
         - "{prompt_file}"
       timeout_seconds: 3600
       mode: "edit"
@@ -53,13 +61,18 @@ agents:
     role_file: ".agentic-sdlc/roles/evaluator.md"
     identity:
       provider: "TO_BE_SELECTED_DURING_INIT"
+      model: "TO_BE_SELECTED_DURING_INIT"
+      reasoning_effort: "TO_BE_SELECTED_DURING_INIT"
       require_external: true
       allow_simulation: false
       allow_local_subagent: false
     invocation:
       type: "external-command"
+      requires_unsandboxed: true
       command:
         - "TO_BE_SELECTED_DURING_INIT"
+        - "{model}"
+        - "{reasoning_effort}"
         - "{prompt_file}"
       timeout_seconds: 3600
       mode: "read_only"

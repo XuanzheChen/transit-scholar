@@ -1,0 +1,751 @@
+{
+  "benchmark_id": "l2s2-bus-control-rl-real-papers-v1",
+  "description": "L2S2 真实公交 DRL 论文 schema 验收 gold 模板：覆盖 6 篇候选论文、每篇 14 个核心字段。所有字段均为待人工标注的模板条目（TEMPLATE），不含任何人工判定结论，不得视为已评估 gold。",
+  "gold_version": "1.0",
+  "papers": [
+    {
+      "paper_id": "transit-001",
+      "title": "Robust Dynamic Bus Control: A Distributional Multi-agent Reinforcement Learning Approach",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/2021_arXiv_Robust_Dynamic_Bus_Control_Distributional_MARL.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "template",
+      "notes": "TEMPLATE: human_review_required - 真实论文 gold 骨架，等待人工标注；任何 correct/partially_correct/incorrect 结论都必须由人工填写后方可生效",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-002",
+      "title": "RL-MSA: a Reinforcement Learning-based Multi-line bus Scheduling Approach",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/2024_arXiv_RL_MSA_Multi_line_Bus_Scheduling.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "template",
+      "notes": "TEMPLATE: human_review_required - 真实论文 gold 骨架，等待人工标注；任何 correct/partially_correct/incorrect 结论都必须由人工填写后方可生效",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-006",
+      "title": "Deep Reinforcement Learning based Dynamic Optimization of Bus Timetable",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Ai_Zuo_Chen_2022_ASC_DRL_Bus_Timetable_Dynamic_Optimization.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "template",
+      "notes": "TEMPLATE: human_review_required - 真实论文 gold 骨架，等待人工标注；任何 correct/partially_correct/incorrect 结论都必须由人工填写后方可生效",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-010",
+      "title": "Dynamic Bus Holding Control Using Spatial-Temporal Data – A Deep Reinforcement Learning Approach",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Dynamic Bus Holding Control Using Spatial-Temporal Data – A Deep Reinforcement Learning Approach.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "template",
+      "notes": "TEMPLATE: human_review_required - 真实论文 gold 骨架，等待人工标注；任何 correct/partially_correct/incorrect 结论都必须由人工填写后方可生效",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-015",
+      "title": "Integrating Conventional Headway Control with Reinforcement Learning to Avoid Bus Bunching",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Wang_2022_arXiv_Integrating_Conventional_Headway_Control_RL_Bus_Bunching.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "template",
+      "notes": "TEMPLATE: human_review_required - 真实论文 gold 骨架，等待人工标注；任何 correct/partially_correct/incorrect 结论都必须由人工填写后方可生效",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-016",
+      "title": "Reducing Bus Bunching with Asynchronous Multi-Agent Reinforcement Learning",
+      "pdf_relative_path": "data/stage7_acceptance/real_papers/Wang_Sun_2021_IJCAI_Reducing_Bus_Bunching_Async_MARL.pdf",
+      "schema_id": "bus_control_rl",
+      "schema_version": "1.0",
+      "selected_for_v1": true,
+      "gold_status": "template",
+      "notes": "TEMPLATE: human_review_required - 真实论文 gold 骨架，等待人工标注；任何 correct/partially_correct/incorrect 结论都必须由人工填写后方可生效",
+      "fields": [
+        {
+          "field_id": "research_problem.control_type",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.control_objective",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.network_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "research_problem.line_scope",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.rl_paradigm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.algorithm",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "rl_formulation.agent_definition",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.state",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.action",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "decision_model.reward",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "baselines.baselines",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "experimental_setup.simulator",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "metrics.metrics",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        },
+        {
+          "field_id": "results.main_results",
+          "expected_status": null,
+          "acceptable_values": null,
+          "value_judgement": "not_evaluated",
+          "evidence_expectation": "required",
+          "notes": "TEMPLATE: human_review_required - 待人工填写 expected_status 与 acceptable_values；本骨架不包含任何人工判定结论"
+        }
+      ]
+    }
+  ]
+}

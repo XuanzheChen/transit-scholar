@@ -12,6 +12,8 @@ REQUIRED = {
         "generator_plan",
         "lightweight closure check",
         "does not run a second technical acceptance review",
+        "reasoning effort/variant",
+        "check_init_consistency.py",
     ],
     "references/workflow-protocol.md": [
         "Generator plan",
@@ -22,6 +24,18 @@ REQUIRED = {
         "generator_plan",
         "generator_plan_planner_review",
         "generator_plan_user_review",
+    ],
+    "references/init-phase.md": [
+        "reasoning effort/model variant",
+        "config.yaml",
+        "init.json",
+        "must agree",
+        "check_init_consistency.py",
+    ],
+    "scripts/check_init_consistency.py": [
+        "reasoning_effort",
+        "init-consistency: ok",
+        "adapter mismatch",
     ],
     "references/role-contracts.md": [
         "review of G's implementation plan",
@@ -43,6 +57,8 @@ REQUIRED = {
         "generator_plan",
         "generator_plan_planner_review",
         "generator_plan_user_review",
+        "require_user_reasoning_effort_selection",
+        "reasoning_effort",
     ],
 }
 

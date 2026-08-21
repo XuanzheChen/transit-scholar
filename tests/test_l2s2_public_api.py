@@ -22,6 +22,7 @@ from transit_scholar.layer2.schema import RetrievalHit, RetrievalResult, SourceR
 from transit_scholar.layer2.schema_extraction import (
     FakeLLMProvider,
     FakeRetrieval,
+    FakeSemanticVerifier,
     FieldResult,
     LLMConfig,
     OpenAICompatibleLLMClient,
@@ -261,7 +262,7 @@ def test_unknown_injection_key_raises_typeerror(test_schema, tmp_path):
 def test_extract_returns_stable_result_object(tmp_path, test_schema):
     """AC-D-17: extract returns a SchemaRunResult with instance, manifest,
     report and run manifest; no directory knowledge required."""
-    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert isinstance(result, SchemaRunResult)
     assert result.paper_id == PAPER_ID
     assert result.schema_id == test_schema
@@ -274,8 +275,9 @@ def test_extract_returns_stable_result_object(tmp_path, test_schema):
 
 
 def test_extract_defaults_are_fake_and_offline(tmp_path, test_schema):
-    """AC-D-17/38: default extract uses fake LLM + fake retrieval offline."""
-    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    """AC-D-17/38: explicit fake injection is offline/deterministic — the fake
+    client is recorded in both manifests and fake retrieval is used."""
+    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert result.manifest.llm_fake is True
     assert result.manifest.llm_provider == "fake"
     assert result.run_manifest.llm_fake is True
@@ -304,7 +306,9 @@ def test_extraction_run_level_failure_no_writes_no_current(tmp_path):
     ``schema_load_failed``; nothing is written and current is untouched."""
     storage_root = tmp_path / "storage"
     with pytest.raises(SchemaExtractionRunError) as excinfo:
-        extract_schema(PAPER_ID, "no_such_schema", storage_root=storage_root)
+        extract_schema(
+            PAPER_ID, "no_such_schema", storage_root=storage_root, llm_client=FakeLLMProvider()
+        )
     assert excinfo.value.error_code == "schema_load_failed"
     assert not storage_root.exists()
 
@@ -322,6 +326,7 @@ def test_validation_stage_failure_prevents_persistence(tmp_path, test_schema):
             PAPER_ID,
             test_schema,
             storage_root=storage_root,
+            llm_client=FakeLLMProvider(),
             cross_field_validators=[exploding_validator],
         )
     assert not storage_root.exists()
@@ -348,7 +353,11 @@ def test_field_level_error_preserved_and_distinct_from_not_found(
         }
     )
     result = extract_schema(
-        PAPER_ID, test_schema, storage_root=tmp_path, retrieval=retrieval
+        PAPER_ID,
+        test_schema,
+        storage_root=tmp_path,
+        retrieval=retrieval,
+        llm_client=FakeLLMProvider(),
     )
     by_field = {entry.field_id: entry for entry in result.manifest.fields}
     assert by_field["headline"].error_code == "retrieval_unavailable"
@@ -383,6 +392,7 @@ def test_validation_failure_persisted_not_disguised(tmp_path, test_schema):
         PAPER_ID,
         test_schema,
         storage_root=tmp_path,
+        llm_client=FakeLLMProvider(),
         cross_field_validators=[failing_validator],
     )
     assert result.report.status == "failed"
@@ -398,7 +408,7 @@ def test_validation_failure_persisted_not_disguised(tmp_path, test_schema):
 
 def test_persisted_content_contains_no_api_keys(tmp_path, test_schema):
     """AC-D-28: no API key material is ever persisted."""
-    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     for path in (tmp_path / PAPER_ID).rglob("*.json"):
         text = path.read_text(encoding="utf-8")
         assert "api_key" not in text
@@ -412,8 +422,8 @@ def test_persisted_content_contains_no_api_keys(tmp_path, test_schema):
 
 
 def test_get_schema_current_and_historical(tmp_path, test_schema):
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
-    second = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
+    second = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert first.run_id != second.run_id
     current = get_schema(PAPER_ID, test_schema, storage_root=tmp_path)
     assert current.fields == second.instance.fields
@@ -430,7 +440,7 @@ def test_get_schema_error_cases(tmp_path, test_schema):
         get_schema("unknown_paper", test_schema, storage_root=tmp_path)
     assert paper_missing.value.__class__.__name__ == "SchemaCurrentNotFoundError"
 
-    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     with pytest.raises(Exception) as run_missing:
         get_schema(PAPER_ID, test_schema, run_id="ghost", storage_root=tmp_path)
     assert run_missing.value.__class__.__name__ == "SchemaRunNotFoundError"
@@ -445,7 +455,7 @@ def test_get_schema_error_cases(tmp_path, test_schema):
 
 
 def test_get_field_behaviour(tmp_path, test_schema):
-    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     field = get_field(
         PAPER_ID, test_schema, "headline", storage_root=tmp_path
     )
@@ -472,7 +482,13 @@ def test_get_field_returns_placeholder_for_failed_field(tmp_path, test_schema):
             ),
         }
     )
-    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, retrieval=retrieval)
+    extract_schema(
+        PAPER_ID,
+        test_schema,
+        storage_root=tmp_path,
+        retrieval=retrieval,
+        llm_client=FakeLLMProvider(),
+    )
     field = get_field(PAPER_ID, test_schema, "headline", storage_root=tmp_path)
     assert isinstance(field, FieldResult)
     assert field.status == "unclear"
@@ -489,11 +505,19 @@ def test_get_field_returns_placeholder_for_failed_field(tmp_path, test_schema):
 def test_validate_schema_is_read_only(tmp_path, test_schema):
     """AC-D-20: validate_schema re-validates a stored run without modifying
     any run file or current.json."""
-    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     storage = persistence_module.SchemaRunStorage(storage_root=tmp_path)
     before = _file_hashes(storage, PAPER_ID, result.run_id)
     current_before = (tmp_path / PAPER_ID / "current.json").read_bytes()
-    report = validate_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    report = validate_schema(
+        PAPER_ID,
+        test_schema,
+        storage_root=tmp_path,
+        llm_client=FakeLLMProvider(),
+        verifier=FakeSemanticVerifier(
+            default_response={"decision": "supported", "confidence": None, "notes": ""}
+        ),
+    )
     after = _file_hashes(storage, PAPER_ID, result.run_id)
     assert isinstance(report, ValidationReport)
     assert report.schema_id == test_schema
@@ -502,10 +526,17 @@ def test_validate_schema_is_read_only(tmp_path, test_schema):
 
 
 def test_validate_schema_historical_run(tmp_path, test_schema):
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
-    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
+    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     report = validate_schema(
-        PAPER_ID, test_schema, run_id=first.run_id, storage_root=tmp_path
+        PAPER_ID,
+        test_schema,
+        run_id=first.run_id,
+        storage_root=tmp_path,
+        llm_client=FakeLLMProvider(),
+        verifier=FakeSemanticVerifier(
+            default_response={"decision": "supported", "confidence": None, "notes": ""}
+        ),
     )
     assert report.paper_id == PAPER_ID
 
@@ -567,8 +598,10 @@ def test_injected_verifier_affects_report(tmp_path, test_schema):
 
 
 def test_injected_top_k_affects_config_hash(tmp_path, test_schema):
-    default = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
-    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, top_k=3)
+    default = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
+    result = extract_schema(
+        PAPER_ID, test_schema, storage_root=tmp_path, top_k=3, llm_client=FakeLLMProvider()
+    )
     assert result.run_manifest.extraction_config_hash != default.run_manifest.extraction_config_hash
     assert result.run_manifest.extraction_config_hash == compute_extraction_config_hash(
         result.run_manifest.prompt_version, 3
@@ -578,7 +611,7 @@ def test_injected_top_k_affects_config_hash(tmp_path, test_schema):
 def test_storage_injection_writes_into_injected_root(tmp_path, test_schema):
     """AC-D-21: ``storage`` object injection is honoured."""
     storage = persistence_module.SchemaRunStorage(storage_root=tmp_path / "custom")
-    extract_schema(PAPER_ID, test_schema, storage=storage)
+    extract_schema(PAPER_ID, test_schema, storage=storage, llm_client=FakeLLMProvider())
     assert (tmp_path / "custom" / PAPER_ID / "current.json").is_file()
 
 
@@ -599,7 +632,7 @@ def test_storage_write_failure_leaves_no_current(tmp_path, test_schema, monkeypa
 
     monkeypatch.setattr(persistence_module, "_atomic_write_json", failing_write)
     with pytest.raises(Exception) as excinfo:
-        extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+        extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert isinstance(excinfo.value, persistence_module.SchemaStorageError)
     assert not (tmp_path / PAPER_ID / "current.json").exists()
 
@@ -609,7 +642,7 @@ def test_readback_verification_failure_keeps_old_current(
 ):
     """AC-D-35: when read-back verification fails after writing, current.json
     is not updated."""
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     storage = persistence_module.SchemaRunStorage(storage_root=tmp_path)
     current_before = (tmp_path / PAPER_ID / "current.json").read_bytes()
 
@@ -620,7 +653,7 @@ def test_readback_verification_failure_keeps_old_current(
         persistence_module.SchemaRunStorage, "verify_run_readable", failing_verify
     )
     with pytest.raises(persistence_module.SchemaCorruptRunError):
-        extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+        extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert (tmp_path / PAPER_ID / "current.json").read_bytes() == current_before
     assert storage.read_current(PAPER_ID).run_id == first.run_id
 
@@ -630,10 +663,10 @@ def test_extract_twice_old_run_byte_identical_and_current_moves(
 ):
     """AC-D-11/12/14: two extracts -> two run ids; the first run directory is
     byte-identical; current points at the second run."""
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     storage = persistence_module.SchemaRunStorage(storage_root=tmp_path)
     before = _file_hashes(storage, PAPER_ID, first.run_id)
-    second = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    second = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert first.run_id != second.run_id
     after = _file_hashes(storage, PAPER_ID, first.run_id)
     assert before == after
@@ -653,7 +686,7 @@ def test_recheck_success_new_run_old_preserved(tmp_path, test_schema):
     """AC-D-29/30/32: recheck produces a brand-new complete run with a fresh
     recheck trace persisted in the report; the old run stays byte-identical
     and readable; non-target fields stay untouched."""
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     storage = persistence_module.SchemaRunStorage(storage_root=tmp_path)
     before = _file_hashes(storage, PAPER_ID, first.run_id)
     old_instance = first.instance
@@ -669,6 +702,7 @@ def test_recheck_success_new_run_old_preserved(tmp_path, test_schema):
         test_schema,
         ["headline", "page_count"],
         storage_root=tmp_path,
+        llm_client=FakeLLMProvider(),
         recheck_callable=rechecker,
     )
     assert result.run_id != first.run_id
@@ -701,7 +735,7 @@ def test_recheck_success_new_run_old_preserved(tmp_path, test_schema):
 def test_recheck_each_target_field_at_most_once(tmp_path, test_schema):
     """AC-D-33: duplicate field ids in the request still recheck each field
     at most once."""
-    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     rechecker = CountingRecheck(
         {"headline": FieldResult(value="x", status="explicit")}
     )
@@ -710,6 +744,7 @@ def test_recheck_each_target_field_at_most_once(tmp_path, test_schema):
         test_schema,
         ["headline", "headline", "headline"],
         storage_root=tmp_path,
+        llm_client=FakeLLMProvider(),
         recheck_callable=rechecker,
     )
     assert rechecker.calls == ["headline"]
@@ -718,7 +753,7 @@ def test_recheck_each_target_field_at_most_once(tmp_path, test_schema):
 def test_recheck_unclear_conclusion_is_legal(tmp_path, test_schema):
     """AC-D-30: an ``unclear`` recheck conclusion is a legal result and
     produces a complete new run."""
-    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     rechecker = CountingRecheck(
         {"headline": FieldResult(value=None, status="unclear")}
     )
@@ -727,6 +762,7 @@ def test_recheck_unclear_conclusion_is_legal(tmp_path, test_schema):
         test_schema,
         ["headline"],
         storage_root=tmp_path,
+        llm_client=FakeLLMProvider(),
         recheck_callable=rechecker,
     )
     assert result.instance.fields["headline"].status == "unclear"
@@ -735,9 +771,9 @@ def test_recheck_unclear_conclusion_is_legal(tmp_path, test_schema):
 
 def test_recheck_default_offline_produces_unclear(tmp_path, test_schema):
     """AC-D-38: the default recheck callable is offline and deterministic."""
-    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     result = recheck_fields(
-        PAPER_ID, test_schema, ["headline"], storage_root=tmp_path
+        PAPER_ID, test_schema, ["headline"], storage_root=tmp_path, llm_client=FakeLLMProvider()
     )
     assert result.instance.fields["headline"].status == "unclear"
     assert "offline default recheck" in result.instance.fields["headline"].notes
@@ -746,7 +782,7 @@ def test_recheck_default_offline_produces_unclear(tmp_path, test_schema):
 def test_recheck_failure_no_writes_current_unchanged(tmp_path, test_schema):
     """AC-D-31: a failing recheck callable raises SchemaRecheckError carrying
     the trace; no new run files are written and current stays byte-identical."""
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     storage = persistence_module.SchemaRunStorage(storage_root=tmp_path)
     current_before = (tmp_path / PAPER_ID / "current.json").read_bytes()
 
@@ -760,6 +796,7 @@ def test_recheck_failure_no_writes_current_unchanged(tmp_path, test_schema):
             test_schema,
             ["headline"],
             storage_root=tmp_path,
+            llm_client=FakeLLMProvider(),
             recheck_callable=FailingRecheck(),
         )
     assert excinfo.value.trace.entries[0].error_code == "recheck_failed"
@@ -770,11 +807,15 @@ def test_recheck_failure_no_writes_current_unchanged(tmp_path, test_schema):
 def test_recheck_unknown_field_raises_with_trace(tmp_path, test_schema):
     """AC-D-31: a target field missing from the definition produces a
     ``recheck_field_missing`` trace entry and zero writes."""
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     storage = persistence_module.SchemaRunStorage(storage_root=tmp_path)
     with pytest.raises(SchemaRecheckError) as excinfo:
         recheck_fields(
-            PAPER_ID, test_schema, ["no_such_field"], storage_root=tmp_path
+            PAPER_ID,
+            test_schema,
+            ["no_such_field"],
+            storage_root=tmp_path,
+            llm_client=FakeLLMProvider(),
         )
     assert excinfo.value.trace.entries[0].error_code == "recheck_field_missing"
     assert _run_dirs(storage, PAPER_ID) == [first.run_id]
@@ -782,7 +823,13 @@ def test_recheck_unknown_field_raises_with_trace(tmp_path, test_schema):
 
 def test_recheck_requires_current_pointer(tmp_path, test_schema):
     with pytest.raises(Exception) as excinfo:
-        recheck_fields(PAPER_ID, test_schema, ["headline"], storage_root=tmp_path)
+        recheck_fields(
+            PAPER_ID,
+            test_schema,
+            ["headline"],
+            storage_root=tmp_path,
+            llm_client=FakeLLMProvider(),
+        )
     assert excinfo.value.__class__.__name__ == "SchemaCurrentNotFoundError"
 
 
@@ -793,7 +840,7 @@ def test_recheck_requires_current_pointer(tmp_path, test_schema):
 
 def test_all_runs_land_under_injected_storage_root(tmp_path, test_schema):
     """AC-D-37: with an injected storage root, every file lives under it."""
-    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     for path in (tmp_path / PAPER_ID).rglob("*"):
         assert path.is_dir() or path.is_file()
     assert (tmp_path / PAPER_ID / "runs" / result.run_id / "run_manifest.json").is_file()
@@ -802,8 +849,8 @@ def test_all_runs_land_under_injected_storage_root(tmp_path, test_schema):
 def test_run_ids_differ_but_not_randomness_dependent(tmp_path, test_schema):
     """AC-D-39: assertions depend only on run ids differing, not on their
     values."""
-    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
-    second = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    first = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
+    second = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert first.run_id != second.run_id
     assert first.run_id and second.run_id
 
@@ -953,8 +1000,9 @@ def test_hybrid_retrieval_wrapper_injection_shape_accepted(
         test_schema,
         storage_root=tmp_path,
         retrieval=HybridRetrievalWrapper(top_k=4),
+        llm_client=FakeLLMProvider(),  # explicit fake -> llm_fake True, offline
     )
-    assert result.run_manifest.llm_fake is True  # default LLM stays fake
+    assert result.run_manifest.llm_fake is True
 
 
 # ---------------------------------------------------------------------------
@@ -984,6 +1032,6 @@ def test_schema_switch_does_not_touch_persistence_or_api(tmp_path, test_schema, 
     behaviour and persistence are unchanged whether enabled or disabled."""
     monkeypatch.setenv("TRANSIT_SCHOLAR_SCHEMA_ENABLED", "0")
     assert schema_enabled() is False
-    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path)
+    result = extract_schema(PAPER_ID, test_schema, storage_root=tmp_path, llm_client=FakeLLMProvider())
     assert result.manifest.llm_fake is True
     assert get_schema(PAPER_ID, test_schema, storage_root=tmp_path) is not None

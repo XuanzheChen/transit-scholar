@@ -12,9 +12,14 @@ Stable, storage-backed entry points for Layer3:
 
 Every function supports deterministic injection (llm_client, retrieval,
 canonical_reader, verifier, cross_field_validators, recheck_callable,
-storage / storage_root, top_k). Defaults are fully offline: fake LLM, fake
-retrieval, offline canonical reader, fake semantic verifier. No real network
-call is ever made by the default path.
+storage / storage_root, top_k). The normal runtime path resolves one shared
+LLM client from the unified config (project-root ``.env`` via the config
+bootstrap -> ``LLMConfig.from_env`` -> ``resolve_runtime_llm_client``) and
+hands the **same** client object to the Extractor, the real
+``StructuredSemanticVerifier`` and the default Targeted Recheck. FakeLLM /
+offline defaults are used only when explicitly injected or when the resolved
+provider is ``fake`` (explicit fake mode). Unconfigured / network-blocked
+runtimes fail with an explicit ``LLMUnavailableError`` — never a silent fake.
 
 Failures are explicit: run-level extraction failures raise
 ``SchemaExtractionRunError`` (never masqueraded as ``not_found``); storage
@@ -32,9 +37,9 @@ from typing import Any, Iterable
 
 from pydantic import BaseModel
 
-from .engine import extract_schema_instance_in_memory
+from .engine import build_runtime_recheck_callable, extract_schema_instance_in_memory
 from .hashing import compute_schema_hash
-from .llm import FakeLLMProvider
+from .llm import resolve_runtime_llm_client
 from .loader import get_schema_definition
 from .models import FieldResult, SchemaInstance
 from .persistence import (
@@ -46,6 +51,7 @@ from .persistence import (
 )
 from .recheck import RecheckTrace, run_targeted_recheck
 from .retrieval import FakeRetrieval
+from .semantic import FakeSemanticVerifier, StructuredSemanticVerifier
 from .trace import ExtractionManifest
 from .validation_pipeline import run_validation_pipeline_in_memory
 from .validation_report import (
@@ -188,10 +194,6 @@ def _resolve_storage(injections: dict[str, Any]) -> SchemaRunStorage:
     return SchemaRunStorage()
 
 
-def _default_llm() -> FakeLLMProvider:
-    return FakeLLMProvider()
-
-
 def _default_retrieval() -> FakeRetrieval:
     return FakeRetrieval()
 
@@ -206,12 +208,66 @@ def _offline_canonical_reader(paper_id: str, block_ids: Iterable[str]) -> dict:
     return {}
 
 
+def _resolve_runtime_context(
+    inj: dict[str, Any], *, need_recheck: bool
+) -> tuple[Any, Any, Any]:
+    """Resolve the shared real-runtime LLM context once per public call.
+
+    Returns ``(client, verifier, recheck_callable)``:
+
+    - ``client`` = injected ``llm_client`` or ``resolve_runtime_llm_client()``
+      (the only place the resolver runs when nothing is injected; a resolution
+      failure raises ``LLMUnavailableError`` up — nothing is written);
+    - ``verifier`` = injected verifier, else ``StructuredSemanticVerifier``
+      on the **same** client for a real client, else the offline
+      ``FakeSemanticVerifier`` for explicit fake mode;
+    - ``recheck_callable`` = injected callable, else (only for
+      ``need_recheck``) the offline default for fake mode, else
+      ``build_runtime_recheck_callable`` on the **same** client for real mode.
+
+    Explicit injection of ``llm_client`` / ``verifier`` / ``recheck_callable``
+    always wins (AC-RW-06/07); the resolver is never called when a client is
+    injected. ``extract_schema`` / ``validate_schema`` call with
+    ``need_recheck=False`` so they install no recheck default (recheck only
+    goes through ``recheck_fields``).
+    """
+    client = inj.get("llm_client") or resolve_runtime_llm_client()
+    fake_mode = bool(getattr(client, "is_fake", False))
+
+    verifier = inj.get("verifier")
+    if verifier is None:
+        if fake_mode:
+            verifier = FakeSemanticVerifier(
+                default_response={
+                    "decision": "supported",
+                    "confidence": None,
+                    "notes": "offline default fake verifier",
+                }
+            )
+        else:
+            verifier = StructuredSemanticVerifier(client)
+
+    recheck_callable = inj.get("recheck_callable")
+    if recheck_callable is None and need_recheck:
+        if fake_mode:
+            recheck_callable = _default_recheck_callable
+        else:
+            retrieval = inj.get("retrieval") or _default_retrieval()
+            top_k = int(inj.get("top_k", 8))
+            recheck_callable = build_runtime_recheck_callable(
+                client, retrieval=retrieval, top_k=top_k
+            )
+    return client, verifier, recheck_callable
+
+
 def _default_recheck_callable(definition, field, paper_id) -> FieldResult:
-    """Offline default recheck: an honest ``unclear`` conclusion.
+    """Offline default recheck (explicit fake mode): an honest ``unclear``.
 
     Without a real re-extraction backend the offline default cannot confirm
     a value, so it records ``unclear`` (a legal conclusion per AC-D-30)
-    instead of inventing data.
+    instead of inventing data. Real mode installs
+    ``build_runtime_recheck_callable`` instead; an explicitly injected
+    ``recheck_callable`` always wins.
     """
     return FieldResult(
         value=None,
@@ -301,12 +357,12 @@ def extract_schema(
     inj = _split_injections(injection_options)
     storage = _resolve_storage(inj)
     top_k = int(inj.get("top_k", 8))
-    llm_client = inj.get("llm_client") or _default_llm()
     retrieval = inj.get("retrieval") or _default_retrieval()
     canonical_reader = inj.get("canonical_reader") or _offline_canonical_reader
-    verifier = inj.get("verifier")
+    llm_client, verifier, recheck_callable = _resolve_runtime_context(
+        inj, need_recheck=False
+    )
     cross_field_validators = inj.get("cross_field_validators")
-    recheck_callable = inj.get("recheck_callable")
 
     run = extract_schema_instance_in_memory(
         paper_id,
@@ -434,7 +490,7 @@ def validate_schema(
     inj = _split_injections(injection_options)
     storage = _resolve_storage(inj)
     canonical_reader = inj.get("canonical_reader") or _offline_canonical_reader
-    verifier = inj.get("verifier")
+    _, verifier, _ = _resolve_runtime_context(inj, need_recheck=False)
     cross_field_validators = inj.get("cross_field_validators")
 
     instance = _read_instance(storage, paper_id, schema_id, run_id)
@@ -467,9 +523,8 @@ def recheck_fields(
     inj = _split_injections(injection_options)
     storage = _resolve_storage(inj)
     top_k = int(inj.get("top_k", 8))
-    recheck_callable = inj.get("recheck_callable") or _default_recheck_callable
     canonical_reader = inj.get("canonical_reader") or _offline_canonical_reader
-    verifier = inj.get("verifier")
+    _, verifier, recheck_callable = _resolve_runtime_context(inj, need_recheck=True)
     cross_field_validators = inj.get("cross_field_validators")
 
     pointer = storage.read_current(paper_id)

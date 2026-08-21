@@ -19,6 +19,7 @@ from transit_scholar.layer2.schema_extraction import (
     CurrentPointer,
     EvidenceRef,
     ExtractionManifest,
+    FakeLLMProvider,
     FieldResult,
     RunManifest,
     SchemaInstance,
@@ -432,7 +433,12 @@ def test_cli_draft_gold_end_to_end_no_key_no_network(tmp_path):
     storage_root = tmp_path / "storage"
     for paper_id in ("transit-001", "transit-002", "transit-006",
                      "transit-010", "transit-015", "transit-016"):
-        extract_schema(paper_id, "bus_control_rl", storage_root=storage_root)
+        extract_schema(
+            paper_id,
+            "bus_control_rl",
+            storage_root=storage_root,
+            llm_client=FakeLLMProvider(),  # explicit fake, offline (AC-RW-15)
+        )
     output_dir = tmp_path / "out"
     result = _run_cli(
         "--gold", str(DRAFT_GOLD),

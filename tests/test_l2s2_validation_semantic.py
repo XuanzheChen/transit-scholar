@@ -10,6 +10,9 @@ unclear -> warning without recheck; supported -> no issue; verifier failure
 
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
 from transit_scholar.layer2.schema_extraction import (
@@ -17,7 +20,10 @@ from transit_scholar.layer2.schema_extraction import (
     FieldDefinition,
     FieldResult,
     FakeSemanticVerifier,
+    LLMConfig,
+    OpenAICompatibleLLMClient,
     SemanticVerdict,
+    StructuredSemanticVerifier,
     VerifierUnavailableError,
     verify_field_semantics,
 )
@@ -162,6 +168,71 @@ def test_verifier_invalid_output_is_explicit_error():
     )
     assert [i.type for i in issues] == ["verifier_unavailable"]
     assert issues[0].severity == "error"
+
+
+def test_structured_verifier_recovers_once_without_mutating_evidence():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        content = {} if calls["n"] == 1 else {"decision": "supported"}
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(content)}}]},
+        )
+
+    client = OpenAICompatibleLLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            model="test-model",
+            api_key="sk-semantic-test",
+            base_url="https://provider.invalid",
+            allow_network=True,
+            max_retries=0,
+            rate_limit_rpm=0,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    result = _result(["the value is v"])
+    before = result.model_dump()
+    issues = verify_field_semantics(
+        _field(), result, StructuredSemanticVerifier(client)
+    )
+    assert issues == []
+    assert calls["n"] == 2
+    assert result.model_dump() == before
+
+
+def test_structured_verifier_correction_exhaustion_is_unavailable():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "{}"}}]},
+        )
+
+    client = OpenAICompatibleLLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            model="test-model",
+            api_key="sk-semantic-test",
+            base_url="https://provider.invalid",
+            allow_network=True,
+            max_retries=0,
+            rate_limit_rpm=0,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    result = _result(["the value is v"])
+    before = result.model_dump()
+    issues = verify_field_semantics(
+        _field(), result, StructuredSemanticVerifier(client)
+    )
+    assert [issue.type for issue in issues] == ["verifier_unavailable"]
+    assert calls["n"] == 2
+    assert result.model_dump() == before
 
 
 def test_verifier_none_is_explicit_error():

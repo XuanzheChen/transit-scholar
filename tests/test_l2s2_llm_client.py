@@ -36,6 +36,8 @@ LLM_ENV_VARS = (
     "TRANSIT_SCHOLAR_LLM_TIMEOUT_SECONDS",
     "TRANSIT_SCHOLAR_LLM_MAX_RETRIES",
     "TRANSIT_SCHOLAR_LLM_RATE_LIMIT_RPM",
+    "TRANSIT_SCHOLAR_LLM_STRUCTURED_OUTPUT_MODE",
+    "TRANSIT_SCHOLAR_BLOCK_NETWORK",
 )
 
 
@@ -221,11 +223,22 @@ def _clear_llm_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_llm_config_defaults_offline_fake():
+def test_llm_config_defaults_unconfigured_raises():
+    """AC-RW-05: a default (unconfigured) config is never silently fake."""
     config = LLMConfig()
     assert config.provider is None
     assert config.allow_network is False
-    assert isinstance(resolve_llm_client(config), FakeLLMProvider)
+    with pytest.raises(LLMUnavailableError) as excinfo:
+        resolve_llm_client(config)
+    assert excinfo.value.error_code == "llm_unavailable"
+
+
+def test_llm_config_explicit_fake_resolves_fake():
+    """AC-RW-05: explicit ``provider=fake`` is the only silent-fake path."""
+    config = LLMConfig(provider="fake")
+    client = resolve_llm_client(config)
+    assert isinstance(client, FakeLLMProvider)
+    assert client.is_fake is True
 
 
 def test_llm_config_from_env_reads_five_vars(monkeypatch):
@@ -250,11 +263,14 @@ def test_llm_config_from_env_blank_values_none(monkeypatch):
     assert config.model is None
 
 
-def test_resolve_default_provider_is_fake(monkeypatch):
+def test_resolve_unconfigured_provider_is_never_fake(monkeypatch):
+    """AC-RW-05: missing/blank provider -> explicit LLMUnavailableError,
+    never FakeLLMProvider, never not_found."""
     monkeypatch.delenv("TRANSIT_SCHOLAR_LLM_PROVIDER", raising=False)
-    client = resolve_llm_client()
-    assert isinstance(client, FakeLLMProvider)
-    assert client.is_fake is True
+    with pytest.raises(LLMUnavailableError) as excinfo:
+        resolve_llm_client()
+    assert "not_found" not in str(excinfo.value)
+    assert excinfo.value.error_code == "llm_unavailable"
 
 
 def test_resolve_non_fake_without_network_raises_unavailable():
@@ -292,16 +308,31 @@ def test_llm_config_new_knob_defaults():
     assert config.timeout_seconds == 60
     assert config.max_retries == 2
     assert config.rate_limit_rpm == 20
+    assert config.structured_output_mode == "auto"
 
 
 def test_llm_config_from_env_reads_new_knobs(monkeypatch):
     monkeypatch.setenv("TRANSIT_SCHOLAR_LLM_TIMEOUT_SECONDS", "30")
     monkeypatch.setenv("TRANSIT_SCHOLAR_LLM_MAX_RETRIES", "5")
     monkeypatch.setenv("TRANSIT_SCHOLAR_LLM_RATE_LIMIT_RPM", "100")
+    monkeypatch.setenv(
+        "TRANSIT_SCHOLAR_LLM_STRUCTURED_OUTPUT_MODE", "json_schema"
+    )
     config = LLMConfig.from_env()
     assert config.timeout_seconds == 30
     assert config.max_retries == 5
     assert config.rate_limit_rpm == 100
+    assert config.structured_output_mode == "json_schema"
+
+
+@pytest.mark.parametrize("mode", ["auto", "json_schema", "json_object"])
+def test_llm_config_accepts_structured_output_modes(mode):
+    assert LLMConfig(structured_output_mode=mode).structured_output_mode == mode
+
+
+def test_llm_config_rejects_invalid_structured_output_mode_before_network():
+    with pytest.raises(ValueError, match="structured_output_mode"):
+        LLMConfig(structured_output_mode="best_effort")
 
 
 def test_llm_config_from_env_blank_knobs_use_defaults(monkeypatch):

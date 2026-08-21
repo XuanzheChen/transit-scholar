@@ -4,8 +4,15 @@ AC-C-04).
 Decides whether the evidence quotes of one field support its extracted value.
 The verifier is injectable and receives only the field definition, the field
 result, and the evidence quote strings; it can never rewrite ``EvidenceRef``
-provenance. The default verifier used by automated tests is
-``FakeSemanticVerifier``: deterministic, offline, no LLM, no network.
+provenance. Two verifiers are provided:
+
+- ``StructuredSemanticVerifier`` — the **real** verifier used by the normal
+  runtime composition root. It consumes the same unified ``StructuredLLMClient``
+  as extraction and targeted recheck, and sends one structured call per field
+  carrying the Field Definition/question, the Extracted Value + Status, and the
+  **complete** Evidence Set (every ``EvidenceRef`` verbatim, never pruned).
+- ``FakeSemanticVerifier`` — the deterministic offline verifier used by
+  deterministic/offline tests and by explicit fake mode.
 
 Verdict vocabulary and its fixed issue mapping (AC-C-04 / G plan §4):
 
@@ -30,9 +37,10 @@ A verifier failure is a system failure: it produces an explicit
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import FieldDefinition, FieldResult, ValidationIssue
 
@@ -61,6 +69,8 @@ class VerifierUnavailableError(Exception):
 
 class SemanticVerdict(BaseModel):
     """Structured semantic verification output (FR-C-004)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     decision: SemanticDecision
     confidence: float | None = Field(default=None, ge=0, le=1)
@@ -105,6 +115,91 @@ class FakeSemanticVerifier:
                 f"fake semantic verifier has no response for field {field.id!r}"
             )
         return SemanticVerdict.model_validate(preset)
+
+
+def build_semantic_verifier_messages(
+    field: FieldDefinition,
+    result: FieldResult,
+) -> list[dict[str, Any]]:
+    """Deterministic prompt construction for one field's semantic verification.
+
+    Embeds the Field Definition/question, the Extracted Value, the Field
+    Status (plus confidence/notes), and the **complete** Evidence Set — every
+    ``EvidenceRef`` (block_id / char range / pages / section_path / quote)
+    verbatim. The verifier never prunes, reorders or rewrites ``EvidenceRef``
+    objects. Unit-testable and LLM-free.
+    """
+    system = (
+        "You are a semantic verification assistant. Judge whether the "
+        "extracted value of one schema field is supported by its complete "
+        "evidence set. Never add provenance fields and never rewrite the "
+        "evidence."
+    )
+    payload: dict[str, Any] = {
+        "task": "verify_field_semantics",
+        "schema_field": {
+            "id": field.id,
+            "label": field.label,
+            "question": field.question,
+            "description": field.description,
+            "type": field.type,
+            "options": field.options,
+            "evidence_required": field.evidence_required,
+            "allow_inference": field.allow_inference,
+        },
+        "extracted": {
+            "value": result.value,
+            "status": result.status,
+            "confidence": result.confidence,
+            "notes": result.notes,
+        },
+        "evidence_set": [
+            {
+                "block_id": ref.block_id,
+                "char_start": ref.char_start,
+                "char_end": ref.char_end,
+                "pages": list(ref.pages),
+                "section_path": list(ref.section_path),
+                "quote": ref.quote,
+            }
+            for ref in result.evidence
+        ],
+    }
+    return [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": json.dumps(payload, ensure_ascii=False, indent=2),
+        },
+    ]
+
+
+class StructuredSemanticVerifier:
+    """Real semantic verifier backed by one shared ``StructuredLLMClient``.
+
+    Implements the existing ``SemanticVerifier`` callable shape
+    ``(field, result, quotes) -> SemanticVerdict``: one structured call per
+    field carries the Field Definition/question, the Extracted Value + Status,
+    and the **complete** Evidence Set (``result.evidence`` — never pruned,
+    reordered or rewritten). Client / invalid-output failures surface as
+    ``verifier_unavailable`` through ``verify_field_semantics`` (AC-RW-13).
+    """
+
+    def __init__(self, client: Any):
+        self.client = client
+
+    def __call__(
+        self,
+        field: FieldDefinition,
+        result: FieldResult,
+        quotes: list[str] | None = None,
+    ) -> SemanticVerdict:
+        messages = build_semantic_verifier_messages(field, result)
+        metadata = {"field_id": field.id, "prompt_key": f"verifier:{field.id}"}
+        verdict = self.client.generate_structured(
+            messages, SemanticVerdict, metadata
+        )
+        return SemanticVerdict.model_validate(verdict)
 
 
 def verify_field_semantics(

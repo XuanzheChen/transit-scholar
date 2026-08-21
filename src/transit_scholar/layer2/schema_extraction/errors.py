@@ -69,6 +69,14 @@ class LLMRequestError(SchemaExtractionError):
         self.status_code = status_code
 
 
+class LLMCapabilityError(LLMRequestError):
+    """Provider explicitly rejected strict JSON Schema response formatting."""
+
+    def __init__(self, message: str = "", *, status_code: int | None = None):
+        super().__init__(message, status_code=status_code)
+        self.error_code = "llm_structured_output_unsupported"
+
+
 class UnknownEvidenceIdError(SchemaExtractionError):
     """LLM selected an evidence id that has no matching candidate."""
 

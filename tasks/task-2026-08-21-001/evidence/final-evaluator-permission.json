@@ -1,0 +1,20 @@
+{
+  "round": "final-evaluation",
+  "pre_tree": "a2d014e3c70b296c77a4d16dfb8f9656d4f1cc31",
+  "post_tree": "4f689ff77e2d3130703b59da9e1f393c92c8130c",
+  "path_compliance": "valid",
+  "output_protocol": "valid",
+  "invocation_evidence": "verified",
+  "decision": "accept",
+  "blocking_count": 0,
+  "requires_user_decision": false,
+  "executor": "codex",
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "medium",
+  "sandbox_mode": "read-only",
+  "simulated": false,
+  "local_subagent_used": false,
+  "product_or_spec_changed_paths": [],
+  "adapter_artifact_prefix": "tasks/task-2026-08-21-001/evaluator/final-evaluation/",
+  "invalid_paths": []
+}

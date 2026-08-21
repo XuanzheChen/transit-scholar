@@ -1,0 +1,18 @@
+[
+  ".agentic-sdlc/**",
+  ".agents/**",
+  "AGENTS.md",
+  "tasks/task-2026-08-21-001/**",
+  ".env",
+  ".env.example",
+  "data/**",
+  "output/**",
+  "alembic/**",
+  "tests/fixtures/**",
+  "src/transit_scholar/schema_acceptance/**",
+  "src/transit_scholar/schema_plugins/**",
+  "src/transit_scholar/layer1/**",
+  "src/transit_scholar/layer3/**",
+  "src/transit_scholar/knowledge_graph/**",
+  "src/transit_scholar/retrieval/**"
+]

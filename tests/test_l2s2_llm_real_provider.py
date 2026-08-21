@@ -17,6 +17,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from transit_scholar.layer2.schema_extraction import (
+    LLMCapabilityError,
     LLMConfig,
     LLMInvalidOutputError,
     LLMRequestError,
@@ -131,7 +132,102 @@ def test_success_path_sends_expected_request_shape():
     assert captured["headers"]["Authorization"] == f"Bearer {SENTINEL_KEY}"
     assert captured["json"]["model"] == "test-model"
     assert captured["json"]["messages"] == [{"role": "user", "content": "u"}]
-    assert captured["json"]["response_format"] == {"type": "json_object"}
+    response_format = captured["json"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["name"] == "DummyOutput"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"] == DummyOutput.model_json_schema()
+
+
+def test_json_object_mode_uses_pydantic_schema_as_prompt_guidance():
+    captured = {}
+
+    def handler(request):
+        captured["json"] = json.loads(request.content)
+        return _json_response({"value": "x", "status": "explicit"})
+
+    client = _client(handler, structured_output_mode="json_object")
+    client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    payload = captured["json"]
+    assert payload["response_format"] == {"type": "json_object"}
+    guidance = payload["messages"][-1]["content"]
+    assert "Pydantic-derived JSON Schema" in guidance
+    assert '"status"' in guidance
+    assert '"confidence"' in guidance
+
+
+def test_auto_falls_back_once_only_for_explicit_schema_capability_rejection():
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        if len(payloads) == 1:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "json_schema response format is not supported",
+                        "param": "response_format",
+                        "code": "unsupported_value",
+                    }
+                },
+            )
+        return _json_response({"value": "ok", "status": "explicit"})
+
+    client = _client(handler, structured_output_mode="auto", max_retries=0)
+    result = client.generate_structured(
+        [{"role": "user", "content": "u"}], DummyOutput
+    )
+    assert result.value == "ok"
+    assert [payload["response_format"]["type"] for payload in payloads] == [
+        "json_schema",
+        "json_object",
+    ]
+
+
+def test_auto_accepts_explicit_schema_capability_error_code_without_message():
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        if len(payloads) == 1:
+            return httpx.Response(
+                400,
+                json={"error": {"code": "json_schema_not_supported"}},
+            )
+        return _json_response({"value": "ok", "status": "explicit"})
+
+    client = _client(handler, structured_output_mode="auto", max_retries=0)
+    result = client.generate_structured(
+        [{"role": "user", "content": "u"}], DummyOutput
+    )
+    assert result.value == "ok"
+    assert [payload["response_format"]["type"] for payload in payloads] == [
+        "json_schema",
+        "json_object",
+    ]
+
+
+def test_json_schema_mode_never_falls_back_on_capability_rejection():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "json_schema response format is unsupported",
+                    "param": "response_format",
+                }
+            },
+        )
+
+    client = _client(handler, structured_output_mode="json_schema", max_retries=0)
+    with pytest.raises(LLMCapabilityError) as excinfo:
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert excinfo.value.error_code == "llm_structured_output_unsupported"
+    assert calls["n"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +253,100 @@ def test_json_failing_schema_validation_raises_invalid_output():
     with pytest.raises(LLMInvalidOutputError) as excinfo:
         client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
     assert excinfo.value.error_code == "llm_invalid_output"
+
+
+@pytest.mark.parametrize(
+    "first_content",
+    [
+        "not json",
+        "[]",
+        '{"value":"x"}',
+        '{"value":"x","status":"not_a_status"}',
+    ],
+)
+def test_invalid_structured_content_gets_exactly_one_correction(first_content):
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        if len(payloads) == 1:
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": first_content}}]},
+            )
+        return _json_response({"value": "fixed", "status": "explicit"})
+
+    client = _client(handler, max_retries=0)
+    result = client.generate_structured(
+        [{"role": "user", "content": "u"}], DummyOutput
+    )
+    assert result.value == "fixed"
+    assert len(payloads) == 2
+    correction = payloads[1]["messages"][-1]["content"]
+    assert "correct_structured_output" in correction
+    assert "Return only the corrected JSON object" in correction
+
+
+def test_second_invalid_structured_content_fails_without_third_request():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return _json_response({"value": "x", "status": "not_a_status"})
+
+    client = _client(handler, max_retries=0)
+    with pytest.raises(LLMInvalidOutputError):
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert calls["n"] == 2
+
+
+def test_fallback_invalid_output_gets_one_json_object_correction_only():
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        if len(payloads) == 1:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "json_schema response format is unsupported",
+                        "param": "response_format",
+                    }
+                },
+            )
+        if len(payloads) == 2:
+            return _json_response({"value": "missing status"})
+        return _json_response({"value": "fixed", "status": "explicit"})
+
+    client = _client(handler, max_retries=0)
+    result = client.generate_structured(
+        [{"role": "user", "content": "u"}], DummyOutput
+    )
+    assert result.value == "fixed"
+    assert [payload["response_format"]["type"] for payload in payloads] == [
+        "json_schema",
+        "json_object",
+        "json_object",
+    ]
+
+
+@pytest.mark.parametrize("status_code", [400, 401, 403, 404, 422])
+def test_generic_schema_error_never_triggers_capability_fallback(status_code):
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(
+            status_code,
+            json={"error": {"message": "invalid schema or JSON request"}},
+        )
+
+    client = _client(handler, max_retries=0)
+    with pytest.raises(LLMRequestError) as excinfo:
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert not isinstance(excinfo.value, LLMCapabilityError)
+    assert calls["n"] == 1
 
 
 def test_missing_choices_raises_invalid_output():
@@ -322,6 +512,59 @@ def test_sentinel_key_never_appears_in_invalid_output_errors():
     with pytest.raises(LLMInvalidOutputError) as excinfo:
         client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
     assert SENTINEL_KEY not in str(excinfo.value)
+
+
+def test_correction_context_is_redacted_and_bounded():
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        leaked = (
+            f"Authorization: Bearer {SENTINEL_KEY} "
+            f"https://provider.invalid {'x' * 5000}"
+        )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": leaked}}]},
+        )
+
+    client = _client(handler, max_retries=0)
+    with pytest.raises(LLMInvalidOutputError):
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert len(payloads) == 2
+    correction = payloads[1]["messages"][-1]["content"]
+    assert SENTINEL_KEY not in correction
+    assert "https://provider.invalid" not in correction
+    assert len(json.loads(correction)["previous_invalid_output"]) <= 2000
+
+
+def test_correction_redacts_unknown_authorization_and_bearer_values():
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "Authorization: Bearer unknown-secret-value "
+                                "and Bearer second-secret-value"
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = _client(handler, max_retries=0)
+    with pytest.raises(LLMInvalidOutputError):
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    correction = payloads[1]["messages"][-1]["content"]
+    assert "unknown-secret-value" not in correction
+    assert "second-secret-value" not in correction
 
 
 def test_sentinel_key_never_appears_in_redacted_message_parts():

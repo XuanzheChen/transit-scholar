@@ -1,0 +1,48 @@
+diff --git a/scripts/l2s2_runtime_smoke.py b/scripts/l2s2_runtime_smoke.py
+index 66181b6f..f93b68f4 100644
+--- a/scripts/l2s2_runtime_smoke.py
++++ b/scripts/l2s2_runtime_smoke.py
+@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
+     from transit_scholar.layer2.schema_extraction.retrieval import (
+         HybridRetrievalWrapper,
+     )
++    from transit_scholar.layer2.retrieval.api import read_blocks
+ 
+     definition = get_schema_definition(args.schema)
+     field = _find_field(definition, args.field)
+@@ -113,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
+         llm_client=client,
+         retrieval=retrieval,
+         top_k=args.top_k,
++        canonical_reader=read_blocks,
+     )
+     if run.instance is None or not run.manifest.fields:
+         print("  failure_class=extraction_runtime", file=sys.stderr)
+diff --git a/tests/test_l2s2_runtime_smoke.py b/tests/test_l2s2_runtime_smoke.py
+index 30c6e785..760d6125 100644
+--- a/tests/test_l2s2_runtime_smoke.py
++++ b/tests/test_l2s2_runtime_smoke.py
+@@ -105,6 +105,7 @@ def test_main_shares_client_and_reports_only_sanitized_success(
+     monkeypatch, capsys
+ ):
+     import transit_scholar.config as config_module
++    import transit_scholar.layer2.retrieval.api as retrieval_api
+     import transit_scholar.layer2.schema_extraction as schema_extraction
+     import transit_scholar.layer2.schema_extraction.retrieval as retrieval_module
+ 
+@@ -139,6 +140,7 @@ def test_main_shares_client_and_reports_only_sanitized_success(
+ 
+     def fake_extract(paper_id, schema_id, field_id, **kwargs):
+         seen["extract_client"] = kwargs["llm_client"]
++        seen["canonical_reader"] = kwargs["canonical_reader"]
+         seen["field_id"] = field_id
+         return SimpleNamespace(
+             instance=SimpleNamespace(fields={field_id: result}),
+@@ -174,6 +176,7 @@ def test_main_shares_client_and_reports_only_sanitized_success(
+ 
+     assert exit_code == 0
+     assert seen["extract_client"] is client
++    assert seen["canonical_reader"] is retrieval_api.read_blocks
+     assert seen["verifier_client"] is client
+     assert seen["field_id"] == "research_problem.control_type"
+     assert seen["verified_field"] == "research_problem.control_type"

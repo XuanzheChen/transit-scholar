@@ -18,7 +18,21 @@ reminders/
 !.env.example
 
 # Multi-agent SDLC runtime artifacts
-tasks/
+# Task records created before repository publication; new task directories remain trackable.
+/tasks/task-2026-08-10-001/
+/tasks/task-2026-08-12-001/
+/tasks/task-2026-08-12-002/
+/tasks/task-2026-08-13-001/
+/tasks/task-2026-08-14-001/
+/tasks/task-2026-08-14-002/
+/tasks/task-2026-08-14-003/
+/tasks/task-2026-08-14-004/
+/tasks/task-2026-08-14-005/
+/tasks/task-2026-08-15-001/
+/tasks/task-2026-08-19-001/
+/tasks/task-2026-08-20-001/
+/tasks/task-2026-08-20-002/
+/tasks/task-2026-08-21-001/evidence/changes.diff
 .agentic-sdlc/active-task.json
 .agentic-sdlc/init.json
 .agentic-sdlc/model-probes/

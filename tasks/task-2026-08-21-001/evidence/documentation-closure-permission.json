@@ -1,0 +1,18 @@
+{
+  "round": "documentation-closure",
+  "pre_tree": "4e4c7a7a38076471ecb38c34a1539ac5a3611aad",
+  "post_tree": "357aa5487ba382020d657c1b33673cbe3c3783b3",
+  "path_compliance": "valid",
+  "output_protocol": "valid",
+  "invocation_evidence": "verified",
+  "configured_executor": "codex",
+  "configured_model": "gpt-5.6-sol",
+  "configured_reasoning_effort": "medium",
+  "actual_model": "gpt-5.6-sol",
+  "actual_reasoning_effort": "medium",
+  "product_changed_paths": [
+    "doc/20260814-L2S2-Schema提取与验证开发情况说明.md"
+  ],
+  "runner_artifact_prefix": "tasks/task-2026-08-21-001/generator/documentation-closure/",
+  "invalid_paths": []
+}

@@ -15,6 +15,29 @@ import tempfile
 import uuid
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# tmp-dir sandbox compatibility shim
+# ---------------------------------------------------------------------------
+# The DSH Windows file sandbox treats directories created with POSIX mode
+# ``0o700`` (the mode used by ``tempfile.mkdtemp``, ``pathlib.mkdir`` and
+# pytest's own ``tmp_path`` machinery) as write-denied, which breaks the
+# deterministic suite under the sandboxed harness. Normalize ``os.mkdir`` so
+# ``0o700`` becomes ``0o755``: on normal Windows the mode bit is ignored, so
+# this is a no-op there, while under the sandbox every test temp tree remains
+# usable exactly as before. Test-harness-only; never touches product behaviour.
+_ORIG_MKDIR = os.mkdir
+
+
+def _sandbox_safe_mkdir(*args, **kwargs):
+    if len(args) >= 2 and args[1] == 0o700:
+        args = (args[0], 0o755) + args[2:]
+    elif kwargs.get("mode") == 0o700:
+        kwargs["mode"] = 0o755
+    return _ORIG_MKDIR(*args, **kwargs)
+
+
+os.mkdir = _sandbox_safe_mkdir
+
 # Project-local temporary root, kept inside the repo so tests never touch the
 # system default temp directory (which can have permission issues on some
 # setups). Individual per-test subdirectories are created by the
@@ -134,9 +157,15 @@ def _cleanup(request):
 def _l2_offline_guard(monkeypatch):
     """Offline guard for the Layer2 suite.
 
-    When ``TRANSIT_SCHOLAR_BLOCK_NETWORK=1`` is set (self-test command #3), any
-    outbound socket connect is blocked and the embedding/reranker API key env
-    vars are cleared, proving the suite runs green with no network and no keys.
+    When ``TRANSIT_SCHOLAR_BLOCK_NETWORK`` is truthy (set as an env var for
+    self-test command #3, or loaded from the project-root ``.env``), any
+    outbound socket connect is blocked, the embedding/reranker API key env
+    vars are cleared, and the ``TRANSIT_SCHOLAR_LLM_*`` vars are cleared so
+    deterministic tests that do not inject an explicit fake
+    client/verifier/recheck fail explicitly with ``LLMUnavailableError``
+    instead of silently resolving the developer's real LLM config. Because the
+    current project ``.env`` ships ``TRANSIT_SCHOLAR_BLOCK_NETWORK=true``,
+    this effectively keeps the whole L2S2 suite hermetic (AC-RW-15).
     """
     if os.environ.get("TRANSIT_SCHOLAR_BLOCK_NETWORK", "0").strip().lower() not in (
         "1",
@@ -175,6 +204,17 @@ def _l2_offline_guard(monkeypatch):
     os.environ["TRANSIT_SCHOLAR_EMBEDDING_API_KEY"] = ""
     os.environ["TRANSIT_SCHOLAR_RERANKER_API_KEY"] = ""
     os.environ["JINA_API_KEY"] = ""
+    for _llm_env in (
+        "TRANSIT_SCHOLAR_LLM_PROVIDER",
+        "TRANSIT_SCHOLAR_LLM_MODEL",
+        "TRANSIT_SCHOLAR_LLM_API_KEY",
+        "TRANSIT_SCHOLAR_LLM_BASE_URL",
+        "TRANSIT_SCHOLAR_LLM_ALLOW_NETWORK",
+        "TRANSIT_SCHOLAR_LLM_TIMEOUT_SECONDS",
+        "TRANSIT_SCHOLAR_LLM_MAX_RETRIES",
+        "TRANSIT_SCHOLAR_LLM_RATE_LIMIT_RPM",
+    ):
+        monkeypatch.delenv(_llm_env, raising=False)
 
 
 @pytest.fixture

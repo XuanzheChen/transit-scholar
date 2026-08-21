@@ -1,0 +1,19 @@
+{
+  "round": "canonical-reader-repair",
+  "pre_tree": "f4279c7acb75fc2f806aa77085aaf0a146165888",
+  "post_tree": "16f5d7d9fb79ddf83640e9d1a3b31edbf12e135c",
+  "path_compliance": "valid",
+  "output_protocol": "valid",
+  "invocation_evidence": "verified",
+  "configured_executor": "codex",
+  "configured_model": "gpt-5.6-sol",
+  "configured_reasoning_effort": "medium",
+  "actual_model": "gpt-5.6-sol",
+  "actual_reasoning_effort": "medium",
+  "product_changed_paths": [
+    "scripts/l2s2_runtime_smoke.py",
+    "tests/test_l2s2_runtime_smoke.py"
+  ],
+  "runner_artifact_prefix": "tasks/task-2026-08-21-001/generator/canonical-reader-repair/",
+  "invalid_paths": []
+}

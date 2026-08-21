@@ -15,6 +15,16 @@ from pathlib import Path
 DATABASE_FILENAME = "transit_scholar.db"
 
 
+def project_dotenv_path() -> Path:
+    """Return the project-root ``.env`` path.
+
+    Derived from this module's location (never a hardcoded absolute path) so
+    the whole project shares exactly one dotenv boundary. Tests may
+    monkeypatch this to point at a temporary ``.env``.
+    """
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
 def _load_project_dotenv() -> None:
     """Load the project-root ``.env`` without overriding real env vars.
 
@@ -23,7 +33,7 @@ def _load_project_dotenv() -> None:
     by whatever sits in ``.env``. Falls back to a minimal parser when
     ``python-dotenv`` is not installed so tests still run.
     """
-    env_path = Path(__file__).resolve().parents[2] / ".env"
+    env_path = project_dotenv_path()
     if not env_path.is_file():
         return
     try:
@@ -39,6 +49,26 @@ def _load_project_dotenv() -> None:
             key = key.strip()
             if key and key not in os.environ:
                 os.environ[key] = value.strip()
+
+
+#: Process-once guard: ``.env`` is loaded at most once per process so a test
+#: that ``delenv``s values after import is never re-polluted by a later reload.
+_env_loaded = False
+
+
+def ensure_project_dotenv() -> None:
+    """Load the project-root ``.env`` at most once per process.
+
+    The first call loads ``.env`` with ``override=False`` (the real
+    environment stays the source of truth); later calls are no-ops. This is
+    the sole project-root dotenv boundary: runtime modules call it lazily
+    instead of invoking ``dotenv.load_dotenv`` themselves.
+    """
+    global _env_loaded
+    if _env_loaded:
+        return
+    _load_project_dotenv()
+    _env_loaded = True
 
 
 def _env_bool(name: str, default: str = "false") -> bool:
@@ -57,7 +87,7 @@ def _env_int(name: str) -> int | None:
         return None
 
 
-_load_project_dotenv()
+ensure_project_dotenv()
 
 
 @dataclass

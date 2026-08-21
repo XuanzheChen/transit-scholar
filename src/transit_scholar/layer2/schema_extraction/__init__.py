@@ -12,7 +12,8 @@ Public contract (stable import path ``transit_scholar.layer2.schema_extraction``
   ``compute_schema_hash(definition)``;
 - Package B (in-memory extraction, FR-B-001..011): ``LLMConfig``,
   ``FakeLLMProvider``, ``RealLLMClientStub``, ``OpenAICompatibleLLMClient``,
-  ``resolve_llm_client``, ``build_field_query``, ``FakeRetrieval``,
+  ``resolve_llm_client``, ``resolve_runtime_llm_client``,
+  ``build_field_query``, ``FakeRetrieval``,
   ``HybridRetrievalWrapper``, ``CandidateEvidence``, ``map_hits_to_candidates``,
   ``bind_evidence``, ``FieldTraceEntry``, ``ExtractionManifest``,
   ``ExtractionEngine``, ``ExtractionRun``,
@@ -22,6 +23,7 @@ Public contract (stable import path ``transit_scholar.layer2.schema_extraction``
   ``validate_evidence_integrity``, ``CanonicalReader``,
   ``CanonicalReadError``, ``SemanticVerdict``, ``SemanticDecision``,
   ``SemanticVerifier``, ``FakeSemanticVerifier``,
+  ``StructuredSemanticVerifier``, ``build_semantic_verifier_messages``,
   ``VerifierUnavailableError``, ``verify_field_semantics``,
   ``RecheckTrace``, ``RecheckTraceEntry``, ``RecheckCallable``,
   ``RecheckError``, ``run_targeted_recheck``,
@@ -38,7 +40,8 @@ This package is self-contained: it imports only stdlib, ``pydantic`` and
 ``yaml`` at module import time. No LLM, network, database, parser, retrieval,
 or L2S1 module is imported (L2S1 types are only referenced lazily inside
 methods or under ``TYPE_CHECKING``). ``transit_scholar.config`` is imported
-lazily by the persistence layer when a default storage root is resolved.
+lazily by ``resolve_runtime_llm_client`` (single dotenv bootstrap boundary)
+and by the persistence layer when a default storage root is resolved.
 """
 
 from __future__ import annotations
@@ -62,10 +65,13 @@ from .engine import (
     ExtractionEngine,
     ExtractionRun,
     build_extraction_messages,
+    build_runtime_recheck_callable,
+    extract_field_instance_in_memory,
     extract_schema_instance_in_memory,
 )
 from .errors import (
     EvidenceBindingError,
+    LLMCapabilityError,
     LLMInvalidOutputError,
     LLMRequestError,
     LLMUnavailableError,
@@ -94,7 +100,9 @@ from .llm import (
     OpenAICompatibleLLMClient,
     RealLLMClientStub,
     StructuredLLMClient,
+    StructuredOutputMode,
     resolve_llm_client,
+    resolve_runtime_llm_client,
 )
 from .loader import (
     InvalidSchemaDefinitionError,
@@ -144,7 +152,9 @@ from .semantic import (
     SemanticDecision,
     SemanticVerdict,
     SemanticVerifier,
+    StructuredSemanticVerifier,
     VerifierUnavailableError,
+    build_semantic_verifier_messages,
     verify_field_semantics,
 )
 from .trace import ExtractionManifest, FieldTraceEntry
@@ -180,17 +190,20 @@ __all__ = [
     "SchemaLoadError",
     "RetrievalUnavailableError",
     "LLMUnavailableError",
+    "LLMCapabilityError",
     "LLMInvalidOutputError",
     "LLMRequestError",
     "UnknownEvidenceIdError",
     "EvidenceBindingError",
     "LLMConfig",
     "StructuredLLMClient",
+    "StructuredOutputMode",
     "FakeCallRecord",
     "FakeLLMProvider",
     "OpenAICompatibleLLMClient",
     "RealLLMClientStub",
     "resolve_llm_client",
+    "resolve_runtime_llm_client",
     "FieldQuery",
     "build_field_query",
     "RetrievalBoundary",
@@ -207,6 +220,8 @@ __all__ = [
     "build_extraction_messages",
     "ExtractionEngine",
     "ExtractionRun",
+    "build_runtime_recheck_callable",
+    "extract_field_instance_in_memory",
     "extract_schema_instance_in_memory",
     "ValidationReport",
     "ReportStatus",
@@ -218,6 +233,8 @@ __all__ = [
     "SemanticVerdict",
     "SemanticVerifier",
     "FakeSemanticVerifier",
+    "StructuredSemanticVerifier",
+    "build_semantic_verifier_messages",
     "VerifierUnavailableError",
     "verify_field_semantics",
     "RecheckCallable",

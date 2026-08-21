@@ -1,0 +1,75 @@
+{
+  "output_protocol": "valid",
+  "overall_exit_code": 0,
+  "commands": [
+    {
+      "name": "focused-l2s2",
+      "cmd": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/test_l2s2_llm_client.py",
+        "tests/test_l2s2_llm_real_provider.py",
+        "tests/test_l2s2_extraction_engine.py",
+        "tests/test_l2s2_runtime_wiring.py",
+        "tests/test_l2s2_validation_semantic.py",
+        "tests/test_l2s2_validation_pipeline.py",
+        "tests/test_l2s2_recheck.py",
+        "tests/test_l2s2_runtime_smoke.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-08-21T03:57:21.167646+00:00",
+      "completed_at": "2026-08-21T03:57:30.188963+00:00",
+      "stdout": "01-focused-l2s2.stdout.log",
+      "stderr": "01-focused-l2s2.stderr.log"
+    },
+    {
+      "name": "complete-l2s2",
+      "cmd": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/test_l2s2_evidence_binding.py",
+        "tests/test_l2s2_extraction_engine.py",
+        "tests/test_l2s2_llm_client.py",
+        "tests/test_l2s2_llm_real_provider.py",
+        "tests/test_l2s2_persistence.py",
+        "tests/test_l2s2_public_api.py",
+        "tests/test_l2s2_recheck.py",
+        "tests/test_l2s2_runtime_smoke.py",
+        "tests/test_l2s2_runtime_wiring.py",
+        "tests/test_l2s2_schema_acceptance_cli.py",
+        "tests/test_l2s2_schema_acceptance_evaluate.py",
+        "tests/test_l2s2_schema_acceptance_gold.py",
+        "tests/test_l2s2_schema_acceptance_report.py",
+        "tests/test_l2s2_schema_core.py",
+        "tests/test_l2s2_schema_plugins.py",
+        "tests/test_l2s2_validation_evidence.py",
+        "tests/test_l2s2_validation_pipeline.py",
+        "tests/test_l2s2_validation_semantic.py",
+        "tests/test_l2s2_validation_structural.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-08-21T03:57:30.188963+00:00",
+      "completed_at": "2026-08-21T03:57:55.606591+00:00",
+      "stdout": "02-complete-l2s2.stdout.log",
+      "stderr": "02-complete-l2s2.stderr.log"
+    },
+    {
+      "name": "network-blocked-l2s2",
+      "cmd": [
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        "$env:TRANSIT_SCHOLAR_BLOCK_NETWORK='1'; python -m pytest tests/test_l2s2_evidence_binding.py tests/test_l2s2_extraction_engine.py tests/test_l2s2_llm_client.py tests/test_l2s2_llm_real_provider.py tests/test_l2s2_persistence.py tests/test_l2s2_public_api.py tests/test_l2s2_recheck.py tests/test_l2s2_runtime_smoke.py tests/test_l2s2_runtime_wiring.py tests/test_l2s2_schema_acceptance_cli.py tests/test_l2s2_schema_acceptance_evaluate.py tests/test_l2s2_schema_acceptance_gold.py tests/test_l2s2_schema_acceptance_report.py tests/test_l2s2_schema_core.py tests/test_l2s2_schema_plugins.py tests/test_l2s2_validation_evidence.py tests/test_l2s2_validation_pipeline.py tests/test_l2s2_validation_semantic.py tests/test_l2s2_validation_structural.py -q"
+      ],
+      "exit_code": 0,
+      "started_at": "2026-08-21T03:57:55.606591+00:00",
+      "completed_at": "2026-08-21T03:58:21.185163+00:00",
+      "stdout": "03-network-blocked-l2s2.stdout.log",
+      "stderr": "03-network-blocked-l2s2.stderr.log"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "name": "retrieval-diagnostic",
+    "timeout_seconds": 300,
+    "cmd": [
+      "powershell", "-NoProfile", "-Command",
+      "$env:TRANSIT_SCHOLAR_BLOCK_NETWORK='0'; $env:TRANSIT_SCHOLAR_RETRIEVAL_ALLOW_NETWORK='true'; $env:TRANSIT_SCHOLAR_DATA_DIR='temp/l2s2_gold_acceptance/data'; python -c \"from transit_scholar.config import ensure_project_dotenv; ensure_project_dotenv(); from transit_scholar.layer2.schema_extraction import get_schema_definition; from transit_scholar.layer2.retrieval.api import search_hybrid; d=get_schema_definition('bus_control_rl'); f=next(x for s in d.sections for x in s.fields if x.id=='research_problem.control_type'); r=search_hybrid('transit-001', f.question, top_k=4, rerank=False); print('status='+str(r.status)); print('method='+str(r.method)); print('error_code='+str(r.error_code)); print('hit_count='+str(len(r.hits)))\""
+    ]
+  }
+]

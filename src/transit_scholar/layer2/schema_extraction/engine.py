@@ -41,7 +41,9 @@ from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict, Field
 
 from .errors import (
+    LLMCapabilityError,
     LLMInvalidOutputError,
+    LLMRequestError,
     LLMUnavailableError,
     EvidenceBindingError,
     UnknownEvidenceIdError,
@@ -53,7 +55,11 @@ from .evidence import (
     map_hits_to_candidates,
 )
 from .hashing import compute_schema_hash
-from .llm import FakeLLMProvider, LLMConfig, StructuredLLMClient
+from .llm import (
+    LLMConfig,
+    StructuredLLMClient,
+    resolve_runtime_llm_client,
+)
 from .loader import (
     InvalidSchemaDefinitionError,
     SchemaPluginNotFoundError,
@@ -69,6 +75,7 @@ from .models import (
     value_matches_field_type,
 )
 from .query import FieldQuery, build_field_query
+from .recheck import RecheckCallable
 from .retrieval import FakeRetrieval, RetrievalBoundary
 from .trace import ExtractionManifest, FieldTraceEntry
 
@@ -76,6 +83,7 @@ from .trace import ExtractionManifest, FieldTraceEntry
 ERROR_RETRIEVAL_UNAVAILABLE = "retrieval_unavailable"
 ERROR_LLM_UNAVAILABLE = "llm_unavailable"
 ERROR_LLM_INVALID_OUTPUT = "llm_invalid_output"
+ERROR_LLM_CAPABILITY_UNSUPPORTED = "llm_structured_output_unsupported"
 ERROR_UNKNOWN_EVIDENCE_ID = "unknown_evidence_id"
 ERROR_EVIDENCE_BINDING_FAILED = "evidence_binding_failed"
 ERROR_SCHEMA_LOAD_FAILED = "schema_load_failed"
@@ -236,8 +244,6 @@ def build_extraction_messages(
     system = (
         "You are a structured schema extraction assistant. Extract a value "
         "for exactly one schema field from the provided candidate evidence. "
-        "Answer as a JSON object with the allowed structured fields only: value, status, "
-        "evidence_ids, confidence, notes. Never produce provenance fields. "
         "Never choose an absent status (not_found / not_applicable) together "
         "with evidence_ids. "
         "A fact stated directly in the paper text — including statements in "
@@ -281,13 +287,6 @@ def build_extraction_messages(
             }
             for candidate in candidates
         ],
-        "output_schema": {
-            "value": "extracted value matching output_constraints.type",
-            "status": "explicit|inferred|unclear|not_found|not_applicable|conflicting",
-            "evidence_ids": ["E1", "E2", "..."],
-            "confidence": "0..1 or null",
-            "notes": "optional note",
-        },
     }
     if retry_feedback:
         prompt["retry_feedback"] = retry_feedback
@@ -333,9 +332,14 @@ class ExtractionRun(BaseModel):
 class ExtractionEngine:
     """In-memory schema extraction engine (FR-B-008).
 
-    Defaults are fully offline: ``FakeLLMProvider`` and ``FakeRetrieval``,
-    with no canonical reader (so no canonical block read ever happens without
-    explicit injection).
+    Default retrieval is the offline ``FakeRetrieval`` and no canonical
+    reader is used (so no canonical block read ever happens without explicit
+    injection). The LLM client default is **lazy**: when no ``llm_client`` is
+    injected it is resolved through ``resolve_runtime_llm_client`` only when a
+    field actually needs the LLM (candidates present), so schema-load
+    failures and no-hit ``not_found`` runs stay LLM-free; a resolution failure
+    becomes the explicit per-field ``llm_unavailable`` placeholder. Explicit
+    fake injection or ``provider=fake`` is the only silent-fake path.
     """
 
     def __init__(
@@ -347,10 +351,21 @@ class ExtractionEngine:
         canonical_reader: Callable[[str, list[str]], Any] | None = None,
     ):
         self.llm_config = llm_config or LLMConfig.from_env()
-        self.llm_client = llm_client if llm_client is not None else FakeLLMProvider()
+        self.llm_client = llm_client
         self.retrieval = retrieval if retrieval is not None else FakeRetrieval()
         self.top_k = int(top_k)
         self.canonical_reader = canonical_reader
+
+    def _get_llm_client(self) -> StructuredLLMClient:
+        """Resolve the LLM client lazily, at most once, on first use.
+
+        A resolution failure raises ``LLMUnavailableError`` from here; the
+        caller (``_extract_field``) converts it to the explicit per-field
+        ``llm_unavailable`` placeholder exactly like any client failure.
+        """
+        if self.llm_client is None:
+            self.llm_client = resolve_runtime_llm_client(self.llm_config)
+        return self.llm_client
 
     # ------------------------------------------------------------------
     # run
@@ -363,13 +378,15 @@ class ExtractionEngine:
         *,
         definition: SchemaDefinition | None = None,
         run_id: str | None = None,
+        field_id: str | None = None,
     ) -> ExtractionRun:
-        """Execute extraction for every field of the schema (in definition
-        order) and return the in-memory instance plus manifest.
+        """Execute extraction for all fields, or one selected field.
 
-        Every field id of the definition is always present in
-        ``instance.fields`` (AC-T001-F01): failing fields carry an ``unclear``
-        placeholder instead of disappearing.
+        Full runs preserve the completeness guarantee: every field id of the
+        definition is present. ``field_id`` is the narrow runtime-smoke path;
+        it selects the existing field definition without modifying or
+        synthesizing a reduced schema. An unknown id fails before retrieval or
+        any LLM call.
         """
         if definition is None:
             if not schema_id:
@@ -384,6 +401,17 @@ class ExtractionEngine:
                     ERROR_SCHEMA_LOAD_FAILED,
                     f"failed to load schema definition {schema_id!r}: {exc}",
                 )
+        selected_fields = [
+            (section, field)
+            for section in definition.sections
+            for field in section.fields
+            if field_id is None or field.id == field_id
+        ]
+        if field_id is not None and not selected_fields:
+            raise ValueError(
+                f"field {field_id!r} is not part of schema {definition.schema_id!r}"
+            )
+
         provider, model, fake = self._llm_identity()
         manifest = ExtractionManifest(
             run_id=run_id or uuid.uuid4().hex,
@@ -397,11 +425,10 @@ class ExtractionEngine:
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         fields: dict[str, FieldResult] = {}
-        for section in definition.sections:
-            for field in section.fields:
-                result, entry = self._extract_field(paper_id, definition, section, field)
-                manifest.fields.append(entry)
-                fields[field.id] = result
+        for section, field in selected_fields:
+            result, entry = self._extract_field(paper_id, definition, section, field)
+            manifest.fields.append(entry)
+            fields[field.id] = result
         instance = SchemaInstance(
             paper_id=paper_id,
             schema_id=definition.schema_id,
@@ -566,11 +593,23 @@ class ExtractionEngine:
             category: str | None = None
             reason: str | None = None
             try:
-                attempt_output = self.llm_client.generate_structured(
+                client = self._get_llm_client()
+                attempt_output = client.generate_structured(
                     messages, FieldExtractionLLMOutput, metadata
                 )
             except LLMInvalidOutputError as exc:
                 category = ERROR_LLM_INVALID_OUTPUT
+                reason = f"field {field.id!r}: {exc}"
+                if bool(getattr(client, "handles_structured_correction", False)):
+                    failure_category = category
+                    failure_reason = reason
+                    final_output = None
+                    break
+            except LLMCapabilityError as exc:
+                category = ERROR_LLM_CAPABILITY_UNSUPPORTED
+                reason = f"field {field.id!r}: {exc}"
+            except LLMRequestError as exc:
+                category = ERROR_LLM_UNAVAILABLE
                 reason = f"field {field.id!r}: {exc}"
             except LLMUnavailableError as exc:
                 category = ERROR_LLM_UNAVAILABLE
@@ -644,7 +683,10 @@ class ExtractionEngine:
             if category is None:
                 break  # success
 
-            if category == ERROR_LLM_UNAVAILABLE:
+            if category in (
+                ERROR_LLM_UNAVAILABLE,
+                ERROR_LLM_CAPABILITY_UNSUPPORTED,
+            ):
                 # system failure: not retriable
                 failure_category = category
                 failure_reason = reason
@@ -698,9 +740,11 @@ def extract_schema_instance_in_memory(
 
     Loads the schema definition from the plugin loader (run-level
     ``schema_load_failed`` marker when it cannot be loaded), then runs the
-    extraction engine with offline defaults. No persistence. An injectable
-    ``canonical_reader`` supplies per-ref canonical provenance for evidence
-    binding; without it the offline candidate fallback is used.
+    extraction engine. The LLM client default is lazy: it is resolved through
+    ``resolve_runtime_llm_client`` only when a field needs the LLM, so
+    schema-load failures and no-hit ``not_found`` runs need no LLM at all. An
+    injectable ``canonical_reader`` supplies per-ref canonical provenance for
+    evidence binding; without it the offline candidate fallback is used.
     """
     engine = ExtractionEngine(
         llm_client=llm_client,
@@ -709,3 +753,146 @@ def extract_schema_instance_in_memory(
         canonical_reader=canonical_reader,
     )
     return engine.run(paper_id, schema_id, run_id=run_id)
+
+
+def extract_field_instance_in_memory(
+    paper_id: str,
+    schema_id: str,
+    field_id: str,
+    *,
+    llm_client: StructuredLLMClient,
+    retrieval: RetrievalBoundary,
+    top_k: int = 8,
+    run_id: str | None = None,
+    canonical_reader: Callable[[str, list[str]], Any] | None = None,
+) -> ExtractionRun:
+    """Extract exactly one existing schema field without reducing the schema.
+
+    This entry point exists for the controlled real-runtime smoke. The full
+    schema definition and hash remain authoritative, but retrieval and LLM
+    generation are executed only for ``field_id``.
+    """
+    engine = ExtractionEngine(
+        llm_client=llm_client,
+        retrieval=retrieval,
+        top_k=top_k,
+        canonical_reader=canonical_reader,
+    )
+    return engine.run(
+        paper_id,
+        schema_id,
+        run_id=run_id,
+        field_id=field_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# runtime targeted recheck (FR-004 / AC-RW-14)
+# ---------------------------------------------------------------------------
+
+
+def _recheck_one_field(
+    client: StructuredLLMClient,
+    retrieval: RetrievalBoundary,
+    top_k: int,
+    definition: SchemaDefinition,
+    field: FieldDefinition,
+    paper_id: str,
+) -> FieldResult:
+    """Re-extract one field through the shared runtime client.
+
+    Mirrors the normal engine pipeline for a single field: query -> retrieval
+    -> candidate evidence -> structured extraction -> program-side evidence
+    binding -> ``FieldResult``. It never reloads ``.env`` and never builds a
+    second provider. No candidate hits -> an honest ``not_found`` (never
+    fabricated); client / retrieval failures propagate to the caller so the
+    recheck layer records an explicit ``recheck_failed`` trace (never a
+    ``not_found``).
+    """
+    section = next(
+        (s for s in definition.sections if any(f.id == field.id for f in s.fields)),
+        None,
+    )
+    if section is None:
+        return FieldResult(
+            value=None,
+            status="unclear",
+            notes="runtime recheck: field is not part of this schema definition",
+        )
+    field_query = build_field_query(field, section, definition)
+    result = retrieval.retrieve(paper_id, field_query.query, top_k)
+    hits = list(getattr(result, "hits", []) or [])
+    if not hits:
+        return FieldResult(
+            value=None,
+            status="not_found",
+            notes="runtime recheck: no candidate evidence",
+        )
+    candidates = map_hits_to_candidates(hits)
+    messages = build_extraction_messages(
+        field, section, definition, field_query.query, candidates
+    )
+    metadata = {"field_id": field.id, "prompt_key": field.id}
+    output = client.generate_structured(messages, FieldExtractionLLMOutput, metadata)
+    if not value_matches_field_type(field.type, output.value, field.options):
+        raise LLMInvalidOutputError(
+            f"runtime recheck: value for field {field.id!r} does not match "
+            f"field type {field.type!r}"
+        )
+    if output.status in ("not_found", "not_applicable"):
+        if output.evidence_ids:
+            raise LLMInvalidOutputError(
+                f"runtime recheck: status {output.status!r} for field "
+                f"{field.id!r} must not carry evidence_ids"
+            )
+        return FieldResult(
+            value=None,
+            status=output.status,
+            confidence=output.confidence,
+            notes=output.notes,
+        )
+    evidence_refs: list = []
+    if output.evidence_ids:
+        evidence_refs = bind_evidence(
+            output.evidence_ids,
+            candidates,
+            field_id=field.id,
+            allow_candidate_fallback=True,
+        )
+    return FieldResult(
+        value=output.value,
+        status=output.status,
+        evidence=evidence_refs,
+        confidence=output.confidence,
+        notes=output.notes,
+    )
+
+
+def build_runtime_recheck_callable(
+    client: StructuredLLMClient,
+    *,
+    retrieval: RetrievalBoundary | None = None,
+    top_k: int = 8,
+) -> RecheckCallable:
+    """Build the normal-runtime targeted-recheck callable (AC-RW-14).
+
+    The returned callable reuses the **same** ``StructuredLLMClient`` handed
+    to the extractor and verifier; it never reloads ``.env`` and never
+    resolves a second provider. An explicitly injected ``recheck_callable``
+    always takes precedence over this default. Without an injected retrieval
+    the offline ``FakeRetrieval`` is used (no hits -> honest ``not_found``).
+    """
+    if retrieval is None:
+        retrieval = FakeRetrieval()
+    top_k = int(top_k)
+
+    def _recheck(
+        definition: SchemaDefinition,
+        field: FieldDefinition,
+        paper_id: str,
+    ) -> FieldResult:
+        return _recheck_one_field(
+            client, retrieval, top_k, definition, field, paper_id
+        )
+
+    return _recheck

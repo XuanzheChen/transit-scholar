@@ -1,0 +1,1 @@
+System.Management.Automation.RemoteException: 2026-08-21T03:17:40.964177Z ERROR codex_core::tools::router: error=apply_patch verification failed: invalid patch: multiple operations target E:\AI_Agent_Development\transit-scholar\scripts\l2s2_runtime_smoke.py

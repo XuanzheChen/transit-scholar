@@ -1,0 +1,11 @@
+L2S2 runtime smoke (one paper x one field)
+  provider=openai_compatible
+  model=deepseek-v4-flash
+  client_class=OpenAICompatibleLLMClient
+  allow_network=True
+  block_network=False
+  paper_id=transit-001
+  field_id=research_problem.control_type
+  extraction_status=explicit
+  semantic_decision=supported
+  final_success=true

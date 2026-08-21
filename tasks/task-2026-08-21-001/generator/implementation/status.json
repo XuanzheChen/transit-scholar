@@ -1,0 +1,17 @@
+﻿{
+    "role":  "generator",
+    "output_protocol":  "invalid_output",
+    "missing_fields":  [
+                           "STATUS",
+                           "NEXT",
+                           "BLOCKING"
+                       ],
+    "invalid_values":  {
+
+                       },
+    "fields":  {
+
+               },
+    "cli_exit_code":  1,
+    "invocation_status":  "cli_error"
+}

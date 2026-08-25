@@ -1,0 +1,433 @@
+{
+  "fixture_id": "l2s3-package-f-real-papers-v1",
+  "description": "L2S3 Package F deterministic acceptance fixture: four repository-reviewed real bus-control RL paper records. Paper identity (paper_id, title, schema identity) and field-level values are derived from the reviewed L2S2 gold (tests/fixtures/l2s2_schema_acceptance/codex_reviewed_gold.json); bibliographic authors and years are copied verbatim from the reviewed L2S2 real-paper corpus manifest (data/stage7_acceptance/real_papers/manifest.json, provenance documentation only - never opened at runtime). The fixture is a derived static snapshot: the loader and the acceptance tests read only this file at runtime.",
+  "schema": {
+    "schema_id": "l2s3_fixture_generic",
+    "schema_version": "1.0",
+    "name": "L2S3 Package F Generic Research Schema"
+  },
+  "sources": [
+    {
+      "role": "identity_and_field_gold",
+      "path": "tests/fixtures/l2s2_schema_acceptance/codex_reviewed_gold.json",
+      "benchmark_id": "l2s2-bus-control-rl-real-papers-codex-reviewed-v1",
+      "gold_version": "1.0-codex-reviewed",
+      "fields": ["title", "schema_id", "schema_version", "field acceptable_values", "field notes"],
+      "runtime_read": false
+    },
+    {
+      "role": "bibliography",
+      "path": "data/stage7_acceptance/real_papers/manifest.json",
+      "fields": ["expected_title", "expected_authors", "expected_year"],
+      "runtime_read": false
+    }
+  ],
+  "papers": [
+    {
+      "paper_id": "transit-001",
+      "title": "Robust Dynamic Bus Control: A Distributional Multi-agent Reinforcement Learning Approach",
+      "authors": ["Jiawei Wang", "Lijun Sun"],
+      "year": 2021,
+      "provenance": {
+        "gold": {
+          "paper_id": "transit-001",
+          "gold_status": "evaluated",
+          "review_status": "codex_reviewed",
+          "schema_id": "bus_control_rl",
+          "schema_version": "1.0"
+        },
+        "bibliography": {
+          "path": "data/stage7_acceptance/real_papers/manifest.json",
+          "fields": ["expected_title", "expected_authors", "expected_year"]
+        }
+      },
+      "instance_fields": {
+        "control_concept": {
+          "value": "bus holding control at stops (holding duration policy)",
+          "status": "explicit",
+          "confidence": 0.95,
+          "evidence": [
+            {
+              "block_id": "transit-001-control",
+              "char_start": 0,
+              "char_end": 19,
+              "pages": [1],
+              "quote": "bus holding control"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "research_problem.control_type",
+            "acceptable_values": ["holding"],
+            "notes": "gold notes candidate verbatim"
+          }
+        },
+        "method_concept": {
+          "value": "IQNC-M (distributional MARL with implicit quantile network and meta-learning, actor-critic)",
+          "status": "explicit",
+          "confidence": 0.93,
+          "evidence": [
+            {
+              "block_id": "transit-001-method",
+              "char_start": 0,
+              "char_end": 25,
+              "pages": [1],
+              "quote": "implicit quantile network"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "rl_formulation.algorithm",
+            "acceptable_values": ["IQNC-M (distributional MARL with implicit quantile network and meta-learning, actor-critic)"]
+          }
+        },
+        "key_metrics": {
+          "value": [
+            "average holding time (AHT)",
+            "average waiting time (AWT)",
+            "average journey time (AJT)",
+            "average travel time (ATT)",
+            "average occupancy dispersion (AOD)"
+          ],
+          "status": "explicit",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "block_id": "transit-001-metrics",
+              "char_start": 0,
+              "char_end": 28,
+              "pages": [1],
+              "quote": "average waiting time (AWT)"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "metrics.metrics",
+            "acceptable_values": [
+              "average holding time (AHT)",
+              "average waiting time (AWT)",
+              "average journey time (AJT)",
+              "average travel time (ATT)",
+              "average occupancy dispersion (AOD)"
+            ]
+          }
+        }
+      },
+      "proposals": [
+        {
+          "canonical_name": "Bus Holding Control",
+          "aliases": ["Holding Control"],
+          "description": "bus holding control at stops (holding duration policy)",
+          "source_field_id": "control_concept",
+          "confidence": 0.92
+        },
+        {
+          "canonical_name": "Distributional MARL",
+          "aliases": ["IQNC-M"],
+          "description": "distributional multi-agent reinforcement learning with implicit quantile networks and meta-learning (IQNC-M)",
+          "source_field_id": "method_concept",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-002",
+      "title": "RL-MSA: a Reinforcement Learning-based Multi-line bus Scheduling Approach",
+      "authors": ["Yingzhuo Liu", "Xingquan Zuo"],
+      "year": 2024,
+      "provenance": {
+        "gold": {
+          "paper_id": "transit-002",
+          "gold_status": "evaluated",
+          "review_status": "codex_reviewed",
+          "schema_id": "bus_control_rl",
+          "schema_version": "1.0"
+        },
+        "bibliography": {
+          "path": "data/stage7_acceptance/real_papers/manifest.json",
+          "fields": ["expected_title", "expected_authors", "expected_year"]
+        }
+      },
+      "instance_fields": {
+        "control_concept": {
+          "value": "multi-line bus scheduling (bus-to-trip allocation, offline and online phases)",
+          "status": "explicit",
+          "confidence": 0.95,
+          "evidence": [
+            {
+              "block_id": "transit-002-control",
+              "char_start": 0,
+              "char_end": 20,
+              "pages": [1],
+              "quote": "multi-line bus scheduling"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "research_problem.control_type",
+            "acceptable_values": ["scheduling"],
+            "notes": "gold notes candidate verbatim"
+          }
+        },
+        "method_concept": {
+          "value": "PPO (proximal policy optimization)",
+          "status": "explicit",
+          "confidence": 0.93,
+          "evidence": [
+            {
+              "block_id": "transit-002-method",
+              "char_start": 0,
+              "char_end": 4,
+              "pages": [1],
+              "quote": "PPO"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "rl_formulation.algorithm",
+            "acceptable_values": ["PPO (proximal policy optimization)"]
+          }
+        },
+        "key_metrics": {
+          "value": [
+            "number of buses used (operational cost)",
+            "departure time coverage (service quality)"
+          ],
+          "status": "explicit",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "block_id": "transit-002-metrics",
+              "char_start": 0,
+              "char_end": 31,
+              "pages": [1],
+              "quote": "number of buses used (operational cost)"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "metrics.metrics",
+            "acceptable_values": [
+              "number of buses used (operational cost)",
+              "departure time coverage (service quality)"
+            ]
+          }
+        }
+      },
+      "proposals": [
+        {
+          "canonical_name": "Multi-line Bus Scheduling",
+          "aliases": ["Bus Scheduling"],
+          "description": "multi-line bus scheduling (bus-to-trip allocation, offline and online phases)",
+          "source_field_id": "control_concept",
+          "confidence": 0.92
+        },
+        {
+          "canonical_name": "PPO",
+          "aliases": ["Proximal Policy Optimization"],
+          "description": "single-agent PPO (proximal policy optimization) for the multi-line scheduling MDP",
+          "source_field_id": "method_concept",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-010",
+      "title": "Dynamic Bus Holding Control Using Spatial-Temporal Data \u2013 A Deep Reinforcement Learning Approach",
+      "authors": ["Yuguang Zhao", "Gang Chen", "Hui Ma", "Xingquan Zuo", "Guanqun Ai"],
+      "year": 2022,
+      "provenance": {
+        "gold": {
+          "paper_id": "transit-010",
+          "gold_status": "evaluated",
+          "review_status": "codex_reviewed",
+          "schema_id": "bus_control_rl",
+          "schema_version": "1.0"
+        },
+        "bibliography": {
+          "path": "data/stage7_acceptance/real_papers/manifest.json",
+          "fields": ["expected_title", "expected_authors", "expected_year"]
+        },
+        "title_dash_note": "the reviewed gold stores the title en dash as an ASCII question mark; the reviewed bibliography manifest records the en dash and its notes state 'title uses en dash'. The fixture uses the manifest-en dash form; the provenance test accepts the gold record under single-character ? -> \u2013 normalization."
+      },
+      "instance_fields": {
+        "control_concept": {
+          "value": "dynamic bus holding control (dispatch/hold decisions at the starting stop of a high-frequency line)",
+          "status": "explicit",
+          "confidence": 0.95,
+          "evidence": [
+            {
+              "block_id": "transit-010-control",
+              "char_start": 0,
+              "char_end": 25,
+              "pages": [1],
+              "quote": "dynamic bus holding control"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "research_problem.control_type",
+            "acceptable_values": ["holding"],
+            "notes": "gold notes candidate verbatim"
+          }
+        },
+        "method_concept": {
+          "value": "DQN with a self-attention network architecture",
+          "status": "explicit",
+          "confidence": 0.93,
+          "evidence": [
+            {
+              "block_id": "transit-010-method",
+              "char_start": 0,
+              "char_end": 4,
+              "pages": [1],
+              "quote": "DQN"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "rl_formulation.algorithm",
+            "acceptable_values": ["DQN with a self-attention network architecture"]
+          }
+        },
+        "key_metrics": {
+          "value": [
+            "total reward",
+            "number of dispatches",
+            "number of boarded passengers",
+            "average waiting time"
+          ],
+          "status": "explicit",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "block_id": "transit-010-metrics",
+              "char_start": 0,
+              "char_end": 11,
+              "pages": [1],
+              "quote": "total reward"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "metrics.metrics",
+            "acceptable_values": [
+              "total reward",
+              "number of dispatches",
+              "number of boarded passengers",
+              "average waiting time",
+              "stranded passengers",
+              "passengers who gave up"
+            ],
+            "notes": "instance selects 4 of the 6 reviewed metrics; the stranding-related items are deliberately excluded so workspace A contains no occurrence of the workspace-B isolation search term 'stranding'"
+          }
+        }
+      },
+      "proposals": [
+        {
+          "canonical_name": "Bus Holding Control",
+          "aliases": ["Holding Control"],
+          "description": "dynamic bus holding control with real-time dispatch and hold decisions at the first stop",
+          "source_field_id": "control_concept",
+          "confidence": 0.92
+        },
+        {
+          "canonical_name": "DQN",
+          "aliases": [],
+          "description": "deep Q-network with a self-attention architecture for dynamic bus holding control decisions",
+          "source_field_id": "method_concept",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "paper_id": "transit-006",
+      "title": "Deep Reinforcement Learning based Dynamic Optimization of Bus Timetable",
+      "authors": ["Guanqun Ai", "Xingquan Zuo", "Gang Chen", "Binglin Wu"],
+      "year": 2021,
+      "provenance": {
+        "gold": {
+          "paper_id": "transit-006",
+          "gold_status": "evaluated",
+          "review_status": "codex_reviewed",
+          "schema_id": "bus_control_rl",
+          "schema_version": "1.0"
+        },
+        "bibliography": {
+          "path": "data/stage7_acceptance/real_papers/manifest.json",
+          "fields": ["expected_title", "expected_authors", "expected_year"]
+        }
+      },
+      "instance_fields": {
+        "control_concept": {
+          "value": "dynamic bus timetable optimization (real-time departure interval control)",
+          "status": "explicit",
+          "confidence": 0.95,
+          "evidence": [
+            {
+              "block_id": "transit-006-control",
+              "char_start": 0,
+              "char_end": 31,
+              "pages": [1],
+              "quote": "dynamic bus timetable optimization"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "research_problem.control_type",
+            "acceptable_values": ["scheduling"],
+            "notes": "gold notes candidate verbatim"
+          }
+        },
+        "method_concept": {
+          "value": "DQN (rule-constrained Deep Q-Network)",
+          "status": "explicit",
+          "confidence": 0.93,
+          "evidence": [
+            {
+              "block_id": "transit-006-method",
+              "char_start": 0,
+              "char_end": 4,
+              "pages": [1],
+              "quote": "DQN"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "rl_formulation.algorithm",
+            "acceptable_values": ["DQN (rule-constrained Deep Q-Network)"]
+          }
+        },
+        "key_metrics": {
+          "value": [
+            "number of vehicles used",
+            "passenger waiting time"
+          ],
+          "status": "explicit",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "block_id": "transit-006-metrics",
+              "char_start": 0,
+              "char_end": 23,
+              "pages": [1],
+              "quote": "number of vehicles used"
+            }
+          ],
+          "gold_origin": {
+            "field_id": "metrics.metrics",
+            "acceptable_values": [
+              "number of vehicles used",
+              "passenger waiting time"
+            ]
+          }
+        }
+      },
+      "proposals": [
+        {
+          "canonical_name": "Bus Timetable Optimization",
+          "aliases": ["Timetable Optimization"],
+          "description": "dynamic bus timetable optimization with real-time departure interval control",
+          "source_field_id": "control_concept",
+          "confidence": 0.92
+        },
+        {
+          "canonical_name": "DQN",
+          "aliases": ["Rule-Constrained DQN"],
+          "description": "rule-constrained deep Q-network deciding departure dispatches; state features include load factor and stranding passengers",
+          "source_field_id": "method_concept",
+          "confidence": 0.9
+        }
+      ]
+    }
+  ]
+}

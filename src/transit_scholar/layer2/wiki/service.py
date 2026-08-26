@@ -118,6 +118,9 @@ class WikiService:
         self._pages: list[WikiPage] = []
         self._entities: list[WikiEntity] = []
         self._links: list[PageEntityLink] = []
+        self._vector_build_error: str | None = None
+        self._last_index_source: str | None = None
+        self._bootstrap_vector_index()
 
     def _source_fingerprint(self) -> str:
         raw = self.store.read_raw_snapshot()
@@ -143,6 +146,28 @@ class WikiService:
 
     def _discard_view(self) -> None:
         self._fingerprint = None
+        self._bootstrap_vector_index(force=True)
+
+    def _bootstrap_vector_index(self, *, force: bool = False) -> None:
+        """Maintain legacy provider-backed services without hiding stale indexes."""
+        provider = self.embedding_provider
+        index_path = self.store.index_path / "package_b_index.json"
+        if provider is None or not provider.available or not self.store.manifest_path.exists():
+            return
+        if index_path.exists():
+            if not force:
+                return
+            try:
+                existing = json.loads(index_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                return
+            if existing.get("source_fingerprint") != self._last_index_source:
+                return
+        try:
+            self.rebuild_indexes()
+            self._vector_build_error = None
+        except WikiIndexError as error:
+            self._vector_build_error = error.code
 
     def _check_workspace(self, value: object) -> None:
         workspace_id = getattr(value, "workspace_id", None)
@@ -396,13 +421,39 @@ class WikiService:
         provider = self.embedding_provider
         lexical = [(kind, object_id, title, snippet, float(len(_tokens(query) & words))) for kind, object_id, title, snippet, words in records]
         lexical = [item for item in lexical if item[4] > 0]
+        if not records:
+            return []
         if provider is None or not provider.available:
             return "degraded", "embedding_unavailable", lexical
+        if self._vector_build_error is not None:
+            return "error", self._vector_build_error, lexical
         try:
-            texts = [f"{title} {snippet}" for _, _, title, snippet, _ in records]
-            vectors, query_vector = provider.embed_documents(texts), provider.embed_query(query)
+            index_path = self.store.index_path / "package_b_index.json"
+            try:
+                payload = json.loads(index_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                return "degraded", "vector_index_missing", lexical
+            if payload.get("index_version") != _INDEX_VERSION:
+                return "degraded", "vector_index_incompatible", lexical
+            if payload.get("source_fingerprint") != self._source_fingerprint():
+                return "degraded", "vector_index_stale", lexical
+            info = provider.info
+            metadata = payload.get("vector_metadata")
             dimension = provider.dimension()
-            if dimension is None or len(query_vector) != dimension or len(vectors) != len(records) or any(len(vector) != dimension for vector in vectors):
+            if not isinstance(metadata, dict) or metadata.get("dimension") != dimension:
+                return "degraded", "vector_index_incompatible", lexical
+            if info is not None and any(metadata.get(key) != getattr(info, key) for key in ("provider", "model", "revision")):
+                return "degraded", "vector_index_incompatible", lexical
+            implementation = f"{type(provider).__module__}.{type(provider).__qualname__}"
+            if metadata.get("implementation") not in (None, implementation):
+                return "error", "embedding_provider_failure", lexical
+            vector_records = payload.get("vectors")
+            by_id = {(item.get("kind"), item.get("object_id")): item.get("vector") for item in vector_records or [] if isinstance(item, dict)}
+            vectors = [by_id.get((kind, object_id)) for kind, object_id, *_ in records]
+            if any(not isinstance(vector, list) or len(vector) != dimension for vector in vectors):
+                return "degraded", "vector_index_incompatible", lexical
+            query_vector = provider.embed_query(query)
+            if dimension is None or len(query_vector) != dimension:
                 raise ValueError("embedding dimensions are inconsistent")
             if not any(query_vector):
                 raise ValueError("query vector is zero")
@@ -433,6 +484,30 @@ class WikiService:
                    "pages": [page.model_dump(mode="json") for page in self._pages],
                    "entities": [entity.model_dump(mode="json") for entity in self._entities],
                    "links": [link.model_dump(mode="json") for link in self._links]}
+        provider = self.embedding_provider
+        vectors: list[dict[str, object]] = []
+        metadata: dict[str, object] | None = None
+        if provider is not None and provider.available:
+            texts = [f"{page.title} {page.summary}" for page in self._pages]
+            texts += [" ".join([entity.canonical_name, *entity.aliases, entity.description]) for entity in self._entities]
+            try:
+                embedded = provider.embed_documents(texts)
+                dimension = provider.dimension()
+                if dimension is None or len(embedded) != len(texts) or any(len(vector) != dimension for vector in embedded):
+                    raise ValueError("embedding dimensions are inconsistent")
+                info = provider.info
+                metadata = {"provider": info.provider if info else None, "model": info.model if info else None,
+                            "revision": info.revision if info else None, "dimension": dimension,
+                            "implementation": f"{type(provider).__module__}.{type(provider).__qualname__}"}
+                offset = len(self._pages)
+                vectors = [{"kind": "page", "object_id": page.page_id, "vector": vector} for page, vector in zip(self._pages, embedded[:offset], strict=True)]
+                vectors += [{"kind": "entity", "object_id": entity.entity_id, "vector": vector} for entity, vector in zip(self._entities, embedded[offset:], strict=True)]
+            except UnavailableError:
+                metadata = None
+            except Exception as error:
+                raise WikiIndexError("embedding_provider_failure", "vector index could not be built") from error
+        payload["vector_metadata"] = metadata
+        payload["vectors"] = vectors
         target = self.store.index_path / "package_b_index.json"
         temporary = target.with_name(f".{target.name}.tmp-{uuid.uuid4().hex}")
         try:
@@ -445,6 +520,7 @@ class WikiService:
             except OSError:
                 pass
             raise WikiIndexError("index_write_failed", "derived index could not be written") from error
+        self._last_index_source = fingerprint
         return IndexRebuildResult(source_fingerprint=fingerprint, index_version=_INDEX_VERSION)
 
     def _audit_raw(self) -> tuple[list[AuditIssue], dict[str, list[object]], str]:

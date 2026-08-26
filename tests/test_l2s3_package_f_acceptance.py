@@ -356,10 +356,9 @@ def test_multi_paper_real_papers_acceptance(project_tmp_path, monkeypatch):
             assert trace.resolution == "create" and trace.resolution_reason == "created"
             assert trace.entity_id and trace.link_id
     assert per_paper["transit-010"].proposals[0].resolution == "reuse"
-    # The frozen resolver reports the exact-canonical reuse reason as
-    # ``semantic_reuse`` whenever exact candidates are present (which is the
-    # case for every canonical reuse); the shared concept is never recreated.
-    assert per_paper["transit-010"].proposals[0].resolution_reason == "semantic_reuse"
+    # Exact-canonical reuse is reported distinctly from semantic reuse; the
+    # shared concept is never recreated.
+    assert per_paper["transit-010"].proposals[0].resolution_reason == "exact_match"
     assert per_paper["transit-010"].proposals[1].resolution == "create"
     assert per_paper["transit-010"].proposals[1].resolution_reason == "created"
 

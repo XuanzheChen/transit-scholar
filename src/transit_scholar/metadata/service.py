@@ -35,6 +35,27 @@ PDF_OPEN_FAILED = "PDF_OPEN_FAILED"
 DATABASE_WRITE_FAILED = "DATABASE_WRITE_FAILED"
 
 
+def read_paper_metadata(paper_id: str) -> "PaperMetadata | None":
+    """Read the persisted metadata required to build a Wiki paper page."""
+    from transit_scholar.layer2.wiki.models import PaperMetadata
+
+    if not isinstance(paper_id, str) or not paper_id:
+        return None
+    with SessionLocal() as session:
+        paper = session.get(Paper, paper_id)
+        if paper is None or not isinstance(paper.title, str) or not paper.title.strip():
+            return None
+        authors = session.execute(
+            select(PaperAuthor).where(PaperAuthor.paper_id == paper.id).order_by(PaperAuthor.author_order)
+        ).scalars().all()
+        return PaperMetadata(
+            paper_id=paper.id,
+            title=paper.title,
+            authors=[author.full_name for author in authors if isinstance(author.full_name, str) and author.full_name.strip()],
+            year=paper.publication_year,
+        )
+
+
 def extract_metadata_candidates(
     file_id: str, *, apply_selected: bool = True
 ) -> MetadataExtractionResult:

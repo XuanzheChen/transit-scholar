@@ -107,14 +107,21 @@ class EntityResolver:
             for entity in sorted(entities, key=lambda item: item.entity_id)
         )
 
-    def _reuse(self, proposal: EntityProposal, entity: WikiEntity, candidates: tuple[EntityResolutionCandidate, ...] = ()) -> EntityResolutionResult:
+    def _reuse(
+        self,
+        proposal: EntityProposal,
+        entity: WikiEntity,
+        candidates: tuple[EntityResolutionCandidate, ...] = (),
+        *,
+        reason_code: str = "exact_match",
+    ) -> EntityResolutionResult:
         if entity.workspace_id != self.context.workspace_id:
             return self._ambiguous(proposal, "invalid_target", candidates)
         try:
             self._add_distinct_aliases(proposal, entity)
         except Exception:
             return self._ambiguous(proposal, "service_failure", candidates)
-        return self._result("reuse", "exact_match" if not candidates else "semantic_reuse", proposal, candidates=candidates, entity=entity)
+        return self._result("reuse", reason_code, proposal, candidates=candidates, entity=entity)
 
     def _add_distinct_aliases(self, proposal: EntityProposal, entity: WikiEntity) -> None:
         existing = {normalize_entity_name(entity.canonical_name), *(normalize_entity_name(alias) for alias in entity.aliases)}
@@ -231,7 +238,7 @@ class EntityResolver:
                 entity = self.service.get_entity(matched[0].entity_id)
             except Exception:
                 return self._ambiguous(proposal, "invalid_target", candidates)
-            return self._reuse(proposal, entity, candidates)
+            return self._reuse(proposal, entity, candidates, reason_code="semantic_reuse")
         if decision.action == "create":
             if decision.target_entity_id is not None:
                 return self._ambiguous(proposal, "invalid_decision", candidates)

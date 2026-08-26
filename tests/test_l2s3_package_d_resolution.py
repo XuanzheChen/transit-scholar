@@ -27,8 +27,14 @@ def test_canonical_and_alias_exact_skip_semantic_and_decider(project_tmp_path, m
     calls = []
     monkeypatch.setattr(service, "search_entities", lambda *args, **kwargs: calls.append(args))
     resolver = EntityResolver(service.context, service, lambda *_: calls.append("decider"))
-    assert resolver.resolve(_proposal()).entity.entity_id == entity.entity_id
-    assert resolver.resolve(_proposal("sp")).entity.entity_id == entity.entity_id
+    canonical_result = resolver.resolve(_proposal())
+    alias_result = resolver.resolve(_proposal("sp"))
+    assert canonical_result.entity.entity_id == entity.entity_id
+    assert alias_result.entity.entity_id == entity.entity_id
+    assert canonical_result.reason_code == "exact_match"
+    assert alias_result.reason_code == "exact_match"
+    assert canonical_result.reason_code != "semantic_reuse"
+    assert alias_result.reason_code != "semantic_reuse"
     assert calls == []
 
 
@@ -52,4 +58,5 @@ def test_semantic_reuse_is_candidate_bound_and_deterministic(project_tmp_path):
     resolver = EntityResolver(service.context, service, lambda proposal, candidates: (seen.append(candidates), {"action": "reuse", "reason": "same", "target_entity_id": first.entity_id, "confidence": 1})[1], top_k=2)
     result = resolver.resolve(_proposal("Related"))
     assert result.decision == "reuse" and result.entity.entity_id == first.entity_id
+    assert result.reason_code == "semantic_reuse"
     assert len(seen) == 1 and [item.entity_id for item in result.candidates] == sorted(item.entity_id for item in result.candidates)

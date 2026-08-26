@@ -56,10 +56,24 @@ from .resolution import (
     EntityResolver,
     ResolutionDecisionProvider,
 )
+from .providers import (
+    EntityProposalLLMAdapter,
+    EntityProposalLLMOutput,
+    EntityResolutionDecisionLLMAdapter,
+    WikiProductionComposition,
+    create_production_entity_proposal_provider,
+    create_production_resolution_decision_provider,
+    create_production_wiki_composition,
+    resolve_wiki_embedding_provider,
+)
 from .builder import (
     MAX_PROPOSALS, AuditTrace, BuildPhase, PageTrace, PaperWikiBuildResult,
     ProposalTrace, WorkspaceWikiBuildResult, build_wiki_for_paper,
     build_wiki_for_workspace,
+)
+from .application import (
+    WIKI_BUILDER_VERSION, WikiBuildInputError, WorkspaceWikiApplicationBuildResult,
+    WorkspaceWikiBuildInputs, WorkspaceWikiBuildService,
 )
 
 __all__ = [
@@ -80,7 +94,14 @@ __all__ = [
     "build_entity_proposal_prompt", "build_proposal_prompt", "generate_entity_proposals",
     "EntityResolutionCandidate", "EntityResolutionDecision", "EntityResolutionResult",
     "EntityResolver", "ResolutionDecisionProvider",
+    "EntityProposalLLMAdapter", "EntityProposalLLMOutput",
+    "EntityResolutionDecisionLLMAdapter", "WikiProductionComposition",
+    "create_production_entity_proposal_provider",
+    "create_production_resolution_decision_provider",
+    "create_production_wiki_composition", "resolve_wiki_embedding_provider",
     "MAX_PROPOSALS", "BuildPhase", "ProposalTrace", "AuditTrace", "PageTrace",
     "PaperWikiBuildResult", "WorkspaceWikiBuildResult", "build_wiki_for_paper",
     "build_wiki_for_workspace",
+    "WIKI_BUILDER_VERSION", "WikiBuildInputError", "WorkspaceWikiApplicationBuildResult",
+    "WorkspaceWikiBuildInputs", "WorkspaceWikiBuildService",
 ]

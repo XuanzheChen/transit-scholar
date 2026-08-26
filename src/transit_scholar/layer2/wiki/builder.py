@@ -94,11 +94,11 @@ def _code(exc: Exception, fallback: str) -> str:
     return value if isinstance(value, str) and value and value.isidentifier() else fallback
 
 
-def _field_status(cards: tuple[FieldCard, ...], field_id: str) -> str:
+def _field_status(cards: tuple[FieldCard, ...], field_id: str) -> str | None:
     for card in cards:
         if card.field_id == field_id:
             return card.status
-    return "unknown"
+    return None
 
 
 def _summary(metadata: PaperMetadata, cards: tuple[FieldCard, ...]) -> str:
@@ -205,8 +205,18 @@ def build_wiki_for_paper(context: WorkspaceContext, definition: SchemaDefinition
         proposals = tuple(getattr(result, "proposals", ()) or ())
         omitted = max(0, len(proposals) - max_proposals)
         for proposal in proposals[:max_proposals]:
+            source_status = _field_status(cards, proposal.source_field_id)
+            if source_status is None:
+                traces.append(ProposalTrace(
+                    source_field_id=proposal.source_field_id,
+                    canonical_name=proposal.canonical_name,
+                    confidence=proposal.confidence,
+                    status="invalid",
+                    error_code="unknown_source_field_id",
+                ))
+                continue
             traces.append(ProposalTrace(source_field_id=proposal.source_field_id, canonical_name=proposal.canonical_name,
-                source_status=_field_status(cards, proposal.source_field_id), confidence=proposal.confidence, status="proposed"))
+                source_status=source_status, confidence=proposal.confidence, status="proposed"))
         phases.append(BuildPhase(name="proposal", status=proposal_status, error_code=getattr(result, "error_code", None)))
     except Exception:
         phases.append(BuildPhase(name="proposal", status="provider_failure", error_code="proposal_failure"))
@@ -214,21 +224,30 @@ def build_wiki_for_paper(context: WorkspaceContext, definition: SchemaDefinition
         proposals = ()
     if proposal_status == "success":
         for index, proposal in enumerate(proposals[:max_proposals]):
+            if traces[index].status == "invalid":
+                continue
+            link_attempted = False
             try:
                 resolved = resolver.resolve(proposal)
                 decision = getattr(resolved, "decision", getattr(resolved, "action", "ambiguous"))
                 entity = getattr(resolved, "entity", None)
                 trace = traces[index].model_copy(update={"resolution": decision, "resolution_reason": getattr(resolved, "reason_code", None)})
                 traces[index] = trace
-                if decision in {"reuse", "create"} and isinstance(entity, WikiEntity) and entity.workspace_id == context.workspace_id:
-                    link = service.link_page_entity(page.page_id, entity.entity_id, source_field_id=proposal.source_field_id, source_status=_field_status(cards, proposal.source_field_id), confidence=proposal.confidence)
-                    trace = trace.model_copy(update={"entity_id": entity.entity_id, "link_id": link.link_id})
-                traces[index] = trace
+                if decision not in {"reuse", "create"}:
+                    traces[index] = trace.model_copy(update={"status": "unresolved", "error_code": "resolution_not_accepted"})
+                    continue
+                if not isinstance(entity, WikiEntity) or entity.workspace_id != context.workspace_id:
+                    traces[index] = trace.model_copy(update={"status": "failed", "error_code": "invalid_resolved_entity"})
+                    continue
+                link_attempted = True
+                link = service.link_page_entity(page.page_id, entity.entity_id, source_field_id=proposal.source_field_id, source_status=traces[index].source_status, confidence=proposal.confidence)
+                traces[index] = trace.model_copy(update={"status": "linked", "entity_id": entity.entity_id, "link_id": link.link_id})
             except Exception as exc:
                 current = traces[index]
                 traces[index] = current.model_copy(update={
+                    "status": "failed",
                     "resolution_reason": _code(exc, "link_or_resolution_failure"),
-                    "error_code": "link_failure" if current.resolution in {"reuse", "create"} else "resolution_failure",
+                    "error_code": "link_failure" if link_attempted else "resolution_failure",
                 })
     audit = AuditTrace()
     try:
@@ -240,14 +259,17 @@ def build_wiki_for_paper(context: WorkspaceContext, definition: SchemaDefinition
     except Exception as exc:
         audit = AuditTrace(attempted=True, ok=False)
         phases.append(BuildPhase(name="audit", status="failed", error_code=_code(exc, "audit_failure")))
-    degraded = proposal_status != "success" or any(t.resolution not in {None, "reuse", "create"} or (t.resolution in {"reuse", "create"} and not t.link_id) for t in traces) or not audit.ok
-    status: Literal["complete", "incomplete", "failed"] = "incomplete" if degraded else "complete"
+    proposal_outcomes_ok = proposal_status in {"success", "success_empty"} and all(
+        trace.status == "linked" for trace in traces
+    )
+    phase_outcomes_ok = all(phase.status != "failed" for phase in phases)
+    status: Literal["complete", "incomplete", "failed"] = "complete" if proposal_outcomes_ok and phase_outcomes_ok and audit.ok else "incomplete"
     try:
         page = service.update_page_build_status(page.page_id, status)
     except Exception:
         status = "failed"
         phases.append(BuildPhase(name="build_status", status="failed", error_code="status_failure"))
-    return PaperWikiBuildResult(status=status, paper_id=paper_id, page=_page_trace(page, context, paper_id, status, page.summary if page else ""), phases=tuple(phases), proposals=tuple(traces), audit=audit, error_codes=tuple(sorted({p.error_code for p in phases if p.error_code})), omitted_proposals=omitted)
+    return PaperWikiBuildResult(status=status, paper_id=paper_id, page=_page_trace(page, context, paper_id, status, page.summary if page else ""), phases=tuple(phases), proposals=tuple(traces), audit=audit, error_codes=tuple(sorted({code for code in (*[p.error_code for p in phases], *[trace.error_code for trace in traces]) if code})), omitted_proposals=omitted)
 
 
 def build_wiki_for_workspace(context: WorkspaceContext, definition: SchemaDefinition, instances_by_paper: dict[str, SchemaInstance], metadata_by_paper: dict[str, PaperMetadata], service: Any, proposal_runner: Any, resolver: Any, *, max_proposals: int = MAX_PROPOSALS) -> WorkspaceWikiBuildResult:

@@ -1,7 +1,0 @@
-interface:
-  display_name: "Agentic SDLC"
-  short_description: "Run simplified P/G/E development workflows."
-  default_prompt: "Use $multi-agent-sdlc to start the simplified agentic SDLC workflow for this feature."
-
-policy:
-  allow_implicit_invocation: true

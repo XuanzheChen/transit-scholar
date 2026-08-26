@@ -6,7 +6,7 @@
 >
 > 对应计划：[20260821-L2S3Schema-guided-Base-Wiki开发计划.md](20260821-L2S3Schema-guided-Base-Wiki开发计划.md)
 >
-> 结论：L2S3 V1 已完成并正式冻结。此结论以离线确定性回归、持久化向量索引验证和真实 Provider 单篇 smoke 均通过为前提。
+> 结论：L2S3 V1 的实现、离线确定性回归和真实 Provider 单篇 smoke 均已通过，现正式冻结。
 
 ---
 
@@ -55,10 +55,11 @@ Wiki Page 与 Entity 向量均作为 Workspace-scoped、可重建的派生索引
 ```powershell
 $env:TRANSIT_SCHOLAR_BLOCK_NETWORK = 'true'
 $env:TRANSIT_SCHOLAR_RETRIEVAL_ALLOW_NETWORK = 'false'
-pytest -q tests/test_l2s3_*.py
+$testFiles = Get-ChildItem tests -Filter 'test_l2s3_*.py' | ForEach-Object { $_.FullName }
+.\.venv\Scripts\python.exe -m pytest -q $testFiles
 ```
 
-结果：`83 passed`。
+结果：`92 passed`（network-blocked deterministic L2S3 suite, as independently rerun for T-004）。
 
 该回归覆盖 Package A–F 及本 Contract 新增回归，保持离线、fake-provider 边界可运行。覆盖内容
 包括 Field Card/Link 可追溯性、失败不完整状态、`success_empty`、精确与语义复用区分、生产
@@ -67,18 +68,16 @@ ID、导航、审计、幂等性与隔离保证。
 
 ### 4.2 真实 Provider 单篇 smoke
 
-`temp/l2s3-smoke-result.json` 记录的 `l2s3_production_single_paper` smoke 成功：
+T-004 独立重试的 `l2s3_production_single_paper` smoke（证据：`temp/l2s3-direct-retry.json`）成功：
 
-- `success: true`，`build_status: complete`，最终审计没有问题；
-- 使用真实 LLM 客户端执行实体提议，真实 embedding Provider 构建持久化向量，并通过真实应用
-  组合、Store/Service/Builder 路径；生产 Resolver 已装配，但本次没有提议，因此没有发生 resolver
-  调用；
-- Page 创建、Manifest 写入和索引重建均通过；本次 `accepted_link_count: 0`，因此 Link
-  可追溯性检查以空集合通过，并未声称执行了具体 Link 的追溯验证。
-- 本次真实 Provider 返回零个提议（`proposal_count: 0`），因此 resolver 的“有提议时执行”检查
-  通过，且该 Paper 以 `success_empty` 语义完整完成，没有伪造 Entity 或 Link。
+- `success: true`，`build_status: complete`；
+- `real_llm_client: true`、`real_embedding_provider: true`，`persistent_vectors_built: true`；
+- 最终审计无阻断错误（`final_audit_no_blocking_error: true`）；
+- 生成并持久化 1 个 Page 向量、17 个 Entity 向量及 17 条可追溯 Link。
 
-此 smoke 不使用 Package F 的 `ProposalFake`、`DecisionFake` 或 `FakeEmbedding` 作为生产就绪证明。
+该结果满足 AC-016。生产完成的必要条件仍是针对最终 Wiki 状态构建有效、持久化且当前的
+vector index：必须覆盖所有 Page，且存在 Entity 时覆盖所有 Entity；缺少或无效的索引不得将
+生产 Wiki 标记为 `complete`。
 
 ### 4.3 验收脚本目录职责
 
@@ -97,9 +96,24 @@ L2S3 的既有核心实现、Package A–F 测试和 Package F fixture 已由 Gi
 
 ## 6. 冻结判定
 
-AC-001 至 AC-025 的验证输入已通过；AC-026 由本说明完成；AC-027 的全部前提均满足：Must
-requirements 对应验收通过、Page/Entity 持久化向量索引已验证、真实 Provider smoke 通过，且完整
-确定性回归为绿色。
+AC-015 已满足：禁网确定性 L2S3 回归为 `92 passed`。现有 Wiki 的 reload → Page/Entity
+mutation → index freshness detection → controlled rebuild 生命周期也由该回归覆盖；重建后
+semantic search 使用更新向量而不会静默使用 stale index。
 
-**L2S3 V1 正式冻结。** 后续修改应作为新的、单独评审的变更处理，并重新运行与其范围相称的
-离线回归和生产 smoke。
+AC-016 已满足：真实 Provider smoke 成功构建并验证了强制持久化 Page/Entity 向量索引，且最终
+审计无阻断错误。AC-015、AC-016 与本节记录的修复验收均已满足。
+
+**L2S3 V1 已正式冻结。**
+
+## 7. T-005 修复后冻结核对（2026-08-26）
+
+本节以 T-004 的验证输出为准：禁网确定性回归为 `92 passed`，真实 Provider 单篇 smoke 为
+`success=true`、`build_status=complete`、`persistent_vectors_built=true`，并确认真实 embedding
+Provider 生成了 1 个 Page 向量和 17 个 Entity 向量，最终审计无阻断错误且有 17 条可追溯 Link。
+
+生产完成要求最终 Wiki 状态具有有效、持久化且当前的 vector index（覆盖 Page，并在存在 Entity
+时覆盖 Entity）；缺少、陈旧、不兼容或生成失败时不得标记 `build_status=complete`。Wiki
+reload → Page/Entity mutation → stale 检测 → controlled rebuild 的 freshness lifecycle 已由
+确定性回归验证；重建后 semantic search 使用更新向量，不会静默使用 stale index。
+
+AC-015、AC-016、AC-017 均满足，L2S3 V1 正式冻结。

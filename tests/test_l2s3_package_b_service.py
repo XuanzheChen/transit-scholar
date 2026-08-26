@@ -48,6 +48,24 @@ def test_workspace_isolation_and_degraded_semantic_search(project_tmp_path):
     assert first.get_page(page.page_id).workspace_id == "one"
 
 
+def test_workspace_isolation_and_semantic_vector_retrieval(project_tmp_path):
+    first_context = WorkspaceContext(workspace_id="one", schema_id="schema", schema_version="1", paper_ids=["p1", "p2"])
+    second_context = first_context.model_copy(update={"workspace_id": "two"})
+    first = WikiService(first_context, WikiStore(first_context, project_tmp_path), _Embedding())
+    second = WikiService(second_context, WikiStore(second_context, project_tmp_path), _Embedding())
+    first_entity = first.create_entity("Signal Alpha", description="signal alpha")
+    second_entity = second.create_entity("Signal Beta", description="signal beta")
+    first.rebuild_indexes()
+    second.rebuild_indexes()
+
+    first_result = first.search_entities("signal", mode="semantic")
+    second_result = second.search_entities("signal", mode="semantic")
+
+    assert first_result.status == second_result.status == "ok"
+    assert {hit.object_id for hit in first_result.hits} == {first_entity.entity_id}
+    assert {hit.object_id for hit in second_result.hits} == {second_entity.entity_id}
+
+
 class _Embedding(EmbeddingProvider):
     available = True
     reason = None

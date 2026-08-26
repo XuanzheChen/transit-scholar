@@ -150,19 +150,33 @@ class WikiService:
 
     def _bootstrap_vector_index(self, *, force: bool = False) -> None:
         """Maintain legacy provider-backed services without hiding stale indexes."""
-        provider = self.embedding_provider
         index_path = self.store.index_path / "package_b_index.json"
-        if provider is None or not provider.available or not self.store.manifest_path.exists():
+        if not self.store.manifest_path.exists():
             return
+        existing: dict[str, object] | None = None
+        persisted_source: str | None = None
         if index_path.exists():
-            if not force:
-                return
             try:
-                existing = json.loads(index_path.read_text(encoding="utf-8"))
+                candidate = json.loads(index_path.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 return
-            if existing.get("source_fingerprint") != self._last_index_source:
+            if isinstance(candidate, dict):
+                existing = candidate
+                source = candidate.get("source_fingerprint")
+                if isinstance(source, str):
+                    persisted_source = source
+                    self._last_index_source = source
+                if candidate.get("index_version") != _INDEX_VERSION or any(
+                    not isinstance(candidate.get(key), list) for key in ("pages", "entities", "links")
+                ):
+                    return
+            if not force:
                 return
+        provider = self.embedding_provider
+        if provider is None or not provider.available:
+            return
+        if existing is not None and (persisted_source is None or persisted_source != self._last_index_source):
+            return
         try:
             self.rebuild_indexes()
             self._vector_build_error = None
@@ -614,8 +628,35 @@ class WikiService:
                     }
                     if any(payload[key] != expected[key] for key in expected):
                         issues.append(AuditIssue(code="index_corrupt", object_id="package_b_index.json", message="index projection differs from source"))
+                issues.extend(self._vector_audit_issues(payload, fingerprint, parsed["pages"], parsed["entities"]))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError): issues.append(AuditIssue(code="index_corrupt", object_id="package_b_index.json", message="index is invalid"))
         return issues, parsed, fingerprint
+
+    def _vector_audit_issues(self, payload: object, fingerprint: str, pages: list[object], entities: list[object]) -> list[AuditIssue]:
+        if not isinstance(payload, dict):
+            return [AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="vector index metadata is absent")]
+        provider = self.embedding_provider
+        if provider is None or not provider.available:
+            return [AuditIssue(code="embedding_unavailable", object_id="package_b_index.json", message="mandatory embedding provider is unavailable", severity="warning")]
+        metadata, vectors = payload.get("vector_metadata"), payload.get("vectors")
+        if not isinstance(metadata, dict) or not isinstance(vectors, list):
+            return [AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="mandatory vector metadata or vectors are absent")]
+        issues: list[AuditIssue] = []
+        if payload.get("source_fingerprint") != fingerprint:
+            issues.append(AuditIssue(code="vector_index_stale", object_id="package_b_index.json", message="vector source fingerprint is stale"))
+        dimension = provider.dimension(); info = provider.info
+        expected = {"dimension": dimension, "implementation": f"{type(provider).__module__}.{type(provider).__qualname__}"}
+        if info is not None:
+            expected.update({key: getattr(info, key) for key in ("provider", "model", "revision")})
+        if any(metadata.get(key) != value for key, value in expected.items()):
+            issues.append(AuditIssue(code="vector_index_incompatible", object_id="package_b_index.json", message="vector metadata is incompatible"))
+        by_id = {(item.get("kind"), item.get("object_id")): item.get("vector") for item in vectors if isinstance(item, dict)}
+        required = [("page", item.page_id) for item in pages] + [("entity", item.entity_id) for item in entities]
+        if any(key not in by_id for key in required):
+            issues.append(AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="required page or entity vectors are missing"))
+        if dimension is None or any(not isinstance(by_id.get(key), list) or len(by_id[key]) != dimension for key in required if key in by_id):
+            issues.append(AuditIssue(code="vector_index_incompatible", object_id="package_b_index.json", message="persisted vector dimensions are incompatible"))
+        return issues
 
     @staticmethod
     def _report(issues: list[AuditIssue], fingerprint: str, page_id: str | None = None) -> WikiAuditReport:

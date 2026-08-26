@@ -327,9 +327,10 @@ class WikiAuditReport(BaseModel):
 
 
 class IndexRebuildResult(BaseModel):
-    status: Literal["rebuilt"] = "rebuilt"
+    status: Literal["rebuilt", "failed"] = "rebuilt"
     source_fingerprint: str
     index_version: int
+    error_code: str | None = None
     rebuilt_at: datetime = Field(default_factory=utc_now)
 
 

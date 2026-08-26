@@ -14,6 +14,7 @@ from transit_scholar.metadata.service import read_paper_metadata
 from .builder import WorkspaceWikiBuildResult, build_wiki_for_workspace
 from .models import IndexRebuildResult, PaperMetadata, WikiAuditReport, WikiManifest, WorkspaceContext
 from .providers import WikiProductionComposition, create_production_wiki_composition
+from .service import WikiIndexError
 from .store import WikiStore
 
 WIKI_BUILDER_VERSION = "wiki-core-v1"
@@ -151,12 +152,24 @@ class WorkspaceWikiBuildService:
             builder_version=WIKI_BUILDER_VERSION,
             build_status=_manifest_build_status(build),
         ))
-        index = composition.service.rebuild_indexes()
-        audit = composition.service.audit_wiki()
-        if not audit.ok and manifest.build_status == "complete":
-            manifest = store.upsert_manifest(manifest.model_copy(update={"build_status": "partial"}))
+        try:
             index = composition.service.rebuild_indexes()
-            audit = composition.service.audit_wiki()
+        except WikiIndexError as error:
+            fingerprint = composition.service._source_fingerprint()
+            index = IndexRebuildResult(status="failed", source_fingerprint=fingerprint, index_version=0, error_code=error.code)
+        audit = composition.service.audit_wiki()
+        blocking_vector_issues = {
+            "embedding_unavailable",
+            "embedding_provider_failure",
+            "vector_index_missing",
+            "vector_index_stale",
+            "vector_index_incompatible",
+        }
+        has_blocking_vector_issue = any(issue.code in blocking_vector_issues for issue in audit.issues)
+        complete = _manifest_build_status(build) == "complete" and index.status == "rebuilt" and audit.ok and not has_blocking_vector_issue
+        finalized = manifest.model_copy(update={"build_status": "complete" if complete else "partial"})
+        if finalized.build_status != manifest.build_status:
+            manifest = store.upsert_manifest(finalized)
         return WorkspaceWikiApplicationBuildResult(
             build=build,
             manifest=manifest,

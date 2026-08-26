@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import transit_scholar.layer2.wiki.application as wiki_application
@@ -60,12 +62,12 @@ def _metadata(paper_id: str):
     return PaperMetadata(paper_id=paper_id, title=f"Paper {paper_id}", authors=["Author"], year=2024)
 
 
-def _service(project_tmp_path, instances, metadata, *, composition_calls=None):
+def _service(project_tmp_path, instances, metadata, *, composition_calls=None, embedding_provider=None, llm_client=None):
     def composition(context, store):
         if composition_calls is not None:
             composition_calls.append(context.workspace_id)
         return create_production_wiki_composition(
-            context, store, llm_client=_Client(), embedding_provider=_Embedding()
+            context, store, llm_client=llm_client or _Client(), embedding_provider=embedding_provider or _Embedding()
         )
 
     return WorkspaceWikiBuildService(
@@ -75,6 +77,35 @@ def _service(project_tmp_path, instances, metadata, *, composition_calls=None):
         composition_factory=composition,
         wiki_storage_root=project_tmp_path,
     )
+
+
+class _UnavailableEmbedding(_Embedding):
+    available = False
+
+
+class _FailingEmbedding(_Embedding):
+    def embed_documents(self, texts):
+        raise RuntimeError("provider failed")
+
+
+class _WrongCountEmbedding(_Embedding):
+    def embed_documents(self, texts):
+        return []
+
+
+class _WrongDimensionEmbedding(_Embedding):
+    def embed_documents(self, texts):
+        return [[1.0] for _ in texts]
+
+
+class _EntityClient(_Client):
+    def generate_structured(self, messages, output_schema, metadata=None):
+        return output_schema.model_validate({"proposals": [{
+            "canonical_name": "Signal",
+            "description": "A measured signal",
+            "source_field_id": "name",
+            "confidence": 0.9,
+        }]})
 
 
 def test_application_service_loads_authoritative_inputs_and_finalizes_build(project_tmp_path):
@@ -173,6 +204,87 @@ def test_application_service_rejects_missing_and_foreign_papers_before_compositi
 
     assert mismatch.value.code == "paper_mismatch"
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("provider", "error_code"),
+    [
+        (_UnavailableEmbedding(), "embedding_unavailable"),
+        (_FailingEmbedding(), "embedding_provider_failure"),
+        (_WrongCountEmbedding(), "embedding_provider_failure"),
+        (_WrongDimensionEmbedding(), "embedding_provider_failure"),
+    ],
+)
+def test_production_finalization_blocks_mandatory_vector_failures(project_tmp_path, provider, error_code):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    service = _service(project_tmp_path, {"p1": _instance("p1")}, {"p1": _metadata("p1")}, embedding_provider=provider)
+
+    result = service.build_wiki_for_workspace(context)
+
+    assert result.manifest.build_status != "complete"
+    if error_code == "embedding_unavailable":
+        assert result.index.status == "rebuilt"
+        assert any(issue.code == error_code for issue in result.audit.issues)
+    else:
+        assert result.index.error_code == error_code
+    persisted = json.loads((project_tmp_path / context.workspace_id / "wiki" / "manifest.json").read_text())
+    assert persisted["build_status"] != "complete"
+
+
+def test_vector_audit_reports_missing_stale_and_incompatible_state(project_tmp_path):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    application = _service(project_tmp_path, {"p1": _instance("p1")}, {"p1": _metadata("p1")})
+    application.build_wiki_for_workspace(context)
+    store = WikiStore(context, project_tmp_path)
+    wiki = WikiService(context, store, _Embedding())
+    index = store.index_path / "package_b_index.json"
+    payload = json.loads(index.read_text())
+
+    payload.pop("vector_metadata")
+    index.write_text(json.dumps(payload))
+    assert any(issue.code == "vector_index_missing" for issue in wiki.audit_wiki().issues)
+
+    payload = json.loads(index.read_text())
+    payload["vector_metadata"] = {"provider": "wrong", "model": "wrong", "revision": "wrong", "dimension": 99, "implementation": "wrong"}
+    payload["source_fingerprint"] = "stale"
+    index.write_text(json.dumps(payload))
+    codes = {issue.code for issue in wiki.audit_wiki().issues}
+    assert {"vector_index_stale", "vector_index_incompatible"}.issubset(codes)
+
+
+def test_valid_vector_audit_requires_full_page_and_entity_coverage(project_tmp_path):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    store = WikiStore(context, project_tmp_path)
+    wiki = WikiService(context, store, _Embedding())
+    page = wiki.ensure_paper_page(_metadata("p1"))
+    entity = wiki.create_entity("Signal", description="A measured signal")
+    wiki.link_page_entity(page, entity, source_field_id="name", source_status="explicit")
+    wiki.rebuild_indexes()
+
+    assert not {"vector_index_missing", "vector_index_stale", "vector_index_incompatible"}.intersection(
+        issue.code for issue in wiki.audit_wiki().issues
+    )
+    payload = json.loads((store.index_path / "package_b_index.json").read_text())
+    assert {(item["kind"], item["object_id"]) for item in payload["vectors"]} == {
+        ("page", page.page_id), ("entity", entity.entity_id)
+    }
+    payload["vectors"] = [item for item in payload["vectors"] if item["kind"] != "entity"]
+    (store.index_path / "package_b_index.json").write_text(json.dumps(payload))
+    assert any(issue.code == "vector_index_missing" for issue in wiki.audit_wiki().issues)
+
+
+def test_production_complete_manifest_has_page_and_entity_vectors(project_tmp_path):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    application = _service(
+        project_tmp_path, {"p1": _instance("p1")}, {"p1": _metadata("p1")}, llm_client=_EntityClient()
+    )
+
+    result = application.build_wiki_for_workspace(context)
+
+    assert result.manifest.build_status == "complete"
+    payload = json.loads((project_tmp_path / context.workspace_id / "wiki" / "index" / "package_b_index.json").read_text())
+    assert {item["kind"] for item in payload["vectors"]} == {"page", "entity"}
+    assert len(payload["vectors"]) == 2
 
 
 def test_application_service_keeps_workspace_builds_isolated(project_tmp_path):

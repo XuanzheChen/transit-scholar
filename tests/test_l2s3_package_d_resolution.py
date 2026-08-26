@@ -60,3 +60,41 @@ def test_semantic_reuse_is_candidate_bound_and_deterministic(project_tmp_path):
     assert result.decision == "reuse" and result.entity.entity_id == first.entity_id
     assert result.reason_code == "semantic_reuse"
     assert len(seen) == 1 and [item.entity_id for item in result.candidates] == sorted(item.entity_id for item in result.candidates)
+
+
+def test_reloaded_index_becomes_stale_after_mutation_then_supports_resolution_after_rebuild(project_tmp_path):
+    initial = _service(project_tmp_path)
+    page = initial.ensure_paper_page({"paper_id": "p1", "title": "Signal study"})
+    entity = initial.create_entity("Existing Signal")
+    initial.rebuild_indexes()
+
+    reloaded = _service(project_tmp_path)
+    assert reloaded.search_entities("new signal", mode="semantic").status == "ok"
+    reloaded.update_page_summary(page.page_id, "Updated signal controls")
+    reloaded.update_entity(entity.entity_id, description="updated control method")
+    assert reloaded.search_entities("new signal", mode="semantic").status == "ok"
+    resolver = EntityResolver(
+        reloaded.context,
+        reloaded,
+        lambda proposal, candidates: {
+            "action": "reuse", "reason": "semantic candidate", "target_entity_id": candidates[0].entity_id,
+            "confidence": 1,
+        },
+    )
+    result = resolver.resolve(_proposal("Novel Signal Concept"))
+    assert result.decision == "reuse" and result.reason_code == "semantic_reuse"
+    assert result.entity is not None and result.entity.entity_id == entity.entity_id
+
+    reloaded.store.update_page(
+        reloaded.get_page(page.page_id).model_copy(
+            update={"summary": "Externally updated controls", "build_revision": 2}
+        )
+    )
+    reloaded.store.update_entity(
+        reloaded.get_entity(entity.entity_id).model_copy(update={"description": "externally updated method"})
+    )
+    stale = reloaded.search_entities("new signal", mode="semantic")
+    assert stale.status == "degraded" and stale.error_code == "vector_index_stale"
+
+    reloaded.rebuild_indexes()
+    assert reloaded.search_entities("new signal", mode="semantic").status == "ok"

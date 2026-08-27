@@ -71,6 +71,23 @@ def _manifest_build_status(build: WorkspaceWikiBuildResult) -> str:
     return "partial"
 
 
+def _final_manifest_build_status(
+    workspace_manifest_status: str,
+    *,
+    index_status: str,
+    audit_ok: bool,
+    has_blocking_vector_issue: bool,
+) -> str:
+    """Select the final status while preserving Workspace build semantics."""
+    if workspace_manifest_status == "failed":
+        return "failed"
+    if workspace_manifest_status != "complete":
+        return "partial"
+    if index_status == "rebuilt" and audit_ok and not has_blocking_vector_issue:
+        return "complete"
+    return "partial"
+
+
 def _load_current_schema_instance(paper_id: str, schema_id: str) -> SchemaInstance:
     return get_schema(paper_id, schema_id)
 
@@ -152,24 +169,26 @@ class WorkspaceWikiBuildService:
             builder_version=WIKI_BUILDER_VERSION,
             build_status=_manifest_build_status(build),
         ))
-        try:
-            index = composition.service.rebuild_indexes()
-        except WikiIndexError as error:
-            fingerprint = composition.service._source_fingerprint()
-            index = IndexRebuildResult(status="failed", source_fingerprint=fingerprint, index_version=0, error_code=error.code)
-        audit = composition.service.audit_wiki()
-        blocking_vector_issues = {
-            "embedding_unavailable",
-            "embedding_provider_failure",
-            "vector_index_missing",
-            "vector_index_stale",
-            "vector_index_incompatible",
-        }
+        def finalize_artifacts() -> tuple[IndexRebuildResult, WikiAuditReport]:
+            try:
+                index_result = composition.service.rebuild_indexes()
+            except WikiIndexError as error:
+                fingerprint = composition.service._source_fingerprint()
+                index_result = IndexRebuildResult(status="failed", source_fingerprint=fingerprint, index_version=0, error_code=error.code)
+            return index_result, composition.service.audit_wiki()
+
+        index, audit = finalize_artifacts()
+        blocking_vector_issues = {"embedding_unavailable", "embedding_provider_failure", "vector_index_missing", "vector_index_stale", "vector_index_incompatible"}
         has_blocking_vector_issue = any(issue.code in blocking_vector_issues for issue in audit.issues)
-        complete = _manifest_build_status(build) == "complete" and index.status == "rebuilt" and audit.ok and not has_blocking_vector_issue
-        finalized = manifest.model_copy(update={"build_status": "complete" if complete else "partial"})
-        if finalized.build_status != manifest.build_status:
-            manifest = store.upsert_manifest(finalized)
+        final_status = _final_manifest_build_status(
+            manifest.build_status,
+            index_status=index.status,
+            audit_ok=audit.ok,
+            has_blocking_vector_issue=has_blocking_vector_issue,
+        )
+        if final_status != manifest.build_status:
+            manifest = store.upsert_manifest(manifest.model_copy(update={"build_status": final_status}))
+            index, audit = finalize_artifacts()
         return WorkspaceWikiApplicationBuildResult(
             build=build,
             manifest=manifest,

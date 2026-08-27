@@ -501,6 +501,7 @@ class WikiService:
         provider = self.embedding_provider
         vectors: list[dict[str, object]] = []
         metadata: dict[str, object] | None = None
+        embedding_error: WikiIndexError | None = None
         if provider is not None and provider.available:
             texts = [f"{page.title} {page.summary}" for page in self._pages]
             texts += [" ".join([entity.canonical_name, *entity.aliases, entity.description]) for entity in self._entities]
@@ -518,8 +519,8 @@ class WikiService:
                 vectors += [{"kind": "entity", "object_id": entity.entity_id, "vector": vector} for entity, vector in zip(self._entities, embedded[offset:], strict=True)]
             except UnavailableError:
                 metadata = None
-            except Exception as error:
-                raise WikiIndexError("embedding_provider_failure", "vector index could not be built") from error
+            except Exception:
+                embedding_error = WikiIndexError("embedding_provider_failure", "vector index could not be built")
         payload["vector_metadata"] = metadata
         payload["vectors"] = vectors
         target = self.store.index_path / "package_b_index.json"
@@ -535,6 +536,8 @@ class WikiService:
                 pass
             raise WikiIndexError("index_write_failed", "derived index could not be written") from error
         self._last_index_source = fingerprint
+        if embedding_error is not None:
+            raise embedding_error
         return IndexRebuildResult(source_fingerprint=fingerprint, index_version=_INDEX_VERSION)
 
     def _audit_raw(self) -> tuple[list[AuditIssue], dict[str, list[object]], str]:
@@ -613,7 +616,9 @@ class WikiService:
         for entity in entities.values():
             if entity.entity_id not in linked: issues.append(AuditIssue(code="orphan_entity", object_id=entity.entity_id, message="entity has no links", severity="warning"))
         index = self.store.index_path / "package_b_index.json"
-        if not index.exists(): issues.append(AuditIssue(code="index_missing", object_id="package_b_index.json", message="derived index is absent", severity="warning"))
+        if not index.exists():
+            issues.append(AuditIssue(code="index_missing", object_id="package_b_index.json", message="derived index is absent", severity="warning"))
+            issues.append(AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="mandatory vector index is absent"))
         else:
             try:
                 payload = json.loads(index.read_bytes().decode("utf-8"))
@@ -635,11 +640,15 @@ class WikiService:
     def _vector_audit_issues(self, payload: object, fingerprint: str, pages: list[object], entities: list[object]) -> list[AuditIssue]:
         if not isinstance(payload, dict):
             return [AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="vector index metadata is absent")]
+        metadata, vectors = payload.get("vector_metadata"), payload.get("vectors")
+        missing_vectors = not isinstance(metadata, dict) or not isinstance(vectors, list)
         provider = self.embedding_provider
         if provider is None or not provider.available:
-            return [AuditIssue(code="embedding_unavailable", object_id="package_b_index.json", message="mandatory embedding provider is unavailable", severity="warning")]
-        metadata, vectors = payload.get("vector_metadata"), payload.get("vectors")
-        if not isinstance(metadata, dict) or not isinstance(vectors, list):
+            issues = [AuditIssue(code="embedding_unavailable", object_id="package_b_index.json", message="mandatory embedding provider is unavailable", severity="warning")]
+            if missing_vectors:
+                issues.append(AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="mandatory vector metadata or vectors are absent"))
+            return issues
+        if missing_vectors:
             return [AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="mandatory vector metadata or vectors are absent")]
         issues: list[AuditIssue] = []
         if payload.get("source_fingerprint") != fingerprint:
@@ -677,6 +686,13 @@ class WikiService:
         object_ids.update(link.link_id for link in links)
         object_ids.update(link.entity_id for link in links)
         relevant = [issue for issue in issues if issue.object_id in object_ids]
+        if not (self.store.index_path / "package_b_index.json").exists():
+            relevant = [
+                issue.model_copy(update={"severity": "warning"})
+                if issue.code == "vector_index_missing"
+                else issue
+                for issue in relevant
+            ]
         return self._report(relevant, fingerprint, page_id)
 
 

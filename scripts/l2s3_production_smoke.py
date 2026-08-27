@@ -174,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
                 "schema_version": context.schema_version,
                 "build_status": result.build.status,
                 "proposal_count": len(proposal_traces),
+                "proposal_phase_status": (
+                    proposal_phase.status if proposal_phase is not None else None
+                ),
                 "accepted_link_count": len(accepted),
                 "audit_issue_codes": sorted({issue.code for issue in result.audit.issues}),
             },

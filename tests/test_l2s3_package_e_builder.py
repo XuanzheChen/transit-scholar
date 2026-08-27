@@ -129,6 +129,38 @@ def test_unknown_source_field_is_rejected_before_wiki_mutation(project_tmp_path)
     assert store.list_links() == []
 
 
+def test_unknown_source_field_does_not_block_valid_linked_proposals(project_tmp_path):
+    context, definition, instance, metadata = _inputs()
+    store = WikiStore(context, project_tmp_path)
+    service = WikiService(context, store)
+    entity = service.create_entity("Signal")
+
+    class _ReuseResolver(_Resolver):
+        def resolve(self, proposal):
+            self.calls.append(proposal.canonical_name)
+            return EntityResolutionResult(
+                decision="reuse", reason_code="exact_match", entity=entity, proposal=proposal
+            )
+
+    runner = EntityProposalRunner(lambda _: {"proposals": [
+        {
+            "canonical_name": "Unknown", "description": "ignored",
+            "source_field_id": "not-a-real-field", "confidence": 0.9,
+        },
+        {
+            "canonical_name": "Signal", "description": "proposal",
+            "source_field_id": "name", "confidence": 0.9,
+        },
+    ]})
+
+    result = build_wiki_for_paper(context, definition, instance, metadata, service, runner, _ReuseResolver(context))
+
+    assert result.status == "complete"
+    assert any(trace.error_code == "unknown_source_field_id" for trace in result.proposals)
+    assert any(trace.status == "linked" for trace in result.proposals)
+    assert len(store.list_links()) == 1
+
+
 def test_valid_source_field_persists_field_card_status(project_tmp_path):
     context, definition, instance, metadata = _inputs()
     store = WikiStore(context, project_tmp_path)

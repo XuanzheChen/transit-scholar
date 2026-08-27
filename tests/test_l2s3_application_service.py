@@ -10,6 +10,7 @@ from transit_scholar.layer2.wiki.builder import PageTrace, PaperWikiBuildResult,
 from transit_scholar.layer2.retrieval.providers import EmbeddingProvider, ProviderInfo
 from transit_scholar.layer2.schema_extraction import FieldDefinition, FieldResult, SchemaDefinition, SchemaInstance, SectionDefinition
 from transit_scholar.layer2.wiki import (
+    AuditIssue,
     PaperMetadata,
     WikiBuildInputError,
     WikiService,
@@ -155,6 +156,80 @@ def test_application_service_finalization_order(project_tmp_path):
     assert events[-3:] == ["manifest", "index", "audit"]
 
 
+def test_finalization_refreshes_index_and_audit_after_manifest_status_change(project_tmp_path):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    calls = {"audit": 0}
+
+    def composition(context, store):
+        composed = create_production_wiki_composition(context, store, llm_client=_Client(), embedding_provider=_Embedding())
+        audit = composed.service.audit_wiki
+
+        def audit_once_with_blocking_issue():
+            calls["audit"] += 1
+            report = audit()
+            if calls["audit"] == 1:
+                return report.model_copy(update={"ok": False, "issues": [AuditIssue(code="vector_index_missing", object_id="package_b_index.json", message="forced") ]})
+            return report
+
+        composed.service.audit_wiki = audit_once_with_blocking_issue
+        return composed
+
+    service = WorkspaceWikiBuildService(
+        schema_definition_loader=lambda _: _definition(),
+        schema_instance_loader=lambda paper_id, _: _instance(paper_id),
+        paper_metadata_loader=lambda paper_id: _metadata(paper_id),
+        composition_factory=composition,
+        wiki_storage_root=project_tmp_path,
+    )
+    result = service.build_wiki_for_workspace(context)
+    persisted = json.loads((project_tmp_path / context.workspace_id / "wiki" / "index" / "package_b_index.json").read_text())
+    assert result.manifest.build_status == "partial"
+    assert calls["audit"] == 2
+    assert result.index.source_fingerprint == persisted["source_fingerprint"] == result.audit.source_fingerprint
+    assert result.index.source_fingerprint == WikiStore(context, project_tmp_path)._source_fingerprint()
+
+
+def test_finalization_preserves_failed_workspace_manifest_status(project_tmp_path, monkeypatch):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    failed = WorkspaceWikiBuildResult(
+        status="failed", workspace_id=context.workspace_id, schema_id=context.schema_id,
+        schema_version=context.schema_version, papers=[], complete_count=0, incomplete_count=0, failed_count=1,
+    )
+    monkeypatch.setattr(wiki_application, "build_wiki_for_workspace", lambda *args, **kwargs: failed)
+    result = _service(project_tmp_path, {"p1": _instance("p1")}, {"p1": _metadata("p1")}).build_wiki_for_workspace(context)
+    assert result.manifest.build_status == "failed"
+
+
+def test_finalization_preserves_partial_workspace_manifest_status(project_tmp_path, monkeypatch):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    partial = WorkspaceWikiBuildResult(
+        status="partial", workspace_id=context.workspace_id, schema_id=context.schema_id,
+        schema_version=context.schema_version, papers=[], complete_count=0, incomplete_count=1, failed_count=0,
+    )
+    monkeypatch.setattr(wiki_application, "build_wiki_for_workspace", lambda *args, **kwargs: partial)
+    result = _service(project_tmp_path, {"p1": _instance("p1")}, {"p1": _metadata("p1")}).build_wiki_for_workspace(context)
+    assert result.manifest.build_status == "partial"
+
+
+def test_complete_workspace_with_finalization_failure_is_partial(project_tmp_path):
+    context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    complete = PaperWikiBuildResult(
+        status="complete", paper_id="p1",
+        page=PageTrace(paper_id="p1", schema_id="schema", schema_version="1", build_status="complete"),
+    )
+    build = WorkspaceWikiBuildResult(
+        status="complete", workspace_id=context.workspace_id, schema_id=context.schema_id,
+        schema_version=context.schema_version, papers=(complete,), complete_count=1, incomplete_count=0, failed_count=0,
+    )
+    store = WikiStore(context, project_tmp_path)
+    composition = create_production_wiki_composition(context, store, llm_client=_Client(), embedding_provider=_Embedding())
+    composition.service.rebuild_indexes = lambda: (_ for _ in ()).throw(wiki_application.WikiIndexError("embedding_provider_failure", "forced"))
+
+    result = WorkspaceWikiBuildService._finalize_build(context, build, store, composition)
+    assert result.build.status == "complete"
+    assert result.manifest.build_status == "partial"
+
+
 def test_application_service_mixed_papers_never_persists_complete_manifest(project_tmp_path, monkeypatch):
     context = WorkspaceContext(workspace_id="workspace", schema_id="schema", schema_version="1", paper_ids=["p1", "p2"])
     complete = PaperWikiBuildResult(
@@ -242,7 +317,9 @@ def test_vector_audit_reports_missing_stale_and_incompatible_state(project_tmp_p
 
     payload.pop("vector_metadata")
     index.write_text(json.dumps(payload))
-    assert any(issue.code == "vector_index_missing" for issue in wiki.audit_wiki().issues)
+    report = wiki.audit_wiki()
+    assert not report.ok
+    assert any(issue.code == "vector_index_missing" for issue in report.issues)
 
     payload = json.loads(index.read_text())
     payload["vector_metadata"] = {"provider": "wrong", "model": "wrong", "revision": "wrong", "dimension": 99, "implementation": "wrong"}
@@ -261,16 +338,28 @@ def test_valid_vector_audit_requires_full_page_and_entity_coverage(project_tmp_p
     wiki.link_page_entity(page, entity, source_field_id="name", source_status="explicit")
     wiki.rebuild_indexes()
 
+    report = wiki.audit_wiki()
+    assert report.ok
     assert not {"vector_index_missing", "vector_index_stale", "vector_index_incompatible"}.intersection(
-        issue.code for issue in wiki.audit_wiki().issues
+        issue.code for issue in report.issues
     )
     payload = json.loads((store.index_path / "package_b_index.json").read_text())
     assert {(item["kind"], item["object_id"]) for item in payload["vectors"]} == {
         ("page", page.page_id), ("entity", entity.entity_id)
     }
+    payload["vectors"] = [item for item in payload["vectors"] if item["kind"] != "page"]
+    (store.index_path / "package_b_index.json").write_text(json.dumps(payload))
+    report = wiki.audit_wiki()
+    assert not report.ok
+    assert any(issue.code == "vector_index_missing" for issue in report.issues)
+
+    wiki.rebuild_indexes()
+    payload = json.loads((store.index_path / "package_b_index.json").read_text())
     payload["vectors"] = [item for item in payload["vectors"] if item["kind"] != "entity"]
     (store.index_path / "package_b_index.json").write_text(json.dumps(payload))
-    assert any(issue.code == "vector_index_missing" for issue in wiki.audit_wiki().issues)
+    report = wiki.audit_wiki()
+    assert not report.ok
+    assert any(issue.code == "vector_index_missing" for issue in report.issues)
 
 
 def test_production_complete_manifest_has_page_and_entity_vectors(project_tmp_path):

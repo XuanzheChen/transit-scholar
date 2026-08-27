@@ -259,8 +259,11 @@ def build_wiki_for_paper(context: WorkspaceContext, definition: SchemaDefinition
     except Exception as exc:
         audit = AuditTrace(attempted=True, ok=False)
         phases.append(BuildPhase(name="audit", status="failed", error_code=_code(exc, "audit_failure")))
-    proposal_outcomes_ok = proposal_status in {"success", "success_empty"} and all(
-        trace.status == "linked" for trace in traces
+    eligible_traces = [trace for trace in traces if trace.status != "invalid"]
+    proposal_outcomes_ok = proposal_status == "success_empty" or (
+        proposal_status == "success"
+        and bool(eligible_traces)
+        and all(trace.status == "linked" for trace in eligible_traces)
     )
     phase_outcomes_ok = all(phase.status != "failed" for phase in phases)
     status: Literal["complete", "incomplete", "failed"] = "complete" if proposal_outcomes_ok and phase_outcomes_ok and audit.ok else "incomplete"

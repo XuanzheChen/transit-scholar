@@ -48,6 +48,16 @@ def test_workspace_isolation_and_degraded_semantic_search(project_tmp_path):
     assert first.get_page(page.page_id).workspace_id == "one"
 
 
+def test_missing_index_file_is_blocking_vector_audit(project_tmp_path):
+    service = _service(project_tmp_path)
+    service.ensure_paper_page(PaperMetadata(paper_id="p1", title="Signal study"))
+    service.rebuild_indexes()
+    service.store.index_path.joinpath("package_b_index.json").unlink()
+    report = service.audit_wiki()
+    assert not report.ok
+    assert any(issue.code == "vector_index_missing" and issue.severity == "error" for issue in report.issues)
+
+
 def test_workspace_isolation_and_semantic_vector_retrieval(project_tmp_path):
     first_context = WorkspaceContext(workspace_id="one", schema_id="schema", schema_version="1", paper_ids=["p1", "p2"])
     second_context = first_context.model_copy(update={"workspace_id": "two"})

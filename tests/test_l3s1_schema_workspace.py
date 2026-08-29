@@ -19,6 +19,20 @@ Proves:
   existence, surfacing the stable ``schema_binding_mismatch`` code;
 - AC-015: compatible runs keep working through every read surface.
 
+Also proves the governed current-run build snapshot (T-001 / REQ-001):
+
+- AC-001: ``capture_current_run`` returns the exact SchemaInstance AND the
+  exact run identity (run_id / schema_id / schema_version / schema_hash /
+  status) from ONE validated current persisted run — ``snapshot.instance``
+  and ``snapshot.run_id`` always refer to the same run, and a concurrent
+  ``current.json`` switch to a valid run B after capture cannot change the
+  captured snapshot A (AC-003 isolation at capture level);
+- AC-002: ``capture_current_runs`` supplies instances and identities from the
+  same captured snapshot collection in deterministic Paper order — no second
+  current-run resolution is needed for identity;
+- AC-009: binding-mismatch / missing / corrupt capture keeps failing with the
+  exact stable codes of every other governed read surface.
+
 All extraction runs are fully offline (fake LLM provider, offline retrieval).
 """
 
@@ -29,6 +43,7 @@ import json
 import shutil
 
 import pytest
+from pydantic import ValidationError
 
 from transit_scholar.db.models import Paper
 from transit_scholar.layer2.schema_extraction import (
@@ -46,6 +61,7 @@ from transit_scholar.layer3.schema import (
     SchemaBindingMismatchError,
     SchemaDisabledError,
     SchemaMissingError,
+    ValidatedCurrentSchemaRun,
     WorkspaceSchemaService,
 )
 from transit_scholar.layer3.storage import workspace_layout
@@ -597,3 +613,264 @@ def test_compatible_run_supports_every_read_surface(session, project_tmp_path):
     readiness = schema.paper_schema_readiness(ws.workspace_id, [paper.id])
     assert readiness[paper.id].status == "ready"
     assert readiness[paper.id].error_code is None
+
+
+# ---------------------------------------------------------------------------
+# T-001 / REQ-001: governed current-run build snapshot (AC-001 / AC-002)
+# ---------------------------------------------------------------------------
+
+
+def test_capture_current_run_returns_instance_and_identity_of_same_run(
+    session, project_tmp_path
+):
+    """AC-001: for current run A, the governed snapshot returns SchemaInstance
+    A and identity A from the SAME persisted run — instance, run_id and the
+    identity triple all resolve to one captured run (REQ-001)."""
+    paper_id, workspace_id, layout, schema = _materialized_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-snap-ok"
+    )
+    storage = layout.schema_storage()
+    pointer = storage.read_current(paper_id)
+    binding = WorkspaceService(session).get(workspace_id).schema_binding
+    assert binding is not None
+
+    snapshot = schema.capture_current_run(workspace_id, paper_id)
+
+    assert isinstance(snapshot, ValidatedCurrentSchemaRun)
+    assert snapshot.paper_id == paper_id
+    # The snapshot's run_id IS the captured pointer's run A.
+    assert snapshot.run_id == pointer.run_id
+    # The snapshot's instance IS run A's persisted instance — the same run
+    # the identity refers to (AC-001 / Required Verification).
+    stored_a = storage.read_run(paper_id, pointer.run_id)
+    assert snapshot.instance == stored_a.instance
+    assert snapshot.instance == get_schema(
+        paper_id, binding.schema_id, run_id=snapshot.run_id, storage=storage
+    )
+    assert snapshot.instance == schema.get_instance(workspace_id, paper_id)
+    # The identity triple is the captured persisted run's triple (validated
+    # against the same immutable Workspace binding as the pointer).
+    assert snapshot.schema_id == stored_a.run_manifest.schema_id == binding.schema_id
+    assert (
+        snapshot.schema_version
+        == stored_a.run_manifest.schema_version
+        == binding.schema_version
+    )
+    assert snapshot.schema_hash == stored_a.run_manifest.schema_hash == binding.schema_hash
+    # The current run status is the captured pointer's status.
+    assert snapshot.status == pointer.status
+    # The provenance/fingerprint identity derives from this same snapshot.
+    assert snapshot.identity == {
+        "run_id": pointer.run_id,
+        "schema_hash": pointer.schema_hash,
+        "status": pointer.status,
+    }
+
+
+def test_capture_current_runs_bulk_deterministic_order(session, project_tmp_path):
+    """AC-002: the bulk capture derives instance AND identity from the same
+    snapshot collection in deterministic sorted Paper order; an explicit
+    paper subset captures exactly those Papers."""
+    paper_one = add_paper(session, paper_id="za", title="Capture Z")
+    paper_two = add_paper(session, paper_id="am", title="Capture A")
+    ws = create_bound_workspace(session, workspace_id="ws-snap-bulk")
+    service = WorkspaceService(session)
+    service.add_paper(ws.workspace_id, paper_one.id)
+    service.add_paper(ws.workspace_id, paper_two.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper_one.id, llm_client=FakeLLMProvider())
+    schema.materialize(ws.workspace_id, paper_two.id, llm_client=FakeLLMProvider())
+
+    # Bulk capture over every member: deterministic sorted order.
+    captured = schema.capture_current_runs(ws.workspace_id)
+    assert list(captured) == ["am", "za"]
+    assert set(captured) == {paper_one.id, paper_two.id}
+    for snapshot in captured.values():
+        storage = workspace_layout(
+            ws.workspace_id, data_root=project_tmp_path
+        ).schema_storage()
+        pointer = storage.read_current(snapshot.paper_id)
+        assert snapshot.run_id == pointer.run_id
+        assert snapshot.instance == storage.read_run(
+            snapshot.paper_id, pointer.run_id
+        ).instance
+        assert snapshot.identity["run_id"] == pointer.run_id
+
+    # Explicit ordered subset: only the requested Papers, still sorted.
+    subset = schema.capture_current_runs(ws.workspace_id, ["za"])
+    assert list(subset) == ["za"]
+    assert subset["za"].run_id == captured["za"].run_id
+
+    # Empty paper set captures nothing and raises nothing.
+    assert schema.capture_current_runs(ws.workspace_id, []) == {}
+
+
+def test_capture_snapshot_is_frozen(session, project_tmp_path):
+    """T-001: the build-snapshot object is frozen after capture — identity
+    and instance can never be rewritten once captured."""
+    paper_id, workspace_id, _, schema = _materialized_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-snap-frozen"
+    )
+    snapshot = schema.capture_current_run(workspace_id, paper_id)
+    with pytest.raises(ValidationError):
+        snapshot.run_id = "forged-run"
+    # ``identity`` is a derived view: mutating a returned copy never changes
+    # the captured snapshot.
+    forged = snapshot.identity
+    forged["run_id"] = "forged-run"
+    assert snapshot.identity["run_id"] == snapshot.run_id
+    assert snapshot.run_id != "forged-run"
+
+
+def test_capture_snapshot_isolated_from_concurrent_current_switch(
+    session, project_tmp_path
+):
+    """AC-001/AC-003 (capture-level race): snapshot A is captured once; when
+    ``current.json`` switches to a valid run B AFTER capture, the snapshot
+    still returns SchemaInstance A and identity A from the same persisted run
+    A — a concurrent change never retroactively rewrites the snapshot
+    (C-003)."""
+    paper_id, workspace_id, layout, schema = _materialized_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-snap-race"
+    )
+    storage = layout.schema_storage()
+    pointer_a = storage.read_current(paper_id)
+
+    snapshot = schema.capture_current_run(workspace_id, paper_id)
+
+    # A new VALID current run B replaces the pointer after the capture.
+    schema.materialize(workspace_id, paper_id, llm_client=FakeLLMProvider())
+    pointer_b = storage.read_current(paper_id)
+    assert pointer_b.run_id != pointer_a.run_id
+
+    # The snapshot is unchanged: instance and identity still refer to run A.
+    assert snapshot.run_id == pointer_a.run_id
+    assert snapshot.identity["run_id"] == pointer_a.run_id
+    assert snapshot.instance == storage.read_run(paper_id, pointer_a.run_id).instance
+    assert snapshot.instance == schema.get_instance(
+        workspace_id, paper_id, run_id=snapshot.run_id
+    )
+    # Capture again now resolves the NEW current run B (normal semantics).
+    recaptured = schema.capture_current_run(workspace_id, paper_id)
+    assert recaptured.run_id == pointer_b.run_id
+    assert recaptured.instance == storage.read_run(paper_id, pointer_b.run_id).instance
+
+
+def test_capture_rejects_pointer_binding_mismatch(session, project_tmp_path):
+    """AC-009: a current pointer whose schema_hash disagrees with the binding
+    fails capture with the stable ``schema_binding_mismatch`` code — same
+    behavior as every other governed read surface."""
+    paper_id, workspace_id, layout, schema = _materialized_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-snap-ptr"
+    )
+    rewrite_pointer(layout, paper_id, {"schema_hash": "f" * 64})
+
+    with pytest.raises(SchemaBindingMismatchError) as mismatch:
+        schema.capture_current_run(workspace_id, paper_id)
+    assert mismatch.value.code == "schema_binding_mismatch"
+    with pytest.raises(SchemaBindingMismatchError) as bulk_mismatch:
+        schema.capture_current_runs(workspace_id, [paper_id])
+    assert bulk_mismatch.value.code == "schema_binding_mismatch"
+
+
+def test_capture_rejects_run_manifest_binding_mismatch(session, project_tmp_path):
+    """AC-009: a READABLE persisted run whose run-manifest schema_hash
+    disagrees with the binding fails capture with the stable
+    ``schema_binding_mismatch`` code."""
+    paper_id, workspace_id, layout, schema = _materialized_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-snap-runhash"
+    )
+    run_id = layout.schema_storage().read_current(paper_id).run_id
+    rewrite_run_manifest(layout, paper_id, run_id, {"schema_hash": "f" * 64})
+
+    with pytest.raises(SchemaBindingMismatchError) as mismatch:
+        schema.capture_current_run(workspace_id, paper_id)
+    assert mismatch.value.code == "schema_binding_mismatch"
+
+
+def test_capture_rejects_missing_referenced_run(session, project_tmp_path):
+    """AC-009: current.json exists but the referenced run was removed ->
+    capture fails with the stable ``schema_missing`` code; a pointer alone
+    never yields a snapshot."""
+    paper_id, workspace_id, layout, schema = _materialized_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-snap-miss"
+    )
+    run_id = layout.schema_storage().read_current(paper_id).run_id
+    assert (layout.schemas_dir / paper_id / "current.json").is_file()
+    shutil.rmtree(layout.schemas_dir / paper_id / "runs" / run_id)
+
+    with pytest.raises(SchemaMissingError) as missing:
+        schema.capture_current_run(workspace_id, paper_id)
+    assert missing.value.code == "schema_missing"
+
+
+def test_capture_rejects_corrupt_referenced_run(session, project_tmp_path):
+    """AC-009: a corrupt referenced run (unreadable instance JSON) fails
+    capture with the stable ``schema_missing`` code."""
+    paper_id, workspace_id, layout, schema = _materialized_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-snap-cor"
+    )
+    run_id = layout.schema_storage().read_current(paper_id).run_id
+    instance_path = (
+        layout.schemas_dir / paper_id / "runs" / run_id / SCHEMA_INSTANCE_FILE
+    )
+    instance_path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(SchemaMissingError) as corrupt:
+        schema.capture_current_run(workspace_id, paper_id)
+    assert corrupt.value.code == "schema_missing"
+
+
+def test_capture_current_runs_aborts_on_first_invalid_run(
+    session, project_tmp_path
+):
+    """T-001: a bulk capture with one invalid member never returns a partial
+    snapshot collection — the first invalid run (in deterministic order)
+    aborts the whole batch with its stable code, so a build can never consume
+    a partially governed set (REQ-004 / AC-009)."""
+    paper_ok = add_paper(session, paper_id="ok", title="Valid Member")
+    paper_bad = add_paper(session, paper_id="bad", title="Corrupt Member")
+    ws = create_bound_workspace(session, workspace_id="ws-snap-partial")
+    service = WorkspaceService(session)
+    service.add_paper(ws.workspace_id, paper_ok.id)
+    service.add_paper(ws.workspace_id, paper_bad.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper_ok.id, llm_client=FakeLLMProvider())
+    schema.materialize(ws.workspace_id, paper_bad.id, llm_client=FakeLLMProvider())
+
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    run_id = layout.schema_storage().read_current(paper_bad.id).run_id
+    shutil.rmtree(layout.schemas_dir / paper_bad.id / "runs" / run_id)
+
+    # Sorted order is ["bad", "ok"]: the invalid Paper aborts the batch.
+    with pytest.raises(SchemaMissingError) as missing:
+        schema.capture_current_runs(ws.workspace_id)
+    assert missing.value.code == "schema_missing"
+    # Explicitly requesting only the valid member still succeeds.
+    captured = schema.capture_current_runs(ws.workspace_id, ["ok"])
+    assert list(captured) == ["ok"]
+    assert captured["ok"].run_id == layout.schema_storage().read_current("ok").run_id
+
+
+def test_capture_requires_bound_workspace_and_member(session, project_tmp_path):
+    """T-001 boundaries: capture is disabled for no-schema Workspaces
+    (``schema_disabled``, never a fallback) and rejects non-member Papers
+    (``paper_not_member``)."""
+    paper = add_paper(session)
+    ws_none = create_none_workspace(session)
+    WorkspaceService(session).add_paper(ws_none.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+
+    with pytest.raises(SchemaDisabledError) as disabled:
+        schema.capture_current_run(ws_none.workspace_id, paper.id)
+    assert disabled.value.code == "schema_disabled"
+    with pytest.raises(SchemaDisabledError):
+        schema.capture_current_runs(ws_none.workspace_id)
+
+    ws_bound = create_bound_workspace(session, workspace_id="ws-snap-member")
+    assert not workspace_layout(
+        ws_bound.workspace_id, data_root=project_tmp_path
+    ).derived_dir.exists()
+    with pytest.raises(PaperNotMemberError) as non_member:
+        schema.capture_current_runs(ws_bound.workspace_id, ["ghost-paper"])
+    assert non_member.value.code == "paper_not_member"

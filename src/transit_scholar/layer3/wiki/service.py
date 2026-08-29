@@ -20,6 +20,18 @@ to global or foreign Schema content, and the L2S3 composition receives only
 the already-governed compatible ``SchemaInstance`` values (or reads them
 through the governed ``WorkspaceSchemaService`` read function).
 
+REQ-002 (T-002): the build captures ONE governed current-run snapshot
+collection (``WorkspaceSchemaService.capture_current_runs``,
+``ValidatedCurrentSchemaRun``) before L2S3 and derives BOTH the
+``SchemaInstance`` inputs (L2S3 ``instances_by_paper``) AND the
+fingerprint/provenance identities from those same snapshot objects — there
+is no second current-run resolution anywhere in the build (AC-002 / C-001),
+so Wiki content and recorded identity always come from the same persisted
+run (AC-003 / AC-004 / C-002). A concurrent ``current.json`` change after
+the capture cannot retroactively change that build's recorded identity; the
+next ``status()`` derives stale against the new governed current (REQ-003 /
+AC-005..AC-008).
+
 No-schema Workspaces report Base Wiki build capability as unsupported
 (REQ-005 / AC-009). Freshness is derived from the deterministic input
 fingerprint (REQ-007): the recorded fingerprint of the last successful build
@@ -100,8 +112,9 @@ class WorkspaceWikiService:
     wires the production L2S3 service with the Workspace-specific Wiki storage
     root and the already-governed Schema instances. ``schemas`` injects the
     Layer3 Schema governance service (default: a ``WorkspaceSchemaService`` on
-    the same ``session``/``data_root``); ``build`` validates every member Schema
-    run through it before L2S3 consumption (REQ-001).
+    the same ``session``/``data_root``); ``build`` captures every member
+    Schema run through it (one governed current-run snapshot per Paper,
+    ``capture_current_runs``) before L2S3 consumption (REQ-001 / REQ-002).
     """
 
     def __init__(
@@ -122,9 +135,10 @@ class WorkspaceWikiService:
             )
 
             schemas = WorkspaceSchemaService(session, data_root=data_root)
-        # REQ-001: the SAME governance boundary WorkspaceSchemaService uses
-        # for reads; the Wiki build validates member Schema runs through it
-        # instead of loading raw Workspace-local L2S2 content.
+        # REQ-001/REQ-002: the SAME governance boundary WorkspaceSchemaService
+        # uses for reads; the Wiki build captures member Schema runs through
+        # it (one governed snapshot per Paper, carrying instance + identity)
+        # instead of loading raw Workspace-local L2S2 content twice.
         self.schemas = schemas
         self._build_service_factory = build_service_factory
 
@@ -163,12 +177,14 @@ class WorkspaceWikiService:
         """Build (or rebuild) the Base Wiki for an eligible schema-bound
         Workspace and record the input fingerprint provenance.
 
-        REQ-001: BEFORE the L2S3 build consumes any member Paper's Schema
-        run, every current Workspace Schema run is validated through the same
-        ``WorkspaceSchemaService`` governance boundary used by Schema reads
-        (``get_instance``): the persisted run must be readable through the
-        normal L2S2 integrity checks AND fully compatible with the immutable
-        Workspace binding (schema_id / schema_version / schema_hash). A
+        REQ-001/REQ-002 (T-001/T-002): BEFORE the L2S3 build consumes any
+        member Paper's Schema run, every current Workspace Schema run is
+        captured once through the same ``WorkspaceSchemaService`` governance
+        boundary used by Schema reads (``capture_current_runs``): each Paper's
+        ``current.json`` is read a single time, and the captured pointer AND
+        the persisted run must both be readable through the normal L2S2
+        integrity checks and fully compatible with the immutable Workspace
+        binding (schema_id / schema_version / schema_hash). A
         missing/corrupt/unreadable run fails explicitly with the stable
         ``schema_missing`` code and a binding-incompatible pointer or
         persisted run with ``schema_binding_mismatch`` (AC-001..AC-003) —
@@ -177,26 +193,50 @@ class WorkspaceWikiService:
         normally through the L2S3 ``WorkspaceWikiBuildService`` composed with
         the Workspace-specific Wiki store root and the already-governed
         compatible ``SchemaInstance`` values (AC-004 / AC-024 / REQ-006).
+
+        Both the L2S3 input instances AND the fingerprint/provenance
+        identities are derived from the SAME captured snapshot collection
+        (AC-002 / AC-003 / AC-004 / C-001 / C-002) — the build never performs
+        a second current-run resolution, so it is impossible to build Wiki
+        content from run A while recording run B in fingerprint/provenance.
+        A concurrent ``current.json`` change (A -> B) after the capture leaves
+        this build's recorded identity at A; the next ``status()`` compares
+        the governed current B against the recorded A and derives stale
+        (REQ-003 / AC-005..AC-007).
         """
         record = self._require_active_bound(workspace_id)
         memberships = self.workspaces.list_memberships(workspace_id)
         context = derive_workspace_context(record, memberships)
         layout = workspace_layout(workspace_id, data_root=self.data_root)
-        # REQ-001 governance gate: load every member's current Validated
-        # SchemaInstance through WorkspaceSchemaService.get_instance(), which
-        # enforces readability + full binding compatibility per run and fails
-        # with the stable schema_missing / schema_binding_mismatch codes
-        # before L2S3 ever sees the Paper (AC-001..AC-003).
-        instances = {
-            paper_id: self.schemas.get_instance(workspace_id, paper_id)
-            for paper_id in context.paper_ids
-        }
-        # Current-run identity input of the Wiki fingerprint, derived from the
-        # validated runs (pointer identities of binding-compatible current
-        # pointers only — never a raw pointer trust).
-        identities = self.schemas.current_run_identities(
+        # REQ-001/REQ-002 (T-001/T-002): ONE governed capture of every member's
+        # current Workspace Schema run, taken before L2S3 consumes anything.
+        # WorkspaceSchemaService.capture_current_runs() reads each Paper's
+        # current.json ONCE, validates the captured pointer and the persisted
+        # run against the immutable Workspace binding (readability through the
+        # normal L2S2 persistence integrity checks + full schema_id /
+        # schema_version / schema_hash binding compatibility) and returns the
+        # exact SchemaInstance AND the exact run identity together from the
+        # SAME persisted run. A missing/corrupt/unreadable or
+        # binding-incompatible run fails with the stable ``schema_missing`` /
+        # ``schema_binding_mismatch`` codes before L2S3 ever sees the Paper
+        # (AC-001..AC-003); no fallback is ever constructed.
+        snapshots = self.schemas.capture_current_runs(
             workspace_id, context.paper_ids
         )
+        # Both the L2S3 inputs and the fingerprint/provenance identities are
+        # derived ONLY from the captured snapshot objects (AC-003 / AC-004 /
+        # C-001 / C-002): no second current-run resolution exists anywhere in
+        # the build, so Wiki content and recorded identity can never come from
+        # different runs, and a concurrent current.json change after the
+        # capture cannot retroactively change this build's identity (REQ-003).
+        instances = {
+            paper_id: snapshot.instance
+            for paper_id, snapshot in snapshots.items()
+        }
+        identities = {
+            paper_id: snapshot.identity
+            for paper_id, snapshot in snapshots.items()
+        }
         try:
             prior = read_build_provenance(layout.wiki_dir)
         except BuildProvenanceError:
@@ -542,11 +582,13 @@ class WorkspaceWikiService:
         """The L2S3 build service for this Workspace.
 
         The default composition's ``schema_instance_loader`` returns only the
-        already-governed compatible ``SchemaInstance`` values loaded through
-        ``WorkspaceSchemaService.get_instance()`` (REQ-001) — never raw L2S2
-        ``get_schema()`` reads that could bypass binding validation. The
-        injectable factory keeps its ``(workspace_id, layout)`` contract for
-        deterministic test composition.
+        already-governed compatible ``SchemaInstance`` values derived from the
+        captured current-run snapshot collection
+        (``capture_current_runs``, REQ-002 / AC-003 / C-002) — never raw L2S2
+        ``get_schema()`` current reads that could bypass binding validation or
+        resolve a different current run than the one whose identity is being
+        recorded. The injectable factory keeps its ``(workspace_id, layout)``
+        contract for deterministic test composition.
         """
         if self._build_service_factory is not None:
             return self._build_service_factory(workspace_id, layout)

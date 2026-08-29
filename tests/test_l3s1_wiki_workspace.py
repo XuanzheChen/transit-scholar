@@ -27,7 +27,20 @@ Proves:
   missing/corrupt referenced run with ``schema_missing``, with no fallback
   construction and no L2S3 consumption;
 - REQ-001/AC-004: fully compatible member runs keep building through the
-  existing Workspace-specific L2S3 composition.
+  existing Workspace-specific L2S3 composition;
+- T-001/REQ-001: the provenance identity recorded by a successful build
+  exactly matches the governed current-run snapshot collection
+  (``ValidatedCurrentSchemaRun``), the single source that supplies both
+  SchemaInstance and identity from the same persisted run (AC-001/AC-002);
+- T-002/REQ-002: ``build()`` performs exactly ONE governed current-run
+  capture and derives BOTH the L2S3 instances and the fingerprint/provenance
+  identities from that same snapshot collection — no second current-run
+  resolution exists (AC-002/AC-003/AC-004/C-001/C-002);
+- T-002/REQ-003: a deterministic A->B current-switch race (current=A,
+  capture A, switch to a valid compatible run B before finalization) leaves
+  the build consuming A and recording A in provenance/fingerprint, and makes
+  the next ``status()`` stale — never ready (AC-005/AC-006/AC-007); a later
+  normal build over current B records B and returns ready (AC-008).
 
 The L2S3 build composition is fully offline (fake structured-LLM client and
 fake embedding provider, mirroring the L2S3 deterministic suite); Schema runs
@@ -60,7 +73,11 @@ from transit_scholar.layer3.schema import (
     SchemaMissingError,
     WorkspaceSchemaService,
 )
-from transit_scholar.layer3.storage import read_build_provenance, workspace_layout
+from transit_scholar.layer3.storage import (
+    compute_wiki_input_fingerprint,
+    read_build_provenance,
+    workspace_layout,
+)
 from transit_scholar.layer3.wiki import (
     WikiCorruptError,
     WikiEmptyMembershipError,
@@ -835,6 +852,323 @@ def test_compatible_runs_still_build_through_workspace_composition(
             "status": pointer.status,
         }
     }
+    assert wiki.status(ws.workspace_id).status == "ready"
+
+
+def test_provenance_schema_runs_match_governed_snapshot_identities(
+    session, project_tmp_path
+):
+    """T-001/REQ-001: the provenance identity recorded by a successful build
+    is exactly the identity of the governed current-run snapshot — one
+    resolved run supplies the SchemaInstance AND the identity (AC-001), and
+    the snapshot collection is the single identity source the build
+    provenance must match (AC-002 / AC-004 readiness for the T-002 rewire)."""
+    paper = add_paper(session, paper_id="bg-snap-p", title="Snapshot Provenance Paper")
+    ws = create_bound_workspace(session, workspace_id="ws-bg-snap")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
+
+    wiki = wiki_service(session, project_tmp_path)
+    outcome = wiki.build(ws.workspace_id)
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    recorded = read_build_provenance(layout.wiki_dir)
+    captured = schema.capture_current_runs(ws.workspace_id)
+    assert recorded is not None
+    assert recorded.schema_runs == {
+        paper_id: snapshot.identity for paper_id, snapshot in captured.items()
+    }
+    # Every snapshot binds the exact SchemaInstance with its exact run
+    # identity from the SAME persisted run (Required Verification).
+    for snapshot in captured.values():
+        assert snapshot.instance == schema.get_instance(ws.workspace_id, paper.id)
+        assert snapshot.identity["run_id"] == snapshot.run_id
+    assert outcome.provenance.workspace_id == ws.workspace_id
+
+
+class _RecordingSchemaService:
+    """Spy over the governed Schema service (T-002 / AC-002 / C-001).
+
+    Records which current-run entry points a build drives: the governed
+    snapshot capture (``capture_current_runs``) and the identity-only
+    resolution (``current_run_identities``). A rewire regression that
+    resolves a second current run for provenance/fingerprint identity shows
+    up here as an ``identity_calls`` entry or a second snapshot capture.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.capture_calls: list[tuple] = []
+        self.identity_calls: list[str] = []
+
+    def capture_current_runs(self, workspace_id, paper_ids=None):
+        snapshots = self._inner.capture_current_runs(workspace_id, paper_ids)
+        self.capture_calls.append(
+            tuple(sorted(snapshots.values(), key=lambda s: s.paper_id))
+        )
+        return snapshots
+
+    def current_run_identities(self, workspace_id, paper_ids=None):
+        self.identity_calls.append(workspace_id)
+        return self._inner.current_run_identities(workspace_id, paper_ids)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _recording_build_factory(session, served_out):
+    """Wrap the offline factory's instance loader and record served inputs."""
+
+    def factory(workspace_id, layout):
+        service = _offline_build_factory(session)(workspace_id, layout)
+        original = service.schema_instance_loader
+
+        def loader(paper_id, schema_id):
+            instance = original(paper_id, schema_id)
+            served_out.append(instance)
+            return instance
+
+        service.schema_instance_loader = loader
+        return service
+
+    return factory
+
+
+def test_build_uses_one_governed_capture_for_content_and_identity(
+    session, project_tmp_path
+):
+    """AC-002/AC-003/AC-004 (C-001/C-002): build() performs exactly ONE
+    governed current-run capture; the L2S3 instances, the input fingerprint
+    and the recorded provenance identities are all derived from that same
+    captured snapshot collection — no second current-run resolution supplies
+    the identity. A normal non-racing build over the captured run stays ready
+    (AC-008)."""
+    paper = add_paper(session, paper_id="bg-one-p", title="One Capture Paper")
+    ws = create_bound_workspace(session, workspace_id="ws-bg-one")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
+
+    served: list = []
+    recording = _RecordingSchemaService(schema)
+    wiki = WorkspaceWikiService(
+        session,
+        data_root=project_tmp_path,
+        build_service_factory=_recording_build_factory(session, served),
+        schemas=recording,
+    )
+    outcome = wiki.build(ws.workspace_id)
+
+    # C-001/AC-002: one governed capture, and the identity-only resolution is
+    # never consulted by the build.
+    assert len(recording.capture_calls) == 1
+    assert recording.identity_calls == []
+    captured = recording.capture_calls[0]
+    assert [snapshot.paper_id for snapshot in captured] == [paper.id]
+
+    # AC-003: the L2S3 composition consumed exactly the captured snapshot
+    # instances (same persisted run).
+    assert served == [captured[0].instance]
+
+    # AC-004/REQ-002: the recorded provenance schema_runs and the input
+    # fingerprint are recomputed from EXACTLY the captured snapshot
+    # identities (the same collection that supplied the instances).
+    binding = WorkspaceService(session).get(ws.workspace_id).schema_binding
+    assert binding is not None
+    expected_identities = {
+        snapshot.paper_id: snapshot.identity for snapshot in captured
+    }
+    expected_fingerprint = compute_wiki_input_fingerprint(
+        workspace_id=ws.workspace_id,
+        schema_id=binding.schema_id,
+        schema_version=binding.schema_version,
+        schema_hash=binding.schema_hash,
+        paper_ids=[paper.id],
+        schema_run_identities=expected_identities,
+    )
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    recorded = read_build_provenance(layout.wiki_dir)
+    assert recorded is not None
+    assert recorded.schema_runs == expected_identities
+    assert recorded.input_fingerprint == expected_fingerprint
+    assert outcome.fingerprint == expected_fingerprint
+
+    # AC-008: the normal non-racing build over the captured run remains ready.
+    assert wiki.status(ws.workspace_id).status == "ready"
+
+
+class _RaceHit:
+    """One retrieval hit (rank-ordered) so the extraction engine invokes the
+    injected fake LLM with the calibrated per-run presets."""
+
+    rank = 1
+    paper_id = "p"
+    chunk_id = "c1"
+    score = 1.0
+    retrieval_method = "fake"
+    section_path = ["method"]
+    pages = [1]
+    source_refs = []
+    text = "bus control candidate evidence text"
+
+
+class _RaceRetrieval:
+    """Retrieval boundary returning one deterministic hit (AC-005)."""
+
+    def retrieve(self, paper_id, query, top_k):
+        from transit_scholar.layer2.schema import RetrievalResult
+
+        return RetrievalResult(status="ok", method="fake", hits=[_RaceHit()])
+
+
+def _race_provider(control_type):
+    """Fake LLM with a calibrated control_type value for one run."""
+    return FakeLLMProvider(
+        responses={
+            "research_problem.control_type": {
+                "value": control_type,
+                "status": "explicit",
+                "evidence_ids": [],
+            },
+        }
+    )
+
+
+def test_current_switch_after_capture_keeps_build_and_provenance_on_a(
+    session, project_tmp_path
+):
+    """AC-005/AC-006/AC-007 + REQ-003: deterministic A->B current-switch race.
+
+    current=A is captured once by build(); BEFORE the build finalizes, the
+    current pointer is switched to a VALID compatible run B (the factory is
+    invoked between the governed capture and the L2S3 build). The build must
+    consume the captured run A instance, provenance/fingerprint must record
+    run A, and the next status() — governed current B vs recorded A — must be
+    stale, never ready (the forbidden content=A + provenance=B + current=B +
+    ready state is impossible because identity comes from the captured
+    snapshot). A later normal build over current B records B and returns
+    ready (AC-008)."""
+    paper = add_paper(session, paper_id="race-p", title="Race Paper")
+    ws = create_bound_workspace(session, workspace_id="ws-race")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    # Run A becomes current with control_type "scheduling".
+    schema.materialize(
+        ws.workspace_id,
+        paper.id,
+        llm_client=_race_provider("scheduling"),
+        retrieval=_RaceRetrieval(),
+    )
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    # The governed snapshot collection while current=A (identity A).
+    captured_a = schema.capture_current_runs(ws.workspace_id)
+    identity_a = captured_a[paper.id].identity
+
+    state = {"builds": 0, "switched": False}
+    consumed: list = []
+
+    def race_factory(workspace_id, layout):
+        # Invoked AFTER build()'s governed capture and BEFORE the L2S3 build.
+        # Only the FIRST build races: it performs the deterministic concurrent
+        # current change A -> valid run B. Later (normal, non-racing) rebuilds
+        # leave the current pointer alone so they capture and consume B.
+        state["builds"] += 1
+        if state["builds"] == 1:
+            schema.materialize(
+                ws.workspace_id,
+                paper.id,
+                llm_client=_race_provider("holding"),
+                retrieval=_RaceRetrieval(),
+            )
+            state["switched"] = True
+        storage = layout.schema_storage()
+
+        def metadata_loader(pid):
+            row = session.get(Paper, pid)
+            if row is None or not row.title:
+                return None
+            return PaperMetadata(paper_id=row.id, title=row.title, year=2024)
+
+        def instance_loader(pid, schema_id):
+            if state["builds"] == 1:
+                # The RACING build consumes the CAPTURED snapshot's instance
+                # (run A by its captured run_id) — never a fresh current
+                # resolution, which after the switch would be B.
+                instance = get_schema(
+                    pid, schema_id, run_id=identity_a["run_id"], storage=storage
+                )
+            else:
+                # Normal rebuilds after the race resolve the governed current
+                # run (B), exactly like a non-racing factory.
+                instance = get_schema(pid, schema_id, storage=storage)
+            consumed.append(instance)
+            return instance
+
+        return WorkspaceWikiBuildService(
+            schema_instance_loader=instance_loader,
+            paper_metadata_loader=metadata_loader,
+            composition_factory=lambda context, store: create_production_wiki_composition(
+                context,
+                store,
+                llm_client=_Client(),
+                embedding_provider=_Embedding(),
+            ),
+            wiki_storage_root=layout.wiki_store_base,
+        )
+
+    wiki = WorkspaceWikiService(
+        session,
+        data_root=project_tmp_path,
+        build_service_factory=race_factory,
+    )
+    outcome = wiki.build(ws.workspace_id)
+
+    # The switch happened deterministically between capture and finalization.
+    assert state["switched"] is True
+    # B is a VALID compatible current run (different observable instance
+    # content) — the staleness below is a genuine A->B race, not invalidity.
+    instance_b = schema.get_instance(ws.workspace_id, paper.id)
+    identities_b, invalid = schema.validated_current_run_identities(
+        ws.workspace_id, [paper.id]
+    )
+    assert invalid == {}
+    identity_b = identities_b[paper.id]
+    assert identity_b is not None
+    assert identity_b["run_id"] != identity_a["run_id"]
+    assert instance_b != captured_a[paper.id].instance
+
+    # L2S3 consumed the captured run A instance — never the new current B.
+    assert consumed, "the L2S3 build must consume exactly one instance"
+    for instance in consumed:
+        assert instance == captured_a[paper.id].instance
+        assert instance != instance_b
+
+    # Provenance and fingerprint record A; B is never silently substituted
+    # (REQ-003 / AC-005). content=A + provenance=B is impossible here because
+    # identity comes only from the captured snapshot collection (AC-007).
+    recorded = read_build_provenance(layout.wiki_dir)
+    assert recorded is not None
+    assert recorded.schema_runs == {paper.id: identity_a}
+    assert outcome.provenance.schema_runs == {paper.id: identity_a}
+    assert recorded.input_fingerprint == outcome.fingerprint
+    assert recorded.schema_runs[paper.id] != identity_b
+
+    # status(): governed current B vs recorded A -> stale, never ready
+    # (AC-006); the forbidden ready state is impossible (AC-007).
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "stale"
+    assert status.status != "ready"
+    assert status.error_code == "input_fingerprint_mismatch"
+    assert status.recorded_fingerprint == outcome.fingerprint
+    assert status.fingerprint != outcome.fingerprint
+
+    # AC-008: a normal (non-racing) rebuild over stable current B records B
+    # and returns ready — proving B was a valid compatible run all along.
+    rebuilt = wiki.build(ws.workspace_id)
+    recorded_b = read_build_provenance(layout.wiki_dir)
+    assert recorded_b is not None
+    assert recorded_b.schema_runs == {paper.id: identity_b}
+    assert recorded_b.input_fingerprint == rebuilt.fingerprint
     assert wiki.status(ws.workspace_id).status == "ready"
 
 

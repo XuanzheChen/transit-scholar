@@ -26,6 +26,16 @@ schema_hash, REQ-003) is enforced at every boundary:
 A no-schema Workspace never exposes or materializes Workspace Schema content
 (AC-007): every read/materialization entry point reports ``schema_disabled``
 and there is no fallback read path to global or foreign instances.
+
+T-001 (REQ-001): the governed current-run build snapshot
+(``capture_current_run`` / ``capture_current_runs``) captures ONE validated
+current persisted run per Paper with its exact ``SchemaInstance`` AND its
+exact run identity (run_id / schema_id / schema_version / schema_hash /
+current status) resolved together from that same run — ``current.json`` is
+read once, the run is read explicitly by the captured run_id, and both are
+validated against the immutable Workspace binding through the same boundary
+every read uses, so no second current-run resolution can ever supply a
+different identity (AC-001 / AC-002).
 """
 
 from __future__ import annotations
@@ -79,6 +89,7 @@ from .errors import (
     SchemaDisabledError,
     SchemaMissingError,
 )
+from .snapshot import ValidatedCurrentSchemaRun
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sqlalchemy.orm import Session
@@ -133,7 +144,11 @@ class WorkspaceSchemaService:
 
     ``data_root`` selects the derived-storage base for the Workspace Schema
     roots (defaults to the project settings data root; tests inject an
-    isolated root).
+    isolated root). ``capture_current_run`` / ``capture_current_runs``
+    additionally expose the governed current-run build snapshot (T-001 /
+    REQ-001): one validated current persisted run carrying the exact
+    ``SchemaInstance`` and the exact run identity together, so build content
+    and fingerprint/provenance identity can never come from different runs.
     """
 
     def __init__(
@@ -389,6 +404,114 @@ class WorkspaceSchemaService:
         return readiness
 
     # ------------------------------------------------------------------
+    # governed current-run build snapshot (T-001 / REQ-001 / AC-001..02)
+    # ------------------------------------------------------------------
+
+    def capture_current_run(
+        self, workspace_id: str, paper_id: str
+    ) -> ValidatedCurrentSchemaRun:
+        """Capture ONE validated current persisted run with instance+identity.
+
+        REQ-001 (T-001): returns the exact ``SchemaInstance`` AND the exact
+        run identity (run_id / schema_id / schema_version / schema_hash /
+        current run status) resolved together from the SAME persisted run —
+        capturing never resolves one current run for content and another for
+        identity (AC-001 / AC-002 / C-001..C-003):
+
+        1. ``current.json`` is read once and its run_id (A) is captured;
+        2. the captured pointer A is validated against the immutable
+           Workspace binding;
+        3. the persisted run A is read explicitly by the captured run_id and
+           validated through the same persistence-integrity + binding
+           boundary every read uses (``require_compatible_run``);
+        4. the ``SchemaInstance`` is read from that SAME run A.
+
+        A concurrent ``current.json`` change after capture (pointer A -> B)
+        cannot retroactively change this snapshot: instance and identity both
+        stay A; the next freshness derivation compares the new governed B
+        against the recorded A and derives stale (REQ-003).
+
+        Binding-mismatch / missing / corrupt behavior is unchanged from every
+        other governed read surface (REQ-004 / AC-009): a missing/unreadable
+        pointer or referenced run raises ``SchemaMissingError``
+        (``schema_missing``) and a pointer or persisted run whose Schema
+        identity disagrees with the immutable Workspace binding raises
+        ``SchemaBindingMismatchError`` (``schema_binding_mismatch``).
+        """
+        record = self._require_bound(workspace_id)
+        self._require_member(workspace_id, paper_id)
+        storage = self.layout(workspace_id).schema_storage()
+        binding = record.schema_binding
+        assert binding is not None
+        # 1.: read current.json ONCE — the pointer IS the captured identity.
+        try:
+            pointer = storage.read_current(paper_id)
+        except _MISSING_STORAGE_ERRORS as exc:
+            raise SchemaMissingError(
+                f"workspace {workspace_id!r} has no usable Schema content for "
+                f"paper {paper_id!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+        # 2.: the captured pointer must match the immutable Workspace binding.
+        self._require_compatible_pointer(record, paper_id, pointer)
+        # 3.: read the persisted run explicitly by the CAPTURED run_id and
+        # validate persistence integrity + binding compatibility.
+        stored = self.require_compatible_run(
+            record, paper_id, storage, run_id=pointer.run_id
+        )
+        run = stored.run_manifest
+        # 4.: the SchemaInstance comes from that SAME captured run.
+        try:
+            instance = get_schema(
+                paper_id, binding.schema_id, run_id=run.run_id, storage=storage
+            )
+        except _MISSING_STORAGE_ERRORS as exc:
+            raise SchemaMissingError(
+                f"workspace {workspace_id!r} has no usable Schema content for "
+                f"paper {paper_id!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+        return ValidatedCurrentSchemaRun(
+            paper_id=paper_id,
+            run_id=pointer.run_id,
+            instance=instance,
+            schema_id=run.schema_id,
+            schema_version=run.schema_version,
+            schema_hash=run.schema_hash,
+            status=pointer.status,
+        )
+
+    def capture_current_runs(
+        self,
+        workspace_id: str,
+        paper_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, ValidatedCurrentSchemaRun]:
+        """Bulk governed current-run snapshot capture (REQ-001 / AC-001..02).
+
+        Captures every given (or every member) Paper's validated current run
+        in deterministic sorted ``paper_id`` order, so a build can derive
+        BOTH its L2S3 ``SchemaInstance`` inputs AND its fingerprint/
+        provenance identities from the SAME snapshot collection — no second
+        current-run resolution is needed for identity (AC-002 / C-002).
+
+        Each Paper goes through the identical governed capture
+        (``capture_current_run``), so the FIRST invalid run aborts the whole
+        batch with its stable code — ``schema_missing`` (missing/corrupt/
+        unreadable) or ``schema_binding_mismatch`` (binding-incompatible
+        pointer or persisted run) — exactly like the per-Paper read paths
+        (REQ-004 / AC-009): an incomplete batch is never returned, so no
+        build can consume a partially governed set.
+        """
+        self._require_bound(workspace_id)
+        if paper_ids is None:
+            paper_ids = tuple(
+                membership.paper_id
+                for membership in self.workspaces.list_memberships(workspace_id)
+            )
+        return {
+            paper_id: self.capture_current_run(workspace_id, paper_id)
+            for paper_id in sorted(paper_ids)
+        }
+
+    # ------------------------------------------------------------------
     # binding validation (REQ-003 / REQ-004)
     # ------------------------------------------------------------------
 
@@ -472,23 +595,7 @@ class WorkspaceSchemaService:
         try:
             if run_id is None:
                 pointer = storage.read_current(paper_id)
-                if not matches_binding(
-                    binding,
-                    schema_id=pointer.schema_id,
-                    schema_version=pointer.schema_version,
-                    schema_hash=pointer.schema_hash,
-                ):
-                    raise SchemaBindingMismatchError(
-                        f"workspace {record.workspace_id!r} schema binding "
-                        f"mismatch: current pointer for paper {paper_id!r} "
-                        f"records schema_id={pointer.schema_id!r} "
-                        f"schema_version={pointer.schema_version!r} "
-                        f"schema_hash={pointer.schema_hash[:12]}..., which "
-                        f"does not match the immutable Workspace binding "
-                        f"(schema_id={binding.schema_id!r} "
-                        f"schema_version={binding.schema_version!r} "
-                        f"schema_hash={binding.schema_hash[:12]}...) (REQ-004)"
-                    )
+                self._require_compatible_pointer(record, paper_id, pointer)
                 run_id = pointer.run_id
             stored = storage.read_run(paper_id, run_id)
         except SchemaBindingMismatchError:
@@ -522,6 +629,42 @@ class WorkspaceSchemaService:
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------
+
+    def _require_compatible_pointer(
+        self,
+        record: WorkspaceRecord,
+        paper_id: str,
+        pointer: Any,
+    ) -> None:
+        """Validate one captured ``current.json`` pointer against the binding.
+
+        Shared REQ-004 pointer gate used by every read path (via
+        ``require_compatible_run``) and by the governed current-run build
+        snapshot capture (``capture_current_run``): the pointer identity
+        (schema_id / schema_version / schema_hash, including the schema_hash
+        the normal L2S2 pointer metadata supplies, AC-014) must exactly match
+        the immutable Workspace binding or the run is unusable with the
+        stable ``schema_binding_mismatch`` code (AC-013/AC-014).
+        """
+        binding = record.schema_binding
+        assert binding is not None
+        if not matches_binding(
+            binding,
+            schema_id=pointer.schema_id,
+            schema_version=pointer.schema_version,
+            schema_hash=pointer.schema_hash,
+        ):
+            raise SchemaBindingMismatchError(
+                f"workspace {record.workspace_id!r} schema binding "
+                f"mismatch: current pointer for paper {paper_id!r} "
+                f"records schema_id={pointer.schema_id!r} "
+                f"schema_version={pointer.schema_version!r} "
+                f"schema_hash={pointer.schema_hash[:12]}..., which "
+                f"does not match the immutable Workspace binding "
+                f"(schema_id={binding.schema_id!r} "
+                f"schema_version={binding.schema_version!r} "
+                f"schema_hash={binding.schema_hash[:12]}...) (REQ-004)"
+            )
 
     def _require_bound(self, workspace_id: str) -> WorkspaceRecord:
         record = self.workspaces.get(workspace_id)

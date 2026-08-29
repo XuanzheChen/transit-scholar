@@ -20,17 +20,22 @@ to global or foreign Schema content, and the L2S3 composition receives only
 the already-governed compatible ``SchemaInstance`` values (or reads them
 through the governed ``WorkspaceSchemaService`` read function).
 
-REQ-002 (T-002): the build captures ONE governed current-run snapshot
-collection (``WorkspaceSchemaService.capture_current_runs``,
-``ValidatedCurrentSchemaRun``) before L2S3 and derives BOTH the
-``SchemaInstance`` inputs (L2S3 ``instances_by_paper``) AND the
-fingerprint/provenance identities from those same snapshot objects — there
-is no second current-run resolution anywhere in the build (AC-002 / C-001),
-so Wiki content and recorded identity always come from the same persisted
-run (AC-003 / AC-004 / C-002). A concurrent ``current.json`` change after
-the capture cannot retroactively change that build's recorded identity; the
-next ``status()`` derives stale against the new governed current (REQ-003 /
-AC-005..AC-008).
+REQ-002 (T-002): the build captures ONE frozen complete authoritative build
+snapshot (``WorkspaceSchemaService.capture_build_snapshot``,
+``WorkspaceWikiSchemaBuildSnapshot`` — the exact binding-compatible
+SchemaDefinition plus every member's validated current run) before L2S3 and
+derives BOTH the L2S3 inputs AND the fingerprint/provenance identities from
+that same snapshot (AC-002..AC-006 / C-001 / C-002). The Layer3-composed
+``WorkspaceWikiBuildService`` receives the captured definition through
+``schema_definition_loader`` and the captured per-Paper ``SchemaInstance``
+values through ``schema_instance_loader`` (AC-004 / AC-005) — the default
+current-definition/current-instance resolvers are never used for that build,
+and no second authoritative resolution exists anywhere in the build, so Wiki
+content and recorded identity always come from the same frozen snapshot
+(AC-006 / AC-007). A concurrent ``current.json`` or plugin-definition change
+after the capture cannot retroactively change that build's content or
+identity; the next ``status()`` derives stale against the new governed
+current (REQ-003 / AC-005..AC-008).
 
 No-schema Workspaces report Base Wiki build capability as unsupported
 (REQ-005 / AC-009). Freshness is derived from the deterministic input
@@ -87,12 +92,17 @@ from .models import WorkspaceWikiBuildOutcome, WorkspaceWikiCapability, Workspac
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sqlalchemy.orm import Session
 
-    from transit_scholar.layer2.schema_extraction.models import SchemaInstance
+    from transit_scholar.layer2.wiki.application import (
+        CompositionFactory as CompositionFactory,
+    )
     from transit_scholar.layer2.wiki.application import WorkspaceWikiBuildService
     from transit_scholar.layer2.wiki.models import WikiSearchResult
     from transit_scholar.layer2.wiki.service import WikiService
     from transit_scholar.layer3.schema.service import (
         WorkspaceSchemaService as WorkspaceSchemaService,
+    )
+    from transit_scholar.layer3.schema.snapshot import (
+        WorkspaceWikiSchemaBuildSnapshot as WorkspaceWikiSchemaBuildSnapshot,
     )
 
 #: Callable receiving ``(workspace_id, layout)`` and returning the L2S3 build
@@ -107,14 +117,19 @@ class WorkspaceWikiService:
 
     ``data_root`` selects the derived-storage base (defaults to the project
     settings data root; tests inject an isolated root). ``build_service_factory``
-    overrides the L2S3 ``WorkspaceWikiBuildService`` construction for
-    deterministic tests (fake loaders/composition); the default composition
-    wires the production L2S3 service with the Workspace-specific Wiki storage
-    root and the already-governed Schema instances. ``schemas`` injects the
-    Layer3 Schema governance service (default: a ``WorkspaceSchemaService`` on
-    the same ``session``/``data_root``); ``build`` captures every member
-    Schema run through it (one governed current-run snapshot per Paper,
-    ``capture_current_runs``) before L2S3 consumption (REQ-001 / REQ-002).
+    overrides the ENTIRE L2S3 ``WorkspaceWikiBuildService`` construction for
+    deterministic tests (fake loaders/composition) and keeps its
+    ``(workspace_id, layout)`` contract; the default composition wires the
+    production L2S3 service with the Workspace-specific Wiki storage root,
+    the captured SchemaDefinition (``schema_definition_loader``) and the
+    already-governed captured Schema instances (``schema_instance_loader``).
+    ``composition_factory`` overrides ONLY the production provider composition
+    of the default build service (the captured-input loaders stay enforced);
+    ``schemas`` injects the Layer3 Schema governance service (default: a
+    ``WorkspaceSchemaService`` on the same ``session``/``data_root``); ``build``
+    captures ONE frozen complete build snapshot through it
+    (``capture_build_snapshot``: binding-compatible definition + every member's
+    governed current run) before L2S3 consumption (REQ-001 / REQ-002).
     """
 
     def __init__(
@@ -125,6 +140,7 @@ class WorkspaceWikiService:
         build_service_factory: BuildServiceFactory | None = None,
         workspaces: WorkspaceService | None = None,
         schemas: "WorkspaceSchemaService | None" = None,
+        composition_factory: "CompositionFactory | None" = None,
     ) -> None:
         self.session = session
         self.data_root = data_root
@@ -136,11 +152,13 @@ class WorkspaceWikiService:
 
             schemas = WorkspaceSchemaService(session, data_root=data_root)
         # REQ-001/REQ-002: the SAME governance boundary WorkspaceSchemaService
-        # uses for reads; the Wiki build captures member Schema runs through
-        # it (one governed snapshot per Paper, carrying instance + identity)
-        # instead of loading raw Workspace-local L2S2 content twice.
+        # uses for reads; the Wiki build captures ONE frozen complete build
+        # snapshot through it (binding-compatible definition + every member's
+        # governed current run, carrying instance + identity) instead of
+        # loading raw Workspace-local L2S2 content twice.
         self.schemas = schemas
         self._build_service_factory = build_service_factory
+        self._composition_factory = composition_factory
 
     # ------------------------------------------------------------------
     # capability (REQ-005 / AC-009)
@@ -177,65 +195,75 @@ class WorkspaceWikiService:
         """Build (or rebuild) the Base Wiki for an eligible schema-bound
         Workspace and record the input fingerprint provenance.
 
-        REQ-001/REQ-002 (T-001/T-002): BEFORE the L2S3 build consumes any
-        member Paper's Schema run, every current Workspace Schema run is
-        captured once through the same ``WorkspaceSchemaService`` governance
-        boundary used by Schema reads (``capture_current_runs``): each Paper's
-        ``current.json`` is read a single time, and the captured pointer AND
-        the persisted run must both be readable through the normal L2S2
-        integrity checks and fully compatible with the immutable Workspace
-        binding (schema_id / schema_version / schema_hash). A
-        missing/corrupt/unreadable run fails explicitly with the stable
-        ``schema_missing`` code and a binding-incompatible pointer or
-        persisted run with ``schema_binding_mismatch`` (AC-001..AC-003) —
+        REQ-001/REQ-002/REQ-003/REQ-004 (T-001/T-002): BEFORE the L2S3 build
+        consumes anything, ONE frozen complete authoritative build snapshot is
+        captured through the same ``WorkspaceSchemaService`` governance
+        boundary used by Schema reads (``capture_build_snapshot``): the
+        current ``SchemaDefinition`` is resolved and proven against the
+        immutable Workspace binding by exact schema_id / schema_version /
+        deterministic schema_hash (REQ-003), then every member Paper's current
+        run is governed-captured — ``current.json`` read a single time, the
+        captured pointer AND the persisted run both readable through the
+        normal L2S2 integrity checks and fully compatible with the binding
+        (AC-001..AC-003). A definition that no longer matches the binding
+        (same id/version changed content hash, or changed version) fails with
+        the stable ``schema_binding_mismatch`` code BEFORE any run capture and
+        before L2S3 execution (AC-002 / AC-003); a missing/corrupt/unreadable
+        run fails with ``schema_missing`` and a binding-incompatible pointer
+        or persisted run with ``schema_binding_mismatch`` (AC-001..AC-003) —
         nothing is consumed by L2S3, no fallback to global/foreign content,
-        and the existing snapshot is left untouched. Compatible runs build
-        normally through the L2S3 ``WorkspaceWikiBuildService`` composed with
-        the Workspace-specific Wiki store root and the already-governed
-        compatible ``SchemaInstance`` values (AC-004 / AC-024 / REQ-006).
+        and the existing Wiki/provenance is left untouched (C-007).
 
-        Both the L2S3 input instances AND the fingerprint/provenance
-        identities are derived from the SAME captured snapshot collection
-        (AC-002 / AC-003 / AC-004 / C-001 / C-002) — the build never performs
-        a second current-run resolution, so it is impossible to build Wiki
-        content from run A while recording run B in fingerprint/provenance.
-        A concurrent ``current.json`` change (A -> B) after the capture leaves
-        this build's recorded identity at A; the next ``status()`` compares
-        the governed current B against the recorded A and derives stale
-        (REQ-003 / AC-005..AC-007).
+        Both the L2S3 inputs AND the fingerprint/provenance identities are
+        derived from the SAME frozen snapshot (AC-002..AC-006 / C-001 / C-002):
+        the Layer3-composed ``WorkspaceWikiBuildService`` receives the
+        captured definition through ``schema_definition_loader`` and the
+        captured per-Paper ``SchemaInstance`` values through
+        ``schema_instance_loader`` (AC-004 / AC-005) — the default current
+        definition/current-instance resolvers are never used for that build
+        (REQ-002), so it is impossible to build Wiki content from definition/
+        run B while recording definition/run A in fingerprint/provenance, and
+        a concurrent ``current.json`` (A -> B) or plugin-definition change
+        after the capture leaves this build's content and recorded identity at
+        A (REQ-004 / AC-007). The next ``status()`` compares the governed
+        current against the recorded identity and derives stale
+        (REQ-003 / AC-005..AC-008).
         """
         record = self._require_active_bound(workspace_id)
         memberships = self.workspaces.list_memberships(workspace_id)
         context = derive_workspace_context(record, memberships)
         layout = workspace_layout(workspace_id, data_root=self.data_root)
-        # REQ-001/REQ-002 (T-001/T-002): ONE governed capture of every member's
-        # current Workspace Schema run, taken before L2S3 consumes anything.
-        # WorkspaceSchemaService.capture_current_runs() reads each Paper's
-        # current.json ONCE, validates the captured pointer and the persisted
-        # run against the immutable Workspace binding (readability through the
-        # normal L2S2 persistence integrity checks + full schema_id /
-        # schema_version / schema_hash binding compatibility) and returns the
-        # exact SchemaInstance AND the exact run identity together from the
-        # SAME persisted run. A missing/corrupt/unreadable or
-        # binding-incompatible run fails with the stable ``schema_missing`` /
-        # ``schema_binding_mismatch`` codes before L2S3 ever sees the Paper
-        # (AC-001..AC-003); no fallback is ever constructed.
-        snapshots = self.schemas.capture_current_runs(
+        # REQ-001/REQ-002/REQ-003 (T-001/T-002): ONE frozen complete build
+        # snapshot taken before L2S3 consumes anything.
+        # WorkspaceSchemaService.capture_build_snapshot() resolves the current
+        # SchemaDefinition and proves it against the immutable Workspace
+        # binding (exact schema_id / schema_version / deterministic
+        # schema_hash, REQ-003 — a same-id/version different content hash or
+        # a different version rejects with the stable
+        # ``schema_binding_mismatch`` code BEFORE any run is captured, AC-002 /
+        # AC-003), then captures every member's validated current persisted
+        # run through the governed per-run capture (current.json read ONCE;
+        # the captured pointer and the persisted run validated for
+        # readability + full binding compatibility; the exact SchemaInstance
+        # and the exact run identity resolved together from the SAME run,
+        # REQ-005). A missing/corrupt/unreadable or binding-incompatible run
+        # aborts the whole capture with its stable code (``schema_missing`` /
+        # ``schema_binding_mismatch``) before L2S3 ever sees the Paper
+        # (AC-001..AC-003); no fallback is ever constructed and a failed
+        # capture cannot disturb an existing Wiki/provenance (C-007).
+        snapshot = self.schemas.capture_build_snapshot(
             workspace_id, context.paper_ids
         )
         # Both the L2S3 inputs and the fingerprint/provenance identities are
-        # derived ONLY from the captured snapshot objects (AC-003 / AC-004 /
-        # C-001 / C-002): no second current-run resolution exists anywhere in
-        # the build, so Wiki content and recorded identity can never come from
-        # different runs, and a concurrent current.json change after the
-        # capture cannot retroactively change this build's identity (REQ-003).
-        instances = {
-            paper_id: snapshot.instance
-            for paper_id, snapshot in snapshots.items()
-        }
+        # derived ONLY from the frozen snapshot (AC-003..AC-006 / C-001 /
+        # C-002): no second authoritative definition/current-run resolution
+        # exists anywhere in the build, so Wiki content and recorded identity
+        # can never come from different runs, and a concurrent current.json /
+        # plugin-definition change after the capture cannot retroactively
+        # change this build's content or identity (REQ-003/REQ-004).
         identities = {
-            paper_id: snapshot.identity
-            for paper_id, snapshot in snapshots.items()
+            paper_id: run.identity
+            for paper_id, run in snapshot.runs_by_paper.items()
         }
         try:
             prior = read_build_provenance(layout.wiki_dir)
@@ -249,15 +277,19 @@ class WorkspaceWikiService:
         if _snapshot_covers_different_inputs(layout, context.paper_ids):
             layout.delete_wiki_storage()
         build_result = self._build_service(
-            workspace_id, layout, instances
+            workspace_id, layout, snapshot
         ).build_wiki_for_workspace(context)
-        binding = record.schema_binding
-        assert binding is not None
+        # REQ-006: the fingerprint and provenance identities derive from the
+        # SAME frozen snapshot — its binding triple (matching BOTH the
+        # captured definition and the Workspace binding, AC-010) and its
+        # captured run identities (AC-009). No later definition/run
+        # re-resolution can alter the recorded build identity.
+        binding_identity = snapshot.binding_identity
         fingerprint = compute_wiki_input_fingerprint(
             workspace_id=record.workspace_id,
-            schema_id=binding.schema_id,
-            schema_version=binding.schema_version,
-            schema_hash=binding.schema_hash,
+            schema_id=binding_identity["schema_id"],
+            schema_version=binding_identity["schema_version"],
+            schema_hash=binding_identity["schema_hash"],
             paper_ids=context.paper_ids,
             schema_run_identities=identities,
         )
@@ -577,18 +609,21 @@ class WorkspaceWikiService:
         self,
         workspace_id: str,
         layout: WorkspaceStorageLayout,
-        instances: dict[str, "SchemaInstance"],
+        snapshot: "WorkspaceWikiSchemaBuildSnapshot",
     ) -> "WorkspaceWikiBuildService":
         """The L2S3 build service for this Workspace.
 
-        The default composition's ``schema_instance_loader`` returns only the
-        already-governed compatible ``SchemaInstance`` values derived from the
-        captured current-run snapshot collection
-        (``capture_current_runs``, REQ-002 / AC-003 / C-002) — never raw L2S2
-        ``get_schema()`` current reads that could bypass binding validation or
-        resolve a different current run than the one whose identity is being
-        recorded. The injectable factory keeps its ``(workspace_id, layout)``
-        contract for deterministic test composition.
+        The default composition receives ONLY the frozen build snapshot's
+        captured inputs (REQ-002 / AC-004 / AC-005 / C-002): the captured
+        ``SchemaDefinition`` through ``schema_definition_loader`` and the
+        captured per-Paper ``SchemaInstance`` values through
+        ``schema_instance_loader`` — never the default current-definition/
+        current-instance resolvers, so no authoritative Schema source that
+        could differ from the captured snapshot is re-resolved by that build
+        (C-002). ``composition_factory`` replaces only the provider
+        composition when injected; the captured-input loaders stay enforced.
+        The injectable ``build_service_factory`` keeps its ``(workspace_id,
+        layout)`` contract for deterministic test composition.
         """
         if self._build_service_factory is not None:
             return self._build_service_factory(workspace_id, layout)
@@ -596,8 +631,24 @@ class WorkspaceWikiService:
             WorkspaceWikiBuildService,
         )
 
+        if self._composition_factory is not None:
+            return WorkspaceWikiBuildService(
+                # REQ-002/AC-004: the captured definition — never the default
+                # ``get_schema_definition`` current-definition resolver.
+                schema_definition_loader=lambda schema_id: snapshot.definition,
+                # REQ-002/AC-005: the captured per-Paper instances — never the
+                # default current ``get_schema()`` resolver.
+                schema_instance_loader=lambda paper_id, schema_id: (
+                    snapshot.runs_by_paper[paper_id].instance
+                ),
+                composition_factory=self._composition_factory,
+                wiki_storage_root=layout.wiki_store_base,
+            )
         return WorkspaceWikiBuildService(
-            schema_instance_loader=lambda paper_id, schema_id: instances[paper_id],
+            schema_definition_loader=lambda schema_id: snapshot.definition,
+            schema_instance_loader=lambda paper_id, schema_id: (
+                snapshot.runs_by_paper[paper_id].instance
+            ),
             wiki_storage_root=layout.wiki_store_base,
         )
 

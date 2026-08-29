@@ -33,6 +33,18 @@ Also proves the governed current-run build snapshot (T-001 / REQ-001):
 - AC-009: binding-mismatch / missing / corrupt capture keeps failing with the
   exact stable codes of every other governed read surface.
 
+And proves the complete build snapshot (T-001 / REQ-001 / REQ-003):
+
+- AC-001: ``capture_build_snapshot`` freezes the exact current
+  SchemaDefinition whose deterministic hash provably equals the binding hash
+  together with every validated current run in ONE immutable
+  ``WorkspaceWikiSchemaBuildSnapshot``;
+- AC-002/AC-003: same id/version with a changed content hash, or a changed
+  version, rejects with the stable ``schema_binding_mismatch`` code BEFORE
+  any run is captured (definition gate precedes run capture);
+- REQ-001: an invalid member run aborts the whole snapshot with its stable
+  code; capture is read-only and never mutates Schema/Wiki state.
+
 All extraction runs are fully offline (fake LLM provider, offline retrieval).
 """
 
@@ -63,12 +75,14 @@ from transit_scholar.layer3.schema import (
     SchemaMissingError,
     ValidatedCurrentSchemaRun,
     WorkspaceSchemaService,
+    WorkspaceWikiSchemaBuildSnapshot,
 )
 from transit_scholar.layer3.storage import workspace_layout
 from transit_scholar.layer3.workspace import (
     InvalidWorkspaceInputError,
     PaperNotMemberError,
     WorkspaceService,
+    compute_schema_hash,
 )
 
 DEFINITION = get_schema_definition("bus_control_rl")
@@ -386,8 +400,6 @@ def test_materialize_rejects_same_id_version_with_changed_hash(
     tampered = _tampered_definition(version=DEFINITION.version)
     assert tampered.schema_id == DEFINITION.schema_id
     assert tampered.version == DEFINITION.version
-    from transit_scholar.layer3.workspace import compute_schema_hash
-
     assert compute_schema_hash(tampered) != compute_schema_hash(DEFINITION)
     monkeypatch.setattr(
         schema_service_module, "get_schema_definition", lambda _schema_id: tampered
@@ -873,4 +885,240 @@ def test_capture_requires_bound_workspace_and_member(session, project_tmp_path):
     ).derived_dir.exists()
     with pytest.raises(PaperNotMemberError) as non_member:
         schema.capture_current_runs(ws_bound.workspace_id, ["ghost-paper"])
+    assert non_member.value.code == "paper_not_member"
+
+
+# ---------------------------------------------------------------------------
+# T-001 / REQ-001 / REQ-003: complete build snapshot (definition + runs)
+# ---------------------------------------------------------------------------
+
+
+def _multi_member_bound_workspace(session, project_tmp_path, *, workspace_id):
+    """A bound Workspace with two materialized members (papers "am" and "za")."""
+    paper_one = add_paper(session, paper_id="za", title="Build Snap Z")
+    paper_two = add_paper(session, paper_id="am", title="Build Snap A")
+    ws = create_bound_workspace(session, workspace_id=workspace_id)
+    service = WorkspaceService(session)
+    service.add_paper(ws.workspace_id, paper_one.id)
+    service.add_paper(ws.workspace_id, paper_two.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper_one.id, llm_client=FakeLLMProvider())
+    schema.materialize(ws.workspace_id, paper_two.id, llm_client=FakeLLMProvider())
+    return ws.workspace_id, schema
+
+
+def test_capture_build_snapshot_captures_exact_definition_and_runs(
+    session, project_tmp_path
+):
+    """AC-001: for binding S/V/HA, ``capture_build_snapshot`` freezes the
+    exact current SchemaDefinition A (with compute_schema_hash(A) == HA) and
+    every validated current run in ONE immutable snapshot — exact definition
+    id/version/hash succeeds (Required Verification)."""
+    workspace_id, schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-ok"
+    )
+    binding = WorkspaceService(session).get(workspace_id).schema_binding
+    assert binding is not None
+
+    snapshot = schema.capture_build_snapshot(workspace_id)
+
+    assert isinstance(snapshot, WorkspaceWikiSchemaBuildSnapshot)
+    # The frozen top-level snapshot carries the Workspace binding triple.
+    assert snapshot.workspace_id == workspace_id
+    assert snapshot.schema_id == binding.schema_id
+    assert snapshot.schema_version == binding.schema_version
+    assert snapshot.schema_hash == binding.schema_hash
+    # Definition capture: the EXACT current definition used by the build,
+    # with the same canonical hash used at Workspace creation (AC-001).
+    assert snapshot.definition == get_schema_definition(binding.schema_id)
+    assert snapshot.definition.schema_id == binding.schema_id
+    assert snapshot.definition.version == binding.schema_version
+    assert compute_schema_hash(snapshot.definition) == binding.schema_hash
+    # Run capture: every member's governed run snapshot, deterministic order.
+    captured_runs = schema.capture_current_runs(workspace_id)
+    assert list(snapshot.runs_by_paper) == ["am", "za"]
+    assert set(snapshot.runs_by_paper) == {"am", "za"}
+    for paper_id, run in snapshot.runs_by_paper.items():
+        assert isinstance(run, ValidatedCurrentSchemaRun)
+        assert run == captured_runs[paper_id]
+        assert run.instance == captured_runs[paper_id].instance
+        assert run.identity == captured_runs[paper_id].identity
+    # The identity consumed by fingerprint/provenance derivation matches
+    # BOTH the captured definition and the Workspace binding (REQ-006).
+    assert snapshot.binding_identity == {
+        "schema_id": binding.schema_id,
+        "schema_version": binding.schema_version,
+        "schema_hash": binding.schema_hash,
+    }
+
+
+def test_capture_build_snapshot_is_frozen(session, project_tmp_path):
+    """T-001: the complete build snapshot is frozen after capture — the
+    binding triple, the definition and the run collection can never be
+    rewritten once captured."""
+    workspace_id, schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-frozen"
+    )
+    snapshot = schema.capture_build_snapshot(workspace_id)
+    with pytest.raises(ValidationError):
+        snapshot.schema_hash = "forged-hash"
+    with pytest.raises(ValidationError):
+        snapshot.definition = DEFINITION
+    with pytest.raises(ValidationError):
+        snapshot.runs_by_paper = {}
+    # ``binding_identity`` and ``runs_by_paper`` values are derived views:
+    # mutating a returned copy never changes the captured snapshot.
+    forged = snapshot.binding_identity
+    forged["schema_hash"] = "forged-hash"
+    assert snapshot.binding_identity["schema_hash"] == snapshot.schema_hash
+
+
+def test_capture_build_snapshot_rejects_same_id_version_changed_hash(
+    monkeypatch, session, project_tmp_path
+):
+    """AC-002 (Required Verification): the current SchemaDefinition has the
+    same schema_id/version but a different deterministic content hash ->
+    capture of the complete build snapshot fails with the stable
+    ``schema_binding_mismatch`` code BEFORE any run is captured — the
+    definition gate precedes run capture, so no snapshot can ever pair a
+    foreign definition with validated runs (REQ-003 / C-003)."""
+    workspace_id, schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-hash"
+    )
+    import transit_scholar.layer3.schema.service as schema_service_module
+
+    tampered = _tampered_definition(version=DEFINITION.version)
+    assert tampered.schema_id == DEFINITION.schema_id
+    assert tampered.version == DEFINITION.version
+    assert compute_schema_hash(tampered) != compute_schema_hash(DEFINITION)
+    monkeypatch.setattr(
+        schema_service_module, "get_schema_definition", lambda _schema_id: tampered
+    )
+
+    # The definition gate must reject BEFORE the governed run capture runs.
+    def run_capture_must_not_run(*args, **kwargs):
+        raise AssertionError(
+            "run capture must not execute when the current SchemaDefinition "
+            "does not match the Workspace binding (REQ-003)"
+        )
+
+    schema.capture_current_runs = run_capture_must_not_run  # type: ignore[method-assign]
+    with pytest.raises(SchemaBindingMismatchError) as mismatch:
+        schema.capture_build_snapshot(workspace_id)
+    assert mismatch.value.code == "schema_binding_mismatch"
+
+
+def test_capture_build_snapshot_rejects_changed_version(
+    monkeypatch, session, project_tmp_path
+):
+    """AC-003 (Required Verification): the current SchemaDefinition version
+    differs from the Workspace binding -> capture of the complete build
+    snapshot rejects with the stable ``schema_binding_mismatch`` code before
+    L2S3 execution."""
+    workspace_id, schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-ver"
+    )
+    import transit_scholar.layer3.schema.service as schema_service_module
+
+    tampered = _tampered_definition(version="9.9.9")
+    assert tampered.version != DEFINITION.version
+    monkeypatch.setattr(
+        schema_service_module, "get_schema_definition", lambda _schema_id: tampered
+    )
+
+    with pytest.raises(SchemaBindingMismatchError) as version_error:
+        schema.capture_build_snapshot(workspace_id)
+    assert version_error.value.code == "schema_binding_mismatch"
+
+
+def test_capture_build_snapshot_rejects_unresolvable_definition(
+    monkeypatch, session, project_tmp_path
+):
+    """REQ-003: when the current SchemaDefinition for the bound schema_id
+    cannot be resolved at all, the complete build snapshot capture fails
+    explicitly with the stable ``schema_binding_mismatch`` code."""
+    workspace_id, schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-unres"
+    )
+    import transit_scholar.layer3.schema.service as schema_service_module
+
+    def missing_definition(schema_id):
+        from transit_scholar.layer2.schema_extraction import (
+            SchemaPluginNotFoundError,
+        )
+
+        raise SchemaPluginNotFoundError(f"schema plugin {schema_id!r} not found")
+
+    monkeypatch.setattr(
+        schema_service_module, "get_schema_definition", missing_definition
+    )
+    with pytest.raises(SchemaBindingMismatchError) as exc_info:
+        schema.capture_build_snapshot(workspace_id)
+    assert exc_info.value.code == "schema_binding_mismatch"
+
+
+def test_capture_build_snapshot_paper_subset_and_empty(session, project_tmp_path):
+    """T-001: the complete build snapshot can capture an explicit Paper
+    subset (still sorted) or an empty set; the definition is always the same
+    validated current definition."""
+    workspace_id, schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-subset"
+    )
+    subset = schema.capture_build_snapshot(workspace_id, ["za"])
+    assert list(subset.runs_by_paper) == ["za"]
+    assert subset.runs_by_paper["za"].run_id == schema.capture_current_run(
+        workspace_id, "za"
+    ).run_id
+    binding = WorkspaceService(session).get(workspace_id).schema_binding
+    assert binding is not None
+    assert subset.definition == get_schema_definition(binding.schema_id)
+
+    empty = schema.capture_build_snapshot(workspace_id, [])
+    assert empty.runs_by_paper == {}
+    assert empty.schema_id == subset.schema_id
+    assert empty.definition == subset.definition
+
+
+def test_capture_build_snapshot_aborts_on_invalid_run(session, project_tmp_path):
+    """REQ-001/AC-009: one invalid member run aborts the complete build
+    snapshot with its stable code — an incomplete snapshot (valid runs
+    without the invalid one) is never returned, so a build can never consume
+    a partially governed set."""
+    workspace_id, schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-invrun"
+    )
+    layout = workspace_layout(workspace_id, data_root=project_tmp_path)
+    run_id = layout.schema_storage().read_current("za").run_id
+    shutil.rmtree(layout.schemas_dir / "za" / "runs" / run_id)
+
+    # Sorted order is ["am", "za"]: the invalid Paper aborts the snapshot.
+    with pytest.raises(SchemaMissingError) as missing:
+        schema.capture_build_snapshot(workspace_id)
+    assert missing.value.code == "schema_missing"
+    # Explicitly requesting only the valid member still succeeds.
+    partial = schema.capture_build_snapshot(workspace_id, ["am"])
+    assert list(partial.runs_by_paper) == ["am"]
+    assert partial.definition == get_schema_definition(DEFINITION.schema_id)
+
+
+def test_capture_build_snapshot_requires_bound_workspace_and_member(
+    session, project_tmp_path
+):
+    """T-001 boundaries: the complete build snapshot is disabled for
+    no-schema Workspaces (``schema_disabled``, never a fallback) and rejects
+    non-member Papers (``paper_not_member``)."""
+    paper = add_paper(session)
+    ws_none = create_none_workspace(session)
+    WorkspaceService(session).add_paper(ws_none.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+
+    with pytest.raises(SchemaDisabledError) as disabled:
+        schema.capture_build_snapshot(ws_none.workspace_id)
+    assert disabled.value.code == "schema_disabled"
+
+    ws_bound, bound_schema = _multi_member_bound_workspace(
+        session, project_tmp_path, workspace_id="ws-bs-member"
+    )
+    with pytest.raises(PaperNotMemberError) as non_member:
+        bound_schema.capture_build_snapshot(ws_bound, ["ghost-paper"])
     assert non_member.value.code == "paper_not_member"

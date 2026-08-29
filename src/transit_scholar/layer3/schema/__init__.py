@@ -9,7 +9,12 @@ The governed current-run build snapshot (``ValidatedCurrentSchemaRun``,
 captured by ``WorkspaceSchemaService.capture_current_run`` /
 ``capture_current_runs``) returns the exact ``SchemaInstance`` and the exact
 run identity from ONE validated current persisted run (T-001 / REQ-001 /
-AC-001..AC-002).
+AC-001..AC-002). The complete build snapshot
+(``WorkspaceWikiSchemaBuildSnapshot``, captured by
+``WorkspaceSchemaService.capture_build_snapshot``) freezes the exact
+binding-compatible ``SchemaDefinition`` together with every captured
+validated current run in ONE immutable object captured before L2S3 execution
+(T-001 / REQ-001 / REQ-003 / AC-001 / AC-006).
 """
 
 from .errors import (
@@ -19,12 +24,16 @@ from .errors import (
     WorkspaceSchemaError,
 )
 from .service import PaperSchemaReadiness, WorkspaceSchemaService
-from .snapshot import ValidatedCurrentSchemaRun
+from .snapshot import (
+    ValidatedCurrentSchemaRun,
+    WorkspaceWikiSchemaBuildSnapshot,
+)
 
 __all__ = [
     "WorkspaceSchemaService",
     "PaperSchemaReadiness",
     "ValidatedCurrentSchemaRun",
+    "WorkspaceWikiSchemaBuildSnapshot",
     "WorkspaceSchemaError",
     "SchemaDisabledError",
     "SchemaMissingError",

@@ -32,15 +32,43 @@ Proves:
   exactly matches the governed current-run snapshot collection
   (``ValidatedCurrentSchemaRun``), the single source that supplies both
   SchemaInstance and identity from the same persisted run (AC-001/AC-002);
-- T-002/REQ-002: ``build()`` performs exactly ONE governed current-run
-  capture and derives BOTH the L2S3 instances and the fingerprint/provenance
-  identities from that same snapshot collection — no second current-run
-  resolution exists (AC-002/AC-003/AC-004/C-001/C-002);
+- T-002/REQ-002: ``build()`` performs exactly ONE governed complete
+  build-snapshot capture (``capture_build_snapshot``: binding-compatible
+  SchemaDefinition + every validated current run) and derives BOTH the L2S3
+  inputs and the fingerprint/provenance identities from that same frozen
+  snapshot — no second definition/current-run resolution exists (AC-002..AC-006 /
+  C-001 / C-002);
+- T-002/AC-004/AC-005 (Required Verification): the Layer3-composed L2S3
+  service receives the captured SchemaDefinition through
+  ``schema_definition_loader`` and the captured per-Paper SchemaInstances
+  through ``schema_instance_loader`` — the default current-definition/
+  current-instance resolvers are never used for that build;
 - T-002/REQ-003: a deterministic A->B current-switch race (current=A,
   capture A, switch to a valid compatible run B before finalization) leaves
   the build consuming A and recording A in provenance/fingerprint, and makes
   the next ``status()`` stale — never ready (AC-005/AC-006/AC-007); a later
-  normal build over current B records B and returns ready (AC-008).
+  normal build over current B records B and returns ready (AC-008);
+- T-002/REQ-004/AC-007: a deterministic A->B definition race (globally
+  resolvable SchemaDefinition changes to B after capture but before L2S3
+  input loading) leaves the current build consuming captured A with
+  provenance/fingerprint still recording A — the default current-definition
+  resolver is proven never re-invoked;
+- T-002/REQ-003/AC-002/AC-003: a current SchemaDefinition that no longer
+  matches the Workspace binding (same id/version changed content hash, or
+  changed version) makes ``build()`` fail with the stable
+  ``schema_binding_mismatch`` code BEFORE L2S3 execution and leaves the
+  existing Wiki and its provenance byte-identical and ready (C-007);
+- T-001/REQ-001/REQ-003: ``capture_build_snapshot`` freezes the exact
+  binding-compatible SchemaDefinition together with every validated current
+  run in ONE immutable ``WorkspaceWikiSchemaBuildSnapshot`` (AC-001/AC-006);
+  a failed capture (same id/version changed hash, or changed version) rejects
+  with the stable ``schema_binding_mismatch`` code and leaves an existing
+  Wiki and its provenance byte-identical and ready (Required Verification);
+- T-001/REQ-006: the recorded build provenance identities and input
+  fingerprint exactly match the complete build snapshot's captured run
+  identities and binding triple (AC-009/AC-010), and the Layer3-composed
+  L2S3 service accepts ONLY the captured definition A and run-A instances
+  (AC-004/AC-005/AC-006).
 
 The L2S3 build composition is fully offline (fake structured-LLM client and
 fake embedding provider, mirroring the L2S3 deterministic suite); Schema runs
@@ -72,6 +100,7 @@ from transit_scholar.layer3.schema import (
     SchemaBindingMismatchError,
     SchemaMissingError,
     WorkspaceSchemaService,
+    WorkspaceWikiSchemaBuildSnapshot,
 )
 from transit_scholar.layer3.storage import (
     compute_wiki_input_fingerprint,
@@ -87,7 +116,7 @@ from transit_scholar.layer3.wiki import (
     WorkspaceWikiService,
     derive_workspace_context,
 )
-from transit_scholar.layer3.workspace import WorkspaceService
+from transit_scholar.layer3.workspace import WorkspaceService, compute_schema_hash
 
 DEFINITION = get_schema_definition("bus_control_rl")
 
@@ -889,24 +918,23 @@ def test_provenance_schema_runs_match_governed_snapshot_identities(
 class _RecordingSchemaService:
     """Spy over the governed Schema service (T-002 / AC-002 / C-001).
 
-    Records which current-run entry points a build drives: the governed
-    snapshot capture (``capture_current_runs``) and the identity-only
-    resolution (``current_run_identities``). A rewire regression that
-    resolves a second current run for provenance/fingerprint identity shows
-    up here as an ``identity_calls`` entry or a second snapshot capture.
+    Records which entry points a build drives: the governed complete
+    build-snapshot capture (``capture_build_snapshot``) and the identity-only
+    resolution (``current_run_identities``). A rewire regression that resolves
+    a second definition/current run for content, fingerprint or provenance
+    identity shows up here as an ``identity_calls`` entry, a second snapshot
+    capture, or a loader-resolver re-resolution.
     """
 
     def __init__(self, inner):
         self._inner = inner
-        self.capture_calls: list[tuple] = []
+        self.capture_calls: list[WorkspaceWikiSchemaBuildSnapshot] = []
         self.identity_calls: list[str] = []
 
-    def capture_current_runs(self, workspace_id, paper_ids=None):
-        snapshots = self._inner.capture_current_runs(workspace_id, paper_ids)
-        self.capture_calls.append(
-            tuple(sorted(snapshots.values(), key=lambda s: s.paper_id))
-        )
-        return snapshots
+    def capture_build_snapshot(self, workspace_id, paper_ids=None):
+        snapshot = self._inner.capture_build_snapshot(workspace_id, paper_ids)
+        self.capture_calls.append(snapshot)
+        return snapshot
 
     def current_run_identities(self, workspace_id, paper_ids=None):
         self.identity_calls.append(workspace_id)
@@ -916,73 +944,130 @@ class _RecordingSchemaService:
         return getattr(self._inner, name)
 
 
-def _recording_build_factory(session, served_out):
-    """Wrap the offline factory's instance loader and record served inputs."""
+def _offline_composition(context, store):
+    """Offline provider composition for the DEFAULT L2S3 build composition
+    (only the LLM/embedding collaborators are faked; the captured-input
+    loaders stay the Layer3 default's)."""
+    return create_production_wiki_composition(
+        context,
+        store,
+        llm_client=_Client(),
+        embedding_provider=_Embedding(),
+    )
 
-    def factory(workspace_id, layout):
-        service = _offline_build_factory(session)(workspace_id, layout)
-        original = service.schema_instance_loader
 
-        def loader(paper_id, schema_id):
-            instance = original(paper_id, schema_id)
-            served_out.append(instance)
+def _instrumented_default_wiki_service(
+    monkeypatch, session, project_tmp_path, *, schemas=None, served=None
+):
+    """A ``WorkspaceWikiService`` driving the LAYER3 DEFAULT composition
+    (no build-service factory) with BOTH L2S3 Schema loaders instrumented.
+
+    Wraps ``_build_service`` so the test can record every object the
+    default composition's ``schema_definition_loader`` and
+    ``schema_instance_loader`` actually serve to the L2S3 build — proving the
+    L2S3 inputs are exactly the captured snapshot objects (AC-004/AC-005/
+    AC-006) and never fresh authoritative re-resolutions (REQ-002 / C-002).
+    Only the Paper metadata loader is substituted (DB row → ``PaperMetadata``,
+    as the offline factories do); the Schema loaders are the Layer3 default's
+    own and are left untouched apart from the recording wrapper.
+    """
+    served = served if served is not None else {"definitions": [], "instances": []}
+    wiki = WorkspaceWikiService(
+        session,
+        data_root=project_tmp_path,
+        schemas=schemas,
+        composition_factory=_offline_composition,
+    )
+    original = WorkspaceWikiService._build_service
+
+    def metadata_loader(paper_id):
+        paper = session.get(Paper, paper_id)
+        if paper is None or not paper.title:
+            return None
+        return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
+
+    def instrumented(self, workspace_id, layout, snapshot):
+        service = original(self, workspace_id, layout, snapshot)
+        definition_loader = service.schema_definition_loader
+        instance_loader = service.schema_instance_loader
+
+        def recorded_definition_loader(schema_id):
+            definition = definition_loader(schema_id)
+            served["definitions"].append(definition)
+            return definition
+
+        def recorded_instance_loader(paper_id, schema_id):
+            instance = instance_loader(paper_id, schema_id)
+            served["instances"].append(instance)
             return instance
 
-        service.schema_instance_loader = loader
+        service.schema_definition_loader = recorded_definition_loader
+        service.schema_instance_loader = recorded_instance_loader
+        service.paper_metadata_loader = metadata_loader
         return service
 
-    return factory
+    monkeypatch.setattr(WorkspaceWikiService, "_build_service", instrumented)
+    return wiki, served
 
 
 def test_build_uses_one_governed_capture_for_content_and_identity(
-    session, project_tmp_path
+    session, project_tmp_path, monkeypatch
 ):
-    """AC-002/AC-003/AC-004 (C-001/C-002): build() performs exactly ONE
-    governed current-run capture; the L2S3 instances, the input fingerprint
-    and the recorded provenance identities are all derived from that same
-    captured snapshot collection — no second current-run resolution supplies
-    the identity. A normal non-racing build over the captured run stays ready
-    (AC-008)."""
+    """AC-002..AC-006 + Required Verification (C-001/C-002): build() performs
+    exactly ONE governed complete build-snapshot capture; the Layer3-composed
+    L2S3 service receives ONLY the captured definition through
+    ``schema_definition_loader`` and the captured per-Paper instances through
+    ``schema_instance_loader`` (the default current resolvers are never used),
+    and the L2S3 instances, the input fingerprint and the recorded provenance
+    identities are all derived from that same frozen snapshot — no second
+    definition/current-run resolution supplies content or identity. A normal
+    non-racing build over the captured run stays ready (AC-008)."""
     paper = add_paper(session, paper_id="bg-one-p", title="One Capture Paper")
     ws = create_bound_workspace(session, workspace_id="ws-bg-one")
     WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
     schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
     schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
 
-    served: list = []
+    served: dict[str, list] = {"definitions": [], "instances": []}
     recording = _RecordingSchemaService(schema)
-    wiki = WorkspaceWikiService(
+    wiki, served = _instrumented_default_wiki_service(
+        monkeypatch,
         session,
-        data_root=project_tmp_path,
-        build_service_factory=_recording_build_factory(session, served),
+        project_tmp_path,
         schemas=recording,
+        served=served,
     )
     outcome = wiki.build(ws.workspace_id)
 
-    # C-001/AC-002: one governed capture, and the identity-only resolution is
-    # never consulted by the build.
+    # C-001/AC-002: one governed complete capture, and the identity-only
+    # resolution is never consulted by the build.
     assert len(recording.capture_calls) == 1
     assert recording.identity_calls == []
-    captured = recording.capture_calls[0]
-    assert [snapshot.paper_id for snapshot in captured] == [paper.id]
+    snapshot = recording.capture_calls[0]
+    assert list(snapshot.runs_by_paper) == [paper.id]
+    assert snapshot.definition == get_schema_definition(
+        WorkspaceService(session).get(ws.workspace_id).schema_binding.schema_id
+    )
 
-    # AC-003: the L2S3 composition consumed exactly the captured snapshot
-    # instances (same persisted run).
-    assert served == [captured[0].instance]
+    # Required Verification: BOTH L2S3 loaders served exactly the captured
+    # snapshot objects — definition A once and the captured run-A instance
+    # (AC-004/AC-005/AC-006); nothing was resolved fresh by default loaders.
+    assert served["definitions"] == [snapshot.definition]
+    assert served["instances"] == [snapshot.runs_by_paper[paper.id].instance]
 
-    # AC-004/REQ-002: the recorded provenance schema_runs and the input
-    # fingerprint are recomputed from EXACTLY the captured snapshot
-    # identities (the same collection that supplied the instances).
-    binding = WorkspaceService(session).get(ws.workspace_id).schema_binding
-    assert binding is not None
+    # AC-004/REQ-002/REQ-006: the recorded provenance schema_runs and the
+    # input fingerprint are recomputed from EXACTLY the frozen snapshot
+    # (binding triple + captured run identities — AC-009/AC-010).
     expected_identities = {
-        snapshot.paper_id: snapshot.identity for snapshot in captured
+        paper_id: run.identity
+        for paper_id, run in snapshot.runs_by_paper.items()
     }
+    binding_identity = snapshot.binding_identity
     expected_fingerprint = compute_wiki_input_fingerprint(
         workspace_id=ws.workspace_id,
-        schema_id=binding.schema_id,
-        schema_version=binding.schema_version,
-        schema_hash=binding.schema_hash,
+        schema_id=binding_identity["schema_id"],
+        schema_version=binding_identity["schema_version"],
+        schema_hash=binding_identity["schema_hash"],
         paper_ids=[paper.id],
         schema_run_identities=expected_identities,
     )
@@ -995,6 +1080,201 @@ def test_build_uses_one_governed_capture_for_content_and_identity(
 
     # AC-008: the normal non-racing build over the captured run remains ready.
     assert wiki.status(ws.workspace_id).status == "ready"
+
+
+class _PostCaptureDefinitionSwap:
+    """Schema-service wrapper that flips the globally resolvable definition to
+    B the moment the build's governed capture finishes (AC-007 scenario C).
+
+    Deterministic seam between the frozen snapshot capture and the L2S3 input
+    loading: the build's own ``capture_build_snapshot`` resolves A normally,
+    then the wrapper arms the swap so any later authoritative definition
+    re-resolution would observe B and must fail/be detected.
+    """
+
+    def __init__(self, inner, state):
+        self._inner = inner
+        self._state = state
+
+    def capture_build_snapshot(self, workspace_id, paper_ids=None):
+        snapshot = self._inner.capture_build_snapshot(workspace_id, paper_ids)
+        self._state["swapped"] = True
+        return snapshot
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_definition_change_after_capture_cannot_alter_current_build(
+    session, project_tmp_path, monkeypatch
+):
+    """AC-006/AC-007 + REQ-002/REQ-004 (Required Verification, scenario C).
+
+    The globally resolvable SchemaDefinition changes from A to B AFTER the
+    frozen build-snapshot capture but BEFORE the L2S3 input loading; the
+    current build still consumes captured A — through the Layer3 default
+    composition's ``schema_definition_loader`` — and the default
+    current-definition resolver is proven never re-invoked for that build:
+    it raises if called after the swap (a regression that re-resolved the
+    definition would fail the build or record B). Provenance/fingerprint
+    still record A (AC-009/AC-010) and the build stays ready.
+    """
+    paper = add_paper(session, paper_id="bg-defrace-p", title="Definition Race Paper")
+    ws = create_bound_workspace(session, workspace_id="ws-bg-defrace")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
+
+    # Snapshot A (definition A + run A) captured before the race begins.
+    snapshot_a = schema.capture_build_snapshot(ws.workspace_id)
+    definition_a = snapshot_a.definition
+
+    import transit_scholar.layer3.schema.service as schema_service_module
+
+    # B: a DIFFERENT globally resolvable definition (changed version AND
+    # content) — if the Layer3-composed L2S3 build ever used the default
+    # current-definition resolver here, B would fail the build's definition
+    # validation (schema_mismatch) instead of consuming captured A.
+    definition_b = DEFINITION.model_copy(
+        update={"version": "9.9.9", "description": "definition B content"}
+    )
+    binding = WorkspaceService(session).get(ws.workspace_id).schema_binding
+    assert binding is not None
+    assert definition_b != definition_a
+    assert definition_b.version != binding.schema_version
+
+    state = {"swapped": False, "resolver_calls": 0}
+
+    def guarded_definition_resolver(schema_id):
+        # The ONLY legitimate authoritative definition resolution is the
+        # build's initial capture (count 1). Any later re-resolution proves
+        # an independent authoritative reload (REQ-002 / C-002) and fails.
+        state["resolver_calls"] += 1
+        if state["swapped"]:
+            raise AssertionError(
+                "an authoritative SchemaDefinition was re-resolved after "
+                "capture (REQ-002/C-002)"
+            )
+        return get_schema_definition(schema_id)
+
+    monkeypatch.setattr(
+        schema_service_module, "get_schema_definition", guarded_definition_resolver
+    )
+
+    served: dict[str, list] = {"definitions": [], "instances": []}
+    wiki, served = _instrumented_default_wiki_service(
+        monkeypatch,
+        session,
+        project_tmp_path,
+        schemas=_PostCaptureDefinitionSwap(schema, state),
+        served=served,
+    )
+    outcome = wiki.build(ws.workspace_id)
+
+    # The swap happened deterministically between capture and L2S3 loading.
+    assert state["swapped"] is True
+    # The default current-definition resolver was invoked exactly ONCE (the
+    # build's initial capture) — never re-resolved for the L2S3 build.
+    assert state["resolver_calls"] == 1
+
+    # Required Verification: the L2S3 build consumed ONLY the captured
+    # definition A and the captured run-A instance — the global A->B change
+    # cannot alter the current build (REQ-004/AC-007).
+    assert served["definitions"] == [definition_a]
+    assert served["instances"] == [
+        snapshot_a.runs_by_paper[paper.id].instance
+    ]
+
+    # Provenance and fingerprint record captured A (AC-009/AC-010) and the
+    # current build is ready (status() never re-resolves the definition).
+    identities_a = {
+        paper_id: run.identity
+        for paper_id, run in snapshot_a.runs_by_paper.items()
+    }
+    expected_fingerprint = compute_wiki_input_fingerprint(
+        workspace_id=ws.workspace_id,
+        schema_id=snapshot_a.schema_id,
+        schema_version=snapshot_a.schema_version,
+        schema_hash=snapshot_a.schema_hash,
+        paper_ids=[paper.id],
+        schema_run_identities=identities_a,
+    )
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    recorded = read_build_provenance(layout.wiki_dir)
+    assert recorded is not None
+    assert recorded.schema_runs == identities_a
+    assert outcome.provenance.schema_runs == identities_a
+    assert recorded.input_fingerprint == outcome.fingerprint == expected_fingerprint
+    assert wiki.status(ws.workspace_id).status == "ready"
+
+
+def test_build_rejects_changed_definition_before_l2s3_and_preserves_snapshot(
+    session, project_tmp_path, monkeypatch
+):
+    """AC-002/AC-003 + Required Verification (scenario B): after a successful
+    build, a current SchemaDefinition with the same id/version but a changed
+    deterministic content hash (or a changed version) makes ``build()`` fail
+    with the stable ``schema_binding_mismatch`` code BEFORE L2S3 execution —
+    via the frozen snapshot capture — and leaves the existing Wiki and its
+    provenance byte-identical and ready (C-007; the L2S3 composition must
+    never run)."""
+    paper = add_paper(
+        session, paper_id="bg-defmis-p", title="Definition Mismatch Paper"
+    )
+    ws = create_bound_workspace(session, workspace_id="ws-bg-defmis")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
+
+    wiki = wiki_service(session, project_tmp_path)
+    first = wiki.build(ws.workspace_id)
+    assert wiki.status(ws.workspace_id).status == "ready"
+
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    manifest_bytes = (layout.wiki_dir / "manifest.json").read_bytes()
+    provenance_bytes = (layout.wiki_dir / "provenance.json").read_bytes()
+
+    import transit_scholar.layer3.schema.service as schema_service_module
+
+    # Same id/version but a different deterministic content hash (AC-002):
+    # the L2S3 composition must never be constructed/consumed.
+    tampered = DEFINITION.model_copy(
+        update={"version": DEFINITION.version, "description": "tampered content"}
+    )
+    assert tampered.schema_id == DEFINITION.schema_id
+    assert tampered.version == DEFINITION.version
+    assert compute_schema_hash(tampered) != compute_schema_hash(DEFINITION)
+    monkeypatch.setattr(
+        schema_service_module, "get_schema_definition", lambda _schema_id: tampered
+    )
+    guarded = wiki_service(
+        session, project_tmp_path, factory=_build_must_not_run_factory
+    )
+    with pytest.raises(SchemaBindingMismatchError) as hash_mismatch:
+        guarded.build(ws.workspace_id)
+    assert hash_mismatch.value.code == "schema_binding_mismatch"
+    # C-007: the previous Wiki and its provenance are byte-identical and the
+    # snapshot stays ready.
+    assert (layout.wiki_dir / "manifest.json").read_bytes() == manifest_bytes
+    assert (layout.wiki_dir / "provenance.json").read_bytes() == provenance_bytes
+    intact = wiki.status(ws.workspace_id)
+    assert intact.status == "ready"
+    assert intact.recorded_fingerprint == first.fingerprint
+
+    # Changed version (AC-003): build() rejects before L2S3 too, state intact.
+    monkeypatch.setattr(
+        schema_service_module,
+        "get_schema_definition",
+        lambda _schema_id: DEFINITION.model_copy(update={"version": "9.9.9"}),
+    )
+    with pytest.raises(SchemaBindingMismatchError) as version_mismatch:
+        guarded.build(ws.workspace_id)
+    assert version_mismatch.value.code == "schema_binding_mismatch"
+    assert (layout.wiki_dir / "manifest.json").read_bytes() == manifest_bytes
+    assert (layout.wiki_dir / "provenance.json").read_bytes() == provenance_bytes
+    still_intact = wiki.status(ws.workspace_id)
+    assert still_intact.status == "ready"
+    assert still_intact.recorded_fingerprint == first.fingerprint
 
 
 class _RaceHit:
@@ -1360,3 +1640,146 @@ def test_restored_compatible_run_returns_the_same_wiki_to_ready(
     assert status.error_code is None
     assert status.fingerprint == outcome.fingerprint
     assert status.recorded_fingerprint == outcome.fingerprint
+
+
+# ---------------------------------------------------------------------------
+# T-001 / REQ-001 / REQ-006: complete build snapshot (definition + runs)
+# ---------------------------------------------------------------------------
+
+
+def test_complete_build_snapshot_matches_recorded_build_and_feeds_l2s3(
+    session, project_tmp_path
+):
+    """AC-006/AC-009/AC-010: the complete build snapshot (SchemaDefinition A
+    + run A snapshots) is exactly the set the recorded build consumed: its
+    provenance schema_runs and the input fingerprint recomputed from the
+    snapshot's binding triple and captured run identities exactly match the
+    recorded build (REQ-006), and the Layer3-composed L2S3 service accepts
+    ONLY the captured inputs — definition A through ``schema_definition_loader``
+    and run-A instances through ``schema_instance_loader`` (AC-004/AC-005)."""
+    paper = add_paper(session, paper_id="bs-p", title="Build Snapshot Paper")
+    ws = create_bound_workspace(session, workspace_id="ws-bs")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
+
+    wiki = wiki_service(session, project_tmp_path)
+    outcome = wiki.build(ws.workspace_id)
+    snapshot = schema.capture_build_snapshot(ws.workspace_id)
+    assert isinstance(snapshot, WorkspaceWikiSchemaBuildSnapshot)
+
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    recorded = read_build_provenance(layout.wiki_dir)
+    assert recorded is not None
+    # AC-009: provenance identities exactly match the captured runs.
+    identities = {
+        paper_id: run.identity for paper_id, run in snapshot.runs_by_paper.items()
+    }
+    assert recorded.schema_runs == identities
+    # AC-010 (REQ-006): the fingerprint identity matches BOTH the captured
+    # definition and the Workspace binding.
+    expected_fingerprint = compute_wiki_input_fingerprint(
+        workspace_id=ws.workspace_id,
+        schema_id=snapshot.schema_id,
+        schema_version=snapshot.schema_version,
+        schema_hash=snapshot.schema_hash,
+        paper_ids=[paper.id],
+        schema_run_identities=identities,
+    )
+    assert expected_fingerprint == outcome.fingerprint == recorded.input_fingerprint
+    # AC-001: the captured definition is the exact current definition and its
+    # deterministic hash provably equals the binding hash.
+    binding = WorkspaceService(session).get(ws.workspace_id).schema_binding
+    assert binding is not None
+    assert snapshot.definition == get_schema_definition(binding.schema_id)
+    assert compute_schema_hash(snapshot.definition) == binding.schema_hash
+    assert snapshot.binding_identity == {
+        "schema_id": binding.schema_id,
+        "schema_version": binding.schema_version,
+        "schema_hash": binding.schema_hash,
+    }
+
+    # AC-006 (REQ-002): the Layer3-composed L2S3 service receives ONLY the
+    # captured definition A and the captured run-A instances (never the
+    # default current-definition/current-instance resolvers) and validates
+    # them against the Workspace context without any independent resolution.
+    record = WorkspaceService(session).get(ws.workspace_id)
+    memberships = WorkspaceService(session).list_memberships(ws.workspace_id)
+    context = derive_workspace_context(record, memberships)
+    captured_service = WorkspaceWikiBuildService(
+        schema_definition_loader=lambda _schema_id: snapshot.definition,
+        schema_instance_loader=lambda paper_id, _schema_id: snapshot.runs_by_paper[
+            paper_id
+        ].instance,
+        paper_metadata_loader=lambda paper_id: PaperMetadata(
+            paper_id=paper.id, title="Build Snapshot Paper", year=2024
+        ),
+        composition_factory=lambda ctx, store: create_production_wiki_composition(
+            ctx, store, llm_client=_Client(), embedding_provider=_Embedding()
+        ),
+        wiki_storage_root=layout.wiki_store_base,
+    )
+    inputs = captured_service.load_build_inputs(context)
+    assert inputs.definition == snapshot.definition
+    assert inputs.instances_by_paper == {
+        paper.id: snapshot.runs_by_paper[paper.id].instance
+    }
+
+
+def test_failed_build_snapshot_capture_leaves_existing_wiki_and_provenance_untouched(
+    monkeypatch, session, project_tmp_path
+):
+    """Required Verification: when the current SchemaDefinition no longer
+    matches the Workspace binding (same id/version changed content hash, or
+    changed version), ``capture_build_snapshot`` rejects with the stable
+    ``schema_binding_mismatch`` code and a pre-existing Wiki and its
+    provenance stay byte-identical and ready — an invalid capture never
+    mutates Wiki/provenance state."""
+    paper = add_paper(session, paper_id="bs-intact-p", title="Intact Paper")
+    ws = create_bound_workspace(session, workspace_id="ws-bs-intact")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
+    wiki = wiki_service(session, project_tmp_path)
+    outcome = wiki.build(ws.workspace_id)
+    assert wiki.status(ws.workspace_id).status == "ready"
+
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    manifest_bytes = (layout.wiki_dir / "manifest.json").read_bytes()
+    provenance_bytes = (layout.wiki_dir / "provenance.json").read_bytes()
+
+    import transit_scholar.layer3.schema.service as schema_service_module
+
+    # Same id/version but a different deterministic content hash (AC-002).
+    tampered = DEFINITION.model_copy(
+        update={"version": DEFINITION.version, "description": "tampered content"}
+    )
+    assert tampered.schema_id == DEFINITION.schema_id
+    assert tampered.version == DEFINITION.version
+    assert compute_schema_hash(tampered) != compute_schema_hash(DEFINITION)
+    monkeypatch.setattr(
+        schema_service_module, "get_schema_definition", lambda _schema_id: tampered
+    )
+    with pytest.raises(SchemaBindingMismatchError) as hash_mismatch:
+        schema.capture_build_snapshot(ws.workspace_id)
+    assert hash_mismatch.value.code == "schema_binding_mismatch"
+    assert (layout.wiki_dir / "manifest.json").read_bytes() == manifest_bytes
+    assert (layout.wiki_dir / "provenance.json").read_bytes() == provenance_bytes
+    intact = wiki.status(ws.workspace_id)
+    assert intact.status == "ready"
+    assert intact.recorded_fingerprint == outcome.fingerprint
+
+    # Changed version (AC-003): rejected too, state still intact.
+    monkeypatch.setattr(
+        schema_service_module,
+        "get_schema_definition",
+        lambda _schema_id: DEFINITION.model_copy(update={"version": "9.9.9"}),
+    )
+    with pytest.raises(SchemaBindingMismatchError) as version_mismatch:
+        schema.capture_build_snapshot(ws.workspace_id)
+    assert version_mismatch.value.code == "schema_binding_mismatch"
+    assert (layout.wiki_dir / "manifest.json").read_bytes() == manifest_bytes
+    assert (layout.wiki_dir / "provenance.json").read_bytes() == provenance_bytes
+    still_intact = wiki.status(ws.workspace_id)
+    assert still_intact.status == "ready"
+    assert still_intact.recorded_fingerprint == outcome.fingerprint

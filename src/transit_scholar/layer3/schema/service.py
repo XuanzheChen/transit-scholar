@@ -36,6 +36,17 @@ read once, the run is read explicitly by the captured run_id, and both are
 validated against the immutable Workspace binding through the same boundary
 every read uses, so no second current-run resolution can ever supply a
 different identity (AC-001 / AC-002).
+
+T-001 (REQ-001/REQ-003): the complete build snapshot
+(``capture_build_snapshot``) additionally captures the EXACT current
+``SchemaDefinition`` used by the build and proves it against the immutable
+Workspace binding by schema_id / schema_version / deterministic schema_hash
+— the same canonical hashing used at Workspace creation — before freezing
+it together with every captured validated current run into ONE immutable
+``WorkspaceWikiSchemaBuildSnapshot`` (AC-001 / AC-006). A definition with
+the same id but a different version or content hash, or an unresolvable
+definition, fails with the stable ``schema_binding_mismatch`` code before
+any run is captured and before L2S3 execution (REQ-003 / AC-002 / AC-003).
 """
 
 from __future__ import annotations
@@ -89,7 +100,10 @@ from .errors import (
     SchemaDisabledError,
     SchemaMissingError,
 )
-from .snapshot import ValidatedCurrentSchemaRun
+from .snapshot import (
+    ValidatedCurrentSchemaRun,
+    WorkspaceWikiSchemaBuildSnapshot,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sqlalchemy.orm import Session
@@ -149,6 +163,10 @@ class WorkspaceSchemaService:
     REQ-001): one validated current persisted run carrying the exact
     ``SchemaInstance`` and the exact run identity together, so build content
     and fingerprint/provenance identity can never come from different runs.
+    ``capture_build_snapshot`` exposes the complete frozen build snapshot
+    (T-001 / REQ-001 / REQ-003): the exact binding-compatible
+    ``SchemaDefinition`` plus every validated current run in ONE immutable
+    ``WorkspaceWikiSchemaBuildSnapshot`` captured before L2S3 execution.
     """
 
     def __init__(
@@ -511,6 +529,66 @@ class WorkspaceSchemaService:
             for paper_id in sorted(paper_ids)
         }
 
+    def capture_build_snapshot(
+        self,
+        workspace_id: str,
+        paper_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> WorkspaceWikiSchemaBuildSnapshot:
+        """Capture ONE frozen complete authoritative build snapshot (T-001).
+
+        REQ-001 (T-001): captures, BEFORE any L2S3 Wiki build execution
+        (C-001), one mutually compatible frozen set containing the Workspace
+        binding triple, the EXACT current ``SchemaDefinition`` used by the
+        build, and every given (or every member) Paper's validated current
+        persisted run (AC-001 / AC-006):
+
+        1. the current ``SchemaDefinition`` for the bound schema_id is
+           resolved through the existing L2S2 loader and its deterministic
+           hash is derived with the SAME canonical hashing used at Workspace
+           creation (``binding_for`` / ``compute_schema_hash``);
+        2. the definition is required to match the immutable Workspace
+           binding by exact schema_id / schema_version / schema_hash —
+           REQ-003: same id/version but different content hash, or a
+           different version, rejects with the stable
+           ``schema_binding_mismatch`` code BEFORE any run is captured and
+           before L2S3 execution (AC-002 / AC-003);
+        3. every Paper's validated current run is captured through the
+           governed per-run capture (``capture_current_runs``), preserving
+           the v6 run-snapshot semantics (REQ-005): current pointer read
+           once, run read/validated by the captured run_id, and SchemaInstance
+           + provenance identity come from that exact run;
+        4. the definition and all runs are frozen into ONE
+           ``WorkspaceWikiSchemaBuildSnapshot`` keyed by deterministic sorted
+           ``paper_id`` order — definition and runs are mutually compatible
+           with the same immutable Workspace binding by construction
+           (REQ-004), and a post-capture definition/current change can never
+           alter the frozen snapshot (C-004).
+
+        A missing/corrupt/unreadable run, or a pointer/persisted run whose
+        Schema identity disagrees with the binding, aborts the whole capture
+        with its stable code (``schema_missing`` / ``schema_binding_mismatch``),
+        exactly like the per-Paper read paths (REQ-004 / AC-009): an
+        incomplete snapshot is never returned, so no build can consume a
+        partially governed set. Capture itself is read-only: it never mutates
+        Wiki or Schema state, so a failed capture cannot disturb an existing
+        Wiki/provenance.
+        """
+        record = self._require_bound(workspace_id)
+        binding = record.schema_binding
+        assert binding is not None
+        # Definition capture first (REQ-003): the exact definition used by
+        # the build must be proven binding-compatible before anything else.
+        definition = self.resolve_validated_definition(record)
+        runs = self.capture_current_runs(workspace_id, paper_ids)
+        return WorkspaceWikiSchemaBuildSnapshot(
+            workspace_id=workspace_id,
+            schema_id=binding.schema_id,
+            schema_version=binding.schema_version,
+            schema_hash=binding.schema_hash,
+            definition=definition,
+            runs_by_paper=runs,
+        )
+
     # ------------------------------------------------------------------
     # binding validation (REQ-003 / REQ-004)
     # ------------------------------------------------------------------
@@ -525,6 +603,29 @@ class WorkspaceSchemaService:
         definition cannot be resolved or its schema_id / schema_version /
         schema_hash differs from the persisted binding; the persisted binding
         is returned unchanged otherwise.
+        """
+        self.resolve_validated_definition(record)
+        binding = record.schema_binding
+        assert binding is not None  # guaranteed by bound-mode callers
+        return binding
+
+    def resolve_validated_definition(
+        self, record: WorkspaceRecord
+    ) -> "SchemaDefinition":
+        """Resolve the CURRENT SchemaDefinition proven to match the binding.
+
+        REQ-003 (T-001): resolves the current ``SchemaDefinition`` for the
+        bound schema_id through the existing L2S2 loader, derives the
+        deterministic binding triple with the same canonical hashing used at
+        Workspace creation (``binding_for`` / ``compute_schema_hash``) and
+        requires exact schema_id / schema_version / schema_hash equality
+        with the immutable Workspace binding. Raises
+        ``SchemaBindingMismatchError`` (the stable ``schema_binding_mismatch``
+        code) when the definition cannot be resolved or differs in version or
+        content hash — before any L2S2 run is read (AC-002 / AC-003). The
+        exact validated definition is returned so callers can freeze the
+        object actually used by the build into a captured build snapshot
+        (AC-001).
         """
         binding = record.schema_binding
         assert binding is not None  # guaranteed by bound-mode callers
@@ -561,7 +662,7 @@ class WorkspaceSchemaService:
                 f"is immutably bound to version {binding.schema_version!r} / "
                 f"hash {binding.schema_hash[:12]}... (REQ-003)"
             )
-        return binding
+        return definition
 
     def require_compatible_run(
         self,

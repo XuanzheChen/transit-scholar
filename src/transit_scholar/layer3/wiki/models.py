@@ -36,7 +36,11 @@ class WorkspaceWikiStatus(BaseModel):
       compatible mandatory persistent vector index with complete Page/Entity
       coverage exists (REQ-001 / AC-006);
     - ``stale`` — artifacts exist but the current authoritative inputs no
-      longer match the recorded fingerprint (AC-010);
+      longer match the recorded fingerprint (AC-010); when the mismatch comes
+      from a member Paper's current Workspace Schema run failing binding or
+      readability validation, the derived ``error_code`` is
+      ``schema_input_invalid`` (REQ-002 / AC-005..AC-007), otherwise
+      ``input_fingerprint_mismatch`` for a genuine input change;
     - ``error`` — artifacts fail integrity checks, provenance is corrupt or
       non-complete, the Manifest build is partial/failed, or the mandatory
       vector index is missing/stale/incompatible (AC-001..AC-005).

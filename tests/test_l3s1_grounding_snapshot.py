@@ -889,3 +889,88 @@ def test_grounding_ready_for_readable_binding_compatible_run(
     assert paper_view.schema_error_code is None
     assert snapshot.schema_coverage.status == "complete"
     assert snapshot.capabilities.schema_ready_papers == 1
+
+
+# ---------------------------------------------------------------------------
+# REQ-002 / AC-008..AC-009: Grounding never contradicts Schema governance
+# ---------------------------------------------------------------------------
+
+
+def _schema_wiki_ready_workspace(session, project_tmp_path, *, workspace_id, paper_id):
+    """A bound Workspace with one materialized member, a READY Base Wiki and a
+    Grounding-verified ready snapshot."""
+    service = WorkspaceService(session)
+    workspace = create_bound_workspace(session, workspace_id=workspace_id)
+    paper = add_paper(session, paper_id=paper_id, title="Consistency Paper")
+    service.add_paper(workspace.workspace_id, paper.id)
+    WorkspaceSchemaService(session, data_root=project_tmp_path).materialize(
+        workspace.workspace_id, paper.id, llm_client=FakeLLMProvider()
+    )
+    build_wiki(session, project_tmp_path, workspace.workspace_id)
+    assert (
+        grounding(session, project_tmp_path, evidence=FakeEvidence())
+        .ground(workspace.workspace_id)
+        .base_wiki.status
+        == "ready"
+    )
+    return workspace, paper
+
+
+def test_grounding_wiki_read_false_when_contributing_run_binding_mismatched(
+    session, project_tmp_path
+):
+    """AC-008: when a member Paper that contributed to a previously ready Wiki
+    derives schema_status missing with ``schema_binding_mismatch``, the SAME
+    Grounding snapshot MUST report base_wiki.status != ready and
+    wiki_read=false — never the old Wiki as current/ready (REQ-003)."""
+    workspace, paper = _schema_wiki_ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-ac8", paper_id="gac8"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    # current.json stays byte-identical; only the persisted run manifest is
+    # made binding-incompatible (AC-005 tamper pattern).
+    current_path = layout.schemas_dir / paper.id / "current.json"
+    current_bytes = current_path.read_bytes()
+    run_id = layout.schema_storage().read_current(paper.id).run_id
+    _rewrite_run_manifest(layout, paper.id, run_id, {"schema_hash": "f" * 64})
+    assert current_path.read_bytes() == current_bytes
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    paper_view = snapshot.visible_papers[0]
+    assert paper_view.schema_status == "missing"
+    assert paper_view.schema_error_code == "schema_binding_mismatch"
+    assert snapshot.base_wiki.status != "ready"
+    assert snapshot.base_wiki.error_code == "schema_input_invalid"
+    assert snapshot.capabilities.wiki_read is False
+
+
+def test_grounding_wiki_read_false_when_contributing_run_missing(
+    session, project_tmp_path
+):
+    """AC-009: when a member Paper's current run is absent/corrupt/unreadable
+    (schema_status missing with ``schema_missing``) while current.json remains
+    present, the SAME Grounding snapshot MUST report base_wiki.status != ready
+    and wiki_read=false (REQ-003)."""
+    import shutil
+
+    workspace, paper = _schema_wiki_ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-ac9", paper_id="gac9"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    assert (layout.schemas_dir / paper.id / "current.json").is_file()
+    run_id = layout.schema_storage().read_current(paper.id).run_id
+    shutil.rmtree(layout.schemas_dir / paper.id / "runs" / run_id)
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    paper_view = snapshot.visible_papers[0]
+    assert paper_view.schema_status == "missing"
+    assert paper_view.schema_error_code == "schema_missing"
+    assert snapshot.schema_coverage.status == "missing"
+    assert snapshot.base_wiki.status != "ready"
+    assert snapshot.base_wiki.error_code == "schema_input_invalid"
+    assert snapshot.capabilities.wiki_read is False
+    # The recommended actions drive repair in the same direction: materialize
+    # the missing run, then rebuild the Wiki — never read the old one.
+    codes = [action.code for action in snapshot.recommended_actions]
+    assert ACTION_MATERIALIZE_SCHEMA_RUNS in codes
+    assert ACTION_REBUILD_BASE_WIKI in codes

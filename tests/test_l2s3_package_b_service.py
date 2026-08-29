@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC
 
 import pytest
@@ -7,12 +9,14 @@ import pytest
 from transit_scholar.layer2.retrieval.providers import EmbeddingProvider, ProviderInfo
 from transit_scholar.layer2.wiki import (
     PaperMetadata,
+    WikiCorruptionError,
     WikiNotFoundError,
     WikiService,
     WikiStore,
     WikiValidationError,
     WikiWorkspaceMismatchError,
     WorkspaceContext,
+    audit_vector_index_readonly,
 )
 
 
@@ -56,6 +60,44 @@ def test_missing_index_file_is_blocking_vector_audit(project_tmp_path):
     report = service.audit_wiki()
     assert not report.ok
     assert any(issue.code == "vector_index_missing" and issue.severity == "error" for issue in report.issues)
+
+
+def test_readonly_vector_audit_wraps_wikistore_failures(project_tmp_path):
+    """REQ-006/AC-012: a WikiStoreError-derived failure while the read-only
+    vector audit loads the authoritative Page/Entity snapshot for required
+    coverage surfaces a stable WikiCorruptionError — never a NameError from an
+    unavailable WikiStoreError symbol. AC-013: a valid complete index still
+    audits clean before the failure is injected."""
+    context = WorkspaceContext(workspace_id="ws-audit", schema_id="schema", schema_version="1", paper_ids=["p1"])
+    service = WikiService(context, WikiStore(context, project_tmp_path), _Embedding())
+    service.ensure_paper_page(PaperMetadata(paper_id="p1", title="Signal study"))
+    service.rebuild_indexes()
+    index_path = service.store.index_path / "package_b_index.json"
+    assert index_path.is_file()
+
+    # AC-013: the provider-free helper audits a valid complete index cleanly.
+    assert audit_vector_index_readonly(service.store) == []
+
+    # Force a WikiStoreError-derived failure during required Page/Entity
+    # loading: corrupt the authoritative pages snapshot, then refresh the
+    # persisted index fingerprint over the corrupted bytes so the audit
+    # reaches the coverage step instead of failing earlier as stale.
+    service.store.pages_path.write_text("not-a-jsonl-record\n", encoding="utf-8")
+    raw = service.store.read_raw_snapshot()
+    digest = hashlib.sha256()
+    for name in ("manifest", "pages", "entities", "links"):
+        digest.update(name.encode("ascii"))
+        digest.update(b"\0")
+        digest.update((raw[name]["sha256"] or "missing").encode("ascii"))
+        digest.update(b"\0")
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    data["source_fingerprint"] = digest.hexdigest()
+    index_path.write_text(json.dumps(data, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(WikiCorruptionError) as error:
+        audit_vector_index_readonly(service.store)
+    assert "vector audit cannot read the authoritative source snapshot" in str(error.value)
+    assert not isinstance(error.value, NameError)
 
 
 def test_workspace_isolation_and_semantic_vector_retrieval(project_tmp_path):

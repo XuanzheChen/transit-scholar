@@ -55,7 +55,6 @@ from transit_scholar.layer2.schema_extraction.persistence import (
 )
 from transit_scholar.layer3.storage import (
     WorkspaceStorageLayout,
-    current_schema_run_identities,
     workspace_layout,
 )
 from transit_scholar.layer3.workspace.errors import (
@@ -274,19 +273,29 @@ class WorkspaceSchemaService:
                 f"paper {paper_id!r}: {type(exc).__name__}: {exc}"
             ) from exc
 
-    def current_run_identities(
+    def validated_current_run_identities(
         self,
         workspace_id: str,
         paper_ids: list[str] | tuple[str, ...] | None = None,
-    ) -> dict[str, dict[str, str] | None]:
-        """Current Workspace Schema run identities for the given (or member)
-        Papers — the File-backed identity input of the Base Wiki fingerprint.
+    ) -> tuple[dict[str, dict[str, str] | None], dict[str, str]]:
+        """Current Workspace Schema run identities derived ONLY from validated
+        compatible current runs (REQ-002 / AC-007).
 
-        Only the Workspace-specific current pointers are inspected; Papers
-        without a current run yield ``None``. REQ-004: a pointer whose
-        recorded identity disagrees with the immutable Workspace binding is
-        not a usable current run identity for this Workspace and also yields
-        ``None``.
+        Every member Paper's current run passes the SAME governance boundary
+        used by reads (``require_compatible_run``): the persisted run must be
+        readable through the normal L2S2 persistence integrity checks AND its
+        Schema identity (schema_id / schema_version / schema_hash) must fully
+        match the immutable Workspace binding — for both the current pointer
+        and the persisted run manifest. Only then does its current-pointer
+        identity contribute to the Wiki input fingerprint.
+
+        A missing/corrupt/unreadable run, or a pointer/run-manifest that
+        disagrees with the binding, yields ``None`` for that Paper and records
+        the stable boundary code (``schema_missing`` /
+        ``schema_binding_mismatch``) in the returned per-Paper error map.
+        ``current.json`` existence (or a matching pointer) by itself NEVER
+        authorizes an identity: the referenced run must still be readable and
+        binding-compatible (AC-005..AC-007).
         """
         record = self._require_bound(workspace_id)
         storage = self.layout(workspace_id).schema_storage()
@@ -297,22 +306,49 @@ class WorkspaceSchemaService:
                 membership.paper_id
                 for membership in self.workspaces.list_memberships(workspace_id)
             )
-        identities = current_schema_run_identities(storage, tuple(paper_ids))
+        identities: dict[str, dict[str, str] | None] = {}
+        invalid: dict[str, str] = {}
         for paper_id in sorted(paper_ids):
-            if identities.get(paper_id) is None:
-                continue
             try:
+                self.require_compatible_run(record, paper_id, storage)
                 pointer = storage.read_current(paper_id)
-            except SchemaCurrentNotFoundError:
+            except (SchemaMissingError, SchemaBindingMismatchError) as exc:
                 identities[paper_id] = None
+                invalid[paper_id] = exc.code
                 continue
-            if not matches_binding(
-                binding,
-                schema_id=pointer.schema_id,
-                schema_version=pointer.schema_version,
-                schema_hash=pointer.schema_hash,
-            ):
+            except SchemaStorageError as exc:
                 identities[paper_id] = None
+                invalid[paper_id] = "schema_missing"
+                continue
+            identities[paper_id] = {
+                "run_id": pointer.run_id,
+                "schema_hash": pointer.schema_hash,
+                "status": pointer.status,
+            }
+        return identities, invalid
+
+    def current_run_identities(
+        self,
+        workspace_id: str,
+        paper_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, dict[str, str] | None]:
+        """Current Workspace Schema run identities for the given (or member)
+        Papers — the File-backed identity input of the Base Wiki fingerprint.
+
+        REQ-002: identities are derived ONLY from validated compatible current
+        runs — each run passes the same ``require_compatible_run`` boundary
+        used by reads (readable through the L2S2 integrity checks AND its
+        schema_id / schema_version / schema_hash fully matching the immutable
+        Workspace binding, for both the pointer and the persisted run
+        manifest). A missing/corrupt/unreadable run, or a pointer/persisted
+        run whose recorded identity disagrees with the Workspace binding, is
+        not a usable current run identity for this Workspace and yields
+        ``None`` — a current pointer alone never authorizes an identity
+        (AC-007).
+        """
+        identities, _ = self.validated_current_run_identities(
+            workspace_id, paper_ids
+        )
         return identities
 
     def paper_schema_readiness(

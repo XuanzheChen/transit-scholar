@@ -44,6 +44,7 @@ from .store import (
     WikiNotFoundError,
     WikiNotInitializedError,
     WikiStore,
+    WikiStoreError,
 )
 
 

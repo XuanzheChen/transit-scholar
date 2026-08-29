@@ -8,12 +8,32 @@ identical Schema bindings (AC-008). The L2S3 ``WorkspaceWikiBuildService`` /
 storage-root injection (AC-024); nothing here reimplements Wiki persistence
 or search internals.
 
+REQ-001: Wiki construction never bypasses Workspace Schema governance. Every
+member Paper's current Workspace Schema run is validated through the same
+``WorkspaceSchemaService`` boundary used by Schema reads — readable through
+the normal L2S2 integrity checks AND fully compatible with the immutable
+Workspace binding (schema_id / schema_version / schema_hash) — BEFORE the
+L2S3 build consumes any of it. A binding-incompatible pointer or persisted
+run fails with the stable ``schema_binding_mismatch`` code and a
+missing/corrupt/unreadable run with ``schema_missing``; there is no fallback
+to global or foreign Schema content, and the L2S3 composition receives only
+the already-governed compatible ``SchemaInstance`` values (or reads them
+through the governed ``WorkspaceSchemaService`` read function).
+
 No-schema Workspaces report Base Wiki build capability as unsupported
 (REQ-005 / AC-009). Freshness is derived from the deterministic input
 fingerprint (REQ-007): the recorded fingerprint of the last successful build
 is compared with one recomputed from the current Workspace identity, Schema
 binding, membership, and current Workspace Schema run identities (AC-010 /
-AC-011). ``ready`` is a production-completeness state (REQ-001): the recorded
+AC-011). REQ-002: those run identities are derived ONLY from validated
+compatible current runs — each member Paper's current run must pass the same
+``WorkspaceSchemaService`` governance boundary used by reads (readable
+through the normal L2S2 integrity checks AND fully compatible with the
+immutable Workspace binding, schema_id / schema_version / schema_hash)
+before it contributes to the fingerprint, so a current pointer alone never
+keeps a previously built Wiki ready/current once its referenced run becomes
+missing, corrupt, unreadable or binding-incompatible (AC-005..AC-007).
+``ready`` is a production-completeness state (REQ-001): the recorded
 provenance and the persisted ``WikiManifest`` must both report
 ``build_status=complete``, the authoritative snapshot must pass the existing
 WikiStore integrity checks, and the mandatory persistent vector index must
@@ -34,7 +54,6 @@ from transit_scholar.layer3.storage import (
     BuildProvenanceError,
     WorkspaceStorageLayout,
     compute_wiki_input_fingerprint,
-    current_schema_run_identities,
     read_build_provenance,
     record_build_provenance,
     workspace_layout,
@@ -56,9 +75,13 @@ from .models import WorkspaceWikiBuildOutcome, WorkspaceWikiCapability, Workspac
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sqlalchemy.orm import Session
 
+    from transit_scholar.layer2.schema_extraction.models import SchemaInstance
     from transit_scholar.layer2.wiki.application import WorkspaceWikiBuildService
     from transit_scholar.layer2.wiki.models import WikiSearchResult
     from transit_scholar.layer2.wiki.service import WikiService
+    from transit_scholar.layer3.schema.service import (
+        WorkspaceSchemaService as WorkspaceSchemaService,
+    )
 
 #: Callable receiving ``(workspace_id, layout)`` and returning the L2S3 build
 #: service bound to this Workspace (injectable for deterministic tests).
@@ -73,9 +96,12 @@ class WorkspaceWikiService:
     ``data_root`` selects the derived-storage base (defaults to the project
     settings data root; tests inject an isolated root). ``build_service_factory``
     overrides the L2S3 ``WorkspaceWikiBuildService`` construction for
-    deterministic tests (fake loaders/composition); the default factory wires
-    the production L2S3 composition together with the Workspace-specific
-    Schema storage and Wiki storage roots.
+    deterministic tests (fake loaders/composition); the default composition
+    wires the production L2S3 service with the Workspace-specific Wiki storage
+    root and the already-governed Schema instances. ``schemas`` injects the
+    Layer3 Schema governance service (default: a ``WorkspaceSchemaService`` on
+    the same ``session``/``data_root``); ``build`` validates every member Schema
+    run through it before L2S3 consumption (REQ-001).
     """
 
     def __init__(
@@ -85,10 +111,21 @@ class WorkspaceWikiService:
         data_root: Path | str | None = None,
         build_service_factory: BuildServiceFactory | None = None,
         workspaces: WorkspaceService | None = None,
+        schemas: "WorkspaceSchemaService | None" = None,
     ) -> None:
         self.session = session
         self.data_root = data_root
         self.workspaces = workspaces or WorkspaceService(session)
+        if schemas is None:
+            from transit_scholar.layer3.schema.service import (  # noqa: PLC0415
+                WorkspaceSchemaService,
+            )
+
+            schemas = WorkspaceSchemaService(session, data_root=data_root)
+        # REQ-001: the SAME governance boundary WorkspaceSchemaService uses
+        # for reads; the Wiki build validates member Schema runs through it
+        # instead of loading raw Workspace-local L2S2 content.
+        self.schemas = schemas
         self._build_service_factory = build_service_factory
 
     # ------------------------------------------------------------------
@@ -126,14 +163,40 @@ class WorkspaceWikiService:
         """Build (or rebuild) the Base Wiki for an eligible schema-bound
         Workspace and record the input fingerprint provenance.
 
-        The L2S3 ``WorkspaceWikiBuildService`` is composed with the
-        Workspace-specific Wiki store root and a schema-instance loader bound
-        to the Workspace-specific Schema storage root (AC-024 / REQ-006).
+        REQ-001: BEFORE the L2S3 build consumes any member Paper's Schema
+        run, every current Workspace Schema run is validated through the same
+        ``WorkspaceSchemaService`` governance boundary used by Schema reads
+        (``get_instance``): the persisted run must be readable through the
+        normal L2S2 integrity checks AND fully compatible with the immutable
+        Workspace binding (schema_id / schema_version / schema_hash). A
+        missing/corrupt/unreadable run fails explicitly with the stable
+        ``schema_missing`` code and a binding-incompatible pointer or
+        persisted run with ``schema_binding_mismatch`` (AC-001..AC-003) —
+        nothing is consumed by L2S3, no fallback to global/foreign content,
+        and the existing snapshot is left untouched. Compatible runs build
+        normally through the L2S3 ``WorkspaceWikiBuildService`` composed with
+        the Workspace-specific Wiki store root and the already-governed
+        compatible ``SchemaInstance`` values (AC-004 / AC-024 / REQ-006).
         """
         record = self._require_active_bound(workspace_id)
         memberships = self.workspaces.list_memberships(workspace_id)
         context = derive_workspace_context(record, memberships)
         layout = workspace_layout(workspace_id, data_root=self.data_root)
+        # REQ-001 governance gate: load every member's current Validated
+        # SchemaInstance through WorkspaceSchemaService.get_instance(), which
+        # enforces readability + full binding compatibility per run and fails
+        # with the stable schema_missing / schema_binding_mismatch codes
+        # before L2S3 ever sees the Paper (AC-001..AC-003).
+        instances = {
+            paper_id: self.schemas.get_instance(workspace_id, paper_id)
+            for paper_id in context.paper_ids
+        }
+        # Current-run identity input of the Wiki fingerprint, derived from the
+        # validated runs (pointer identities of binding-compatible current
+        # pointers only — never a raw pointer trust).
+        identities = self.schemas.current_run_identities(
+            workspace_id, context.paper_ids
+        )
         try:
             prior = read_build_provenance(layout.wiki_dir)
         except BuildProvenanceError:
@@ -145,12 +208,9 @@ class WorkspaceWikiService:
         # (or is unreadable), rebuild into a fresh Workspace-owned boundary.
         if _snapshot_covers_different_inputs(layout, context.paper_ids):
             layout.delete_wiki_storage()
-        build_result = self._build_service(workspace_id, layout).build_wiki_for_workspace(
-            context
-        )
-        identities = current_schema_run_identities(
-            layout.schema_storage(), context.paper_ids
-        )
+        build_result = self._build_service(
+            workspace_id, layout, instances
+        ).build_wiki_for_workspace(context)
         binding = record.schema_binding
         assert binding is not None
         fingerprint = compute_wiki_input_fingerprint(
@@ -185,10 +245,21 @@ class WorkspaceWikiService:
         Read-only: never mutates Schema/Wiki storage, DB or provenance, and
         never calls LLM/embedding providers or rebuilds indexes. The recorded
         input fingerprint is recomputed from the current Workspace identity,
-        Schema binding, membership and current Workspace Schema run identities:
+        Schema binding, membership and the current Workspace Schema run
+        identities — where every member run identity is derived ONLY after it
+        passed the same ``WorkspaceSchemaService`` governance boundary used by
+        reads (readable through the L2S2 integrity checks AND fully compatible
+        with the immutable Workspace binding; REQ-002). A missing/corrupt/
+        unreadable or binding-incompatible current run never contributes an
+        identity, so a previously built Wiki ceases to be ready/current even
+        when ``current.json`` bytes are unchanged (AC-005..AC-007):
 
-        - fingerprint mismatch (or no recorded fingerprint) -> ``stale`` —
-          the snapshot is observably non-current (AC-010);
+        - validated-run fingerprint mismatch (or no recorded fingerprint) ->
+          ``stale`` — the snapshot is observably non-current (AC-010);
+          ``schema_input_invalid`` is the derived code when a member Schema
+          run that contributed to the RECORDED build fails binding/readability
+          validation (REQ-002 / AC-005..AC-007), ``input_fingerprint_mismatch``
+          for a genuine input change;
         - provenance bound to a different Workspace -> ``error`` with
           ``workspace_mismatch`` (REQ-005 boundary: a foreign snapshot is
           never treated as this Workspace's Wiki);
@@ -230,8 +301,16 @@ class WorkspaceWikiService:
                 status="error",
                 error_code="build_provenance_unreadable",
             )
-        identities = current_schema_run_identities(
-            layout.schema_storage(), context.paper_ids
+        # REQ-002: current-input identities are derived ONLY from validated
+        # compatible current runs (never a raw current-pointer trust). Every
+        # member Paper's current run must pass the same Workspace Schema
+        # governance boundary used by reads — readable through the L2S2
+        # persistence integrity checks AND fully compatible with the immutable
+        # Workspace binding (schema_id / schema_version / schema_hash) — before
+        # its identity enters the fingerprint; a missing/corrupt/unreadable or
+        # binding-incompatible run yields ``None`` and records its stable code.
+        identities, invalid_runs = self.schemas.validated_current_run_identities(
+            workspace_id, context.paper_ids
         )
         binding = record.schema_binding
         assert binding is not None
@@ -257,7 +336,22 @@ class WorkspaceWikiService:
                 error_code="workspace_mismatch",
                 fingerprint=fingerprint,
             )
-        if provenance.input_fingerprint != fingerprint:
+        if provenance.input_fingerprint != fingerprint or invalid_runs:
+            # AC-005..AC-007 (REQ-002): a member Paper's current run that
+            # fails binding/readability validation invalidates freshness even
+            # when current.json (and therefore the raw pointer identity) is
+            # unchanged — the recorded build inputs are no longer validated as
+            # current, so the previously built Wiki ceases to be ready/current.
+            # ``schema_input_invalid`` is derived exactly when a run that
+            # contributed to the RECORDED build (recorded identity present)
+            # is no longer a validated current identity; genuine input changes
+            # (membership changes, replacement current runs) keep the stable
+            # ``input_fingerprint_mismatch`` code (AC-010).
+            invalidated_run = any(
+                identities.get(paper_id) is None
+                and provenance.schema_runs.get(paper_id) is not None
+                for paper_id in context.paper_ids
+            )
             return WorkspaceWikiStatus(
                 workspace_id=record.workspace_id,
                 status="stale",
@@ -265,7 +359,11 @@ class WorkspaceWikiService:
                 recorded_fingerprint=provenance.input_fingerprint,
                 build_revision=provenance.build_revision,
                 built_at=_parse_built_at(provenance.built_at),
-                error_code="input_fingerprint_mismatch",
+                error_code=(
+                    "schema_input_invalid"
+                    if invalidated_run
+                    else "input_fingerprint_mismatch"
+                ),
             )
         if provenance.build_status != "complete":
             # AC-003: an input-current snapshot is never ready when the
@@ -322,8 +420,23 @@ class WorkspaceWikiService:
         # the SAME authoritative source fingerprint, with valid vector metadata
         # and complete Page/Entity vector coverage (REQ-001 / C-010). The L2S3
         # read-only helper audits it provider-free; the first issue's stable
-        # code becomes the derived error_code (AC-004/AC-005).
-        vector_issues = audit_vector_index_readonly(store)
+        # code becomes the derived error_code (AC-004/AC-005). Any unexpected
+        # store-level failure during the audit keeps the Wiki non-ready as a
+        # stable integrity error instead of surfacing an implementation
+        # exception (REQ-006 / AC-012 boundary containment).
+        try:
+            vector_issues = audit_vector_index_readonly(store)
+        except Exception as exc:  # noqa: BLE001 - any audit failure is corrupt
+            return WorkspaceWikiStatus(
+                workspace_id=record.workspace_id,
+                status="error",
+                error_code=getattr(exc, "code", "wiki_corrupt") or "wiki_corrupt",
+                manifest_status=manifest.build_status,
+                fingerprint=fingerprint,
+                recorded_fingerprint=provenance.input_fingerprint,
+                build_revision=provenance.build_revision,
+                built_at=_parse_built_at(provenance.built_at),
+            )
         if vector_issues:
             return WorkspaceWikiStatus(
                 workspace_id=record.workspace_id,
@@ -421,20 +534,28 @@ class WorkspaceWikiService:
     # ------------------------------------------------------------------
 
     def _build_service(
-        self, workspace_id: str, layout: WorkspaceStorageLayout
+        self,
+        workspace_id: str,
+        layout: WorkspaceStorageLayout,
+        instances: dict[str, "SchemaInstance"],
     ) -> "WorkspaceWikiBuildService":
+        """The L2S3 build service for this Workspace.
+
+        The default composition's ``schema_instance_loader`` returns only the
+        already-governed compatible ``SchemaInstance`` values loaded through
+        ``WorkspaceSchemaService.get_instance()`` (REQ-001) — never raw L2S2
+        ``get_schema()`` reads that could bypass binding validation. The
+        injectable factory keeps its ``(workspace_id, layout)`` contract for
+        deterministic test composition.
+        """
         if self._build_service_factory is not None:
             return self._build_service_factory(workspace_id, layout)
-        from transit_scholar.layer2.schema_extraction.api import get_schema  # noqa: PLC0415
         from transit_scholar.layer2.wiki.application import (  # noqa: PLC0415
             WorkspaceWikiBuildService,
         )
 
-        schema_storage = layout.schema_storage()
         return WorkspaceWikiBuildService(
-            schema_instance_loader=lambda paper_id, schema_id: get_schema(
-                paper_id, schema_id, storage=schema_storage
-            ),
+            schema_instance_loader=lambda paper_id, schema_id: instances[paper_id],
             wiki_storage_root=layout.wiki_store_base,
         )
 

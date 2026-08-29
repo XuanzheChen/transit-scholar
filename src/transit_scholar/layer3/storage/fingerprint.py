@@ -14,6 +14,14 @@ membership or to any current Workspace Schema run identity produces a
 different fingerprint, so Grounding can derive "stale" vs "current" purely
 from the recorded vs recomputed fingerprint — no persisted boolean readiness
 flag (REQ-007).
+
+REQ-002 governance: ``current_schema_run_identities`` is a POINTER-LEVEL
+reader only — it reads ``current.json`` identity fields and never validates
+the referenced persisted run. It MUST NOT be used directly to derive Wiki
+freshness: an identity it returns is only usable for fingerprinting after the
+run passed Workspace Schema binding compatibility and persistence-integrity
+validation (the governed `WorkspaceSchemaService` identity derivation does
+this; a current pointer alone never authorizes readiness, AC-007).
 """
 
 from __future__ import annotations
@@ -37,10 +45,17 @@ def current_schema_run_identities(
 ) -> dict[str, dict[str, str] | None]:
     """Per-Paper current Workspace Schema run identity, or ``None`` when absent.
 
-    Reads the current pointer of the *Workspace-specific* ``SchemaRunStorage``
-    (never a global or another Workspace's storage). A Paper without a current
-    run contributes ``None``, which still participates deterministically in
-    the fingerprint.
+    Reads ONLY the current pointer of the *Workspace-specific*
+    ``SchemaRunStorage`` (never a global or another Workspace's storage). A
+    Paper without a current run contributes ``None``, which still participates
+    deterministically in the fingerprint.
+
+    REQ-002: this is the raw pointer-level identity reader and MUST NOT be
+    used alone as the Wiki freshness input — the referenced persisted run must
+    additionally pass Workspace Schema binding compatibility and
+    persistence-integrity validation before its identity is trusted (the
+    governed ``WorkspaceSchemaService`` identity derivation validates every
+    run first and yields ``None`` for unusable runs, AC-007).
     """
     from transit_scholar.layer2.schema_extraction.persistence import (  # noqa: PLC0415
         SchemaCurrentNotFoundError,

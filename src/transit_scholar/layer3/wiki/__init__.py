@@ -21,11 +21,10 @@ from .models import (
     WorkspaceWikiCapability,
     WorkspaceWikiStatus,
 )
-from .service import BuildServiceFactory, WorkspaceWikiService
+from .service import WorkspaceWikiService
 
 __all__ = [
     "WorkspaceWikiService",
-    "BuildServiceFactory",
     "derive_workspace_context",
     "member_paper_ids",
     "WorkspaceWikiError",

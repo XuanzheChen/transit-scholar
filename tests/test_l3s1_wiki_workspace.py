@@ -77,6 +77,7 @@ are produced through the real L2S2 public API with an offline fake LLM.
 
 from __future__ import annotations
 
+import inspect
 import json
 import shutil
 
@@ -86,7 +87,6 @@ from transit_scholar.db.models import Paper
 from transit_scholar.layer2.retrieval.providers import EmbeddingProvider, ProviderInfo
 from transit_scholar.layer2.schema_extraction import (
     FakeLLMProvider,
-    get_schema,
     get_schema_definition,
 )
 from transit_scholar.layer2.schema_extraction.persistence import RUN_MANIFEST_FILE
@@ -169,48 +169,22 @@ def create_none_workspace(session, name="No Schema", workspace_id="ws-none"):
     return WorkspaceService(session).create(name=name, workspace_id=workspace_id).workspace
 
 
-def _offline_build_factory(session):
-    """A build-service factory mirroring the L3 default composition, with the
-    LLM/embedding/metadata collaborators replaced by deterministic fakes.
+def _paper_metadata_loader(session):
+    def load(paper_id):
+        paper = session.get(Paper, paper_id)
+        if paper is None or not paper.title:
+            return None
+        return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
 
-    Schema instances are still loaded from each Workspace's OWN L2S2 storage
-    root (workspace boundary preserved); only the Wiki composition providers
-    are faked for offline determinism.
-    """
-
-    def factory(workspace_id, layout):
-        storage = layout.schema_storage()
-
-        def metadata_loader(paper_id):
-            paper = session.get(Paper, paper_id)
-            if paper is None or not paper.title:
-                return None
-            return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
-
-        return WorkspaceWikiBuildService(
-            schema_instance_loader=lambda paper_id, schema_id: get_schema(
-                paper_id, schema_id, storage=storage
-            ),
-            paper_metadata_loader=metadata_loader,
-            composition_factory=lambda context, store: create_production_wiki_composition(
-                context,
-                store,
-                llm_client=_Client(),
-                embedding_provider=_Embedding(),
-            ),
-            wiki_storage_root=layout.wiki_store_base,
-        )
-
-    return factory
+    return load
 
 
-def wiki_service(session, project_tmp_path, *, factory=None):
+def wiki_service(session, project_tmp_path, *, composition_factory=None):
     return WorkspaceWikiService(
         session,
         data_root=project_tmp_path,
-        build_service_factory=(
-            factory if factory is not None else _offline_build_factory(session)
-        ),
+        composition_factory=composition_factory or _offline_composition,
+        paper_metadata_loader=_paper_metadata_loader(session),
     )
 
 
@@ -219,6 +193,56 @@ def materialize_all(session, schema_service, workspaces, paper):
         schema_service.materialize(
             workspace.workspace_id, paper.id, llm_client=FakeLLMProvider()
         )
+
+
+def test_public_api_has_no_build_service_factory_bypass(session, project_tmp_path):
+    import transit_scholar.layer3.wiki as wiki_package
+
+    assert "build_service_factory" not in inspect.signature(
+        WorkspaceWikiService
+    ).parameters
+    assert not hasattr(wiki_package, "BuildServiceFactory")
+    with pytest.raises(TypeError, match="build_service_factory"):
+        WorkspaceWikiService(
+            session,
+            data_root=project_tmp_path,
+            build_service_factory=lambda workspace_id, layout: None,
+        )
+
+
+def test_composition_injection_preserves_captured_schema_loaders(
+    session, project_tmp_path
+):
+    paper = add_paper(session, paper_id="safe-seam-p", title="Safe Seam Paper")
+    workspace = create_bound_workspace(session, workspace_id="safe-seam-ws")
+    WorkspaceService(session).add_paper(workspace.workspace_id, paper.id)
+    schemas = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    schemas.materialize(
+        workspace.workspace_id, paper.id, llm_client=FakeLLMProvider()
+    )
+    snapshot = schemas.capture_build_snapshot(workspace.workspace_id)
+
+    composition_factory = _offline_composition
+    wiki = WorkspaceWikiService(
+        session,
+        data_root=project_tmp_path,
+        composition_factory=composition_factory,
+    )
+
+    build_service = wiki._build_service(
+        workspace.workspace_id,
+        workspace_layout(workspace.workspace_id, data_root=project_tmp_path),
+        snapshot,
+    )
+
+    assert build_service.composition_factory is composition_factory
+    assert (
+        build_service.schema_definition_loader(snapshot.schema_id)
+        == snapshot.definition
+    )
+    assert build_service.schema_instance_loader(
+        paper.id, snapshot.schema_id
+    ) == snapshot.runs_by_paper[paper.id].instance
 
 
 # ---------------------------------------------------------------------------
@@ -700,9 +724,8 @@ def test_complete_current_valid_wiki_is_ready_and_searchable(session, project_tm
 # ---------------------------------------------------------------------------
 
 
-def _build_must_not_run_factory(workspace_id, layout):
-    """A build-service factory that MUST never be invoked: reaching it proves
-    L2S3 would consume an ungoverned Schema run (REQ-001)."""
+def _composition_must_not_run(context, store):
+    """A provider composition that MUST never run before Schema validation."""
     raise AssertionError(
         "L2S3 build composition must not run for invalid Workspace Schema "
         "inputs (REQ-001/AC-001..AC-003)"
@@ -752,7 +775,9 @@ def test_build_rejects_pointer_schema_hash_mismatch(session, project_tmp_path):
     rewrite_pointer(layout, "bg-ptrhash-p", {"schema_hash": "f" * 64})
 
     # The L2S3 build composition must never be constructed/consumed.
-    wiki = wiki_service(session, project_tmp_path, factory=_build_must_not_run_factory)
+    wiki = wiki_service(
+        session, project_tmp_path, composition_factory=_composition_must_not_run
+    )
     with pytest.raises(SchemaBindingMismatchError) as mismatch:
         wiki.build(ws.workspace_id)
     assert mismatch.value.code == "schema_binding_mismatch"
@@ -774,7 +799,9 @@ def test_build_rejects_run_manifest_schema_hash_mismatch(session, project_tmp_pa
     run_id = layout.schema_storage().read_current(paper_id).run_id
     rewrite_run_manifest(layout, paper_id, run_id, {"schema_hash": "f" * 64})
 
-    wiki = wiki_service(session, project_tmp_path, factory=_build_must_not_run_factory)
+    wiki = wiki_service(
+        session, project_tmp_path, composition_factory=_composition_must_not_run
+    )
     with pytest.raises(SchemaBindingMismatchError) as mismatch:
         wiki.build(ws.workspace_id)
     assert mismatch.value.code == "schema_binding_mismatch"
@@ -794,7 +821,9 @@ def test_build_rejects_run_manifest_schema_version_mismatch(session, project_tmp
     run_id = layout.schema_storage().read_current(paper_id).run_id
     rewrite_run_manifest(layout, paper_id, run_id, {"schema_version": "0.0-forged"})
 
-    wiki = wiki_service(session, project_tmp_path, factory=_build_must_not_run_factory)
+    wiki = wiki_service(
+        session, project_tmp_path, composition_factory=_composition_must_not_run
+    )
     with pytest.raises(SchemaBindingMismatchError) as version_error:
         wiki.build(ws.workspace_id)
     assert version_error.value.code == "schema_binding_mismatch"
@@ -815,7 +844,9 @@ def test_build_rejects_pointer_to_missing_referenced_run(session, project_tmp_pa
     assert (layout.schemas_dir / paper_id / "current.json").is_file()
     shutil.rmtree(layout.schemas_dir / paper_id / "runs" / run_id)
 
-    wiki = wiki_service(session, project_tmp_path, factory=_build_must_not_run_factory)
+    wiki = wiki_service(
+        session, project_tmp_path, composition_factory=_composition_must_not_run
+    )
     with pytest.raises(SchemaMissingError) as missing:
         wiki.build(ws.workspace_id)
     assert missing.value.code == "schema_missing"
@@ -838,7 +869,9 @@ def test_build_rejects_corrupt_referenced_run(session, project_tmp_path):
     )
     instance_path.write_text("{not json", encoding="utf-8")
 
-    wiki = wiki_service(session, project_tmp_path, factory=_build_must_not_run_factory)
+    wiki = wiki_service(
+        session, project_tmp_path, composition_factory=_composition_must_not_run
+    )
     with pytest.raises(SchemaMissingError) as corrupt:
         wiki.build(ws.workspace_id)
     assert corrupt.value.code == "schema_missing"
@@ -977,14 +1010,9 @@ def _instrumented_default_wiki_service(
         data_root=project_tmp_path,
         schemas=schemas,
         composition_factory=_offline_composition,
+        paper_metadata_loader=_paper_metadata_loader(session),
     )
     original = WorkspaceWikiService._build_service
-
-    def metadata_loader(paper_id):
-        paper = session.get(Paper, paper_id)
-        if paper is None or not paper.title:
-            return None
-        return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
 
     def instrumented(self, workspace_id, layout, snapshot):
         service = original(self, workspace_id, layout, snapshot)
@@ -1003,7 +1031,6 @@ def _instrumented_default_wiki_service(
 
         service.schema_definition_loader = recorded_definition_loader
         service.schema_instance_loader = recorded_instance_loader
-        service.paper_metadata_loader = metadata_loader
         return service
 
     monkeypatch.setattr(WorkspaceWikiService, "_build_service", instrumented)
@@ -1248,7 +1275,7 @@ def test_build_rejects_changed_definition_before_l2s3_and_preserves_snapshot(
         schema_service_module, "get_schema_definition", lambda _schema_id: tampered
     )
     guarded = wiki_service(
-        session, project_tmp_path, factory=_build_must_not_run_factory
+        session, project_tmp_path, composition_factory=_composition_must_not_run
     )
     with pytest.raises(SchemaBindingMismatchError) as hash_mismatch:
         guarded.build(ws.workspace_id)
@@ -1315,13 +1342,13 @@ def _race_provider(control_type):
 
 
 def test_current_switch_after_capture_keeps_build_and_provenance_on_a(
-    session, project_tmp_path
+    session, project_tmp_path, monkeypatch
 ):
     """AC-005/AC-006/AC-007 + REQ-003: deterministic A->B current-switch race.
 
     current=A is captured once by build(); BEFORE the build finalizes, the
-    current pointer is switched to a VALID compatible run B (the factory is
-    invoked between the governed capture and the L2S3 build). The build must
+    current pointer is switched to a VALID compatible run B by wrapping the
+    already snapshot-bound build service before L2S3 consumption. The build must
     consume the captured run A instance, provenance/fingerprint must record
     run A, and the next status() — governed current B vs recorded A — must be
     stale, never ready (the forbidden content=A + provenance=B + current=B +
@@ -1347,7 +1374,10 @@ def test_current_switch_after_capture_keeps_build_and_provenance_on_a(
     state = {"builds": 0, "switched": False}
     consumed: list = []
 
-    def race_factory(workspace_id, layout):
+    wiki = wiki_service(session, project_tmp_path)
+    original_build_service = wiki._build_service
+
+    def post_capture_build_service(workspace_id, layout, snapshot):
         # Invoked AFTER build()'s governed capture and BEFORE the L2S3 build.
         # Only the FIRST build races: it performs the deterministic concurrent
         # current change A -> valid run B. Later (normal, non-racing) rebuilds
@@ -1361,46 +1391,18 @@ def test_current_switch_after_capture_keeps_build_and_provenance_on_a(
                 retrieval=_RaceRetrieval(),
             )
             state["switched"] = True
-        storage = layout.schema_storage()
+        service = original_build_service(workspace_id, layout, snapshot)
+        captured_instance_loader = service.schema_instance_loader
 
-        def metadata_loader(pid):
-            row = session.get(Paper, pid)
-            if row is None or not row.title:
-                return None
-            return PaperMetadata(paper_id=row.id, title=row.title, year=2024)
-
-        def instance_loader(pid, schema_id):
-            if state["builds"] == 1:
-                # The RACING build consumes the CAPTURED snapshot's instance
-                # (run A by its captured run_id) — never a fresh current
-                # resolution, which after the switch would be B.
-                instance = get_schema(
-                    pid, schema_id, run_id=identity_a["run_id"], storage=storage
-                )
-            else:
-                # Normal rebuilds after the race resolve the governed current
-                # run (B), exactly like a non-racing factory.
-                instance = get_schema(pid, schema_id, storage=storage)
+        def observed_instance_loader(pid, schema_id):
+            instance = captured_instance_loader(pid, schema_id)
             consumed.append(instance)
             return instance
 
-        return WorkspaceWikiBuildService(
-            schema_instance_loader=instance_loader,
-            paper_metadata_loader=metadata_loader,
-            composition_factory=lambda context, store: create_production_wiki_composition(
-                context,
-                store,
-                llm_client=_Client(),
-                embedding_provider=_Embedding(),
-            ),
-            wiki_storage_root=layout.wiki_store_base,
-        )
+        service.schema_instance_loader = observed_instance_loader
+        return service
 
-    wiki = WorkspaceWikiService(
-        session,
-        data_root=project_tmp_path,
-        build_service_factory=race_factory,
-    )
+    monkeypatch.setattr(wiki, "_build_service", post_capture_build_service)
     outcome = wiki.build(ws.workspace_id)
 
     # The switch happened deterministically between capture and finalization.

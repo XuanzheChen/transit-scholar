@@ -357,7 +357,7 @@ regression set. All of it was executed again for this T-004 report:
     `test_build_rejects_changed_definition_before_l2s3_and_preserves_snapshot` — after a
     successful build, a current `SchemaDefinition` with the same id/version but a changed
     deterministic content hash (or a changed version) makes `build()` fail with the stable
-    `schema_binding_mismatch` code BEFORE L2S3 execution (must-not-run L2S3 factory) and
+    `schema_binding_mismatch` code BEFORE L2S3 execution (must-not-run provider composition) and
     leaves the existing Wiki manifest/provenance byte-identical and ready (C-007);
   - T-001/C-007: `test_failed_build_snapshot_capture_leaves_existing_wiki_and_provenance_untouched`
     — a failed complete-snapshot capture never mutates Wiki/provenance state;
@@ -370,7 +370,7 @@ regression set. All of it was executed again for this T-004 report:
     `test_build_rejects_run_manifest_schema_hash_mismatch`, `test_build_rejects_run_manifest_schema_version_mismatch`,
     `test_build_rejects_pointer_to_missing_referenced_run`, `test_build_rejects_corrupt_referenced_run`,
     `test_build_rejects_invalid_run_even_after_prior_successful_build` (the L2S3 composition is proven
-    never constructed for invalid inputs via a must-not-run factory);
+    never constructed for invalid inputs via a must-not-run composition factory);
   - REQ-007/AC-011: `test_compatible_runs_still_build_through_workspace_composition`;
   - REQ-007 freshness (AC-011): `test_run_manifest_hash_tamper_invalidates_ready_wiki`,
     `test_run_manifest_version_mismatch_invalidates_ready_wiki`, `test_missing_current_run_invalidates_ready_wiki`,
@@ -466,7 +466,7 @@ refers to `tests/integration/test_l3s1_*.py`.
 | AC-013 | read-only vector audit WikiStoreError failure → stable WikiCorruptionError, never NameError; valid complete indexes audit provider-free | `tests/test_l2s3_package_b_service.py::test_readonly_vector_audit_wraps_wikistore_failures` (clean audit before failure injection); `test_l3s1_wiki_workspace.py::test_complete_current_valid_wiki_is_ready_and_searchable` |
 | AC-014 | isolation, no-schema no-fallback, read-only Grounding, revision/membership revalidation, archive, two-phase delete, global asset preservation, Layer1/L2 API independence proven | complete `tests/test_l3s1_*.py` + `tests/integration/test_l3s1_*.py` suites (lifecycle/isolation/readonly/no-agent modules; `test_l3s1_schema_workspace.py::test_l2s2_public_api_usable_independently_without_workspace_id`); perimeter subset run **123 passed** (see §6) |
 | AC-015 | all new complete-build-snapshot regressions pass | targeted runs: **13 passed** (v6 run-snapshot build regressions) + **12 passed** (complete build snapshot closure regressions) — see §6 |
-| AC-016 | complete L3S1 unit suite + complete integration suite pass | **225 + 12 = 237 passed** (see §6) |
+| AC-016 | complete L3S1 unit suite + complete integration suite pass | **227 + 12 = 239 passed** (see §6/§10) |
 | AC-017 | affected L2S2 and L2S3 suites introduce no new failures | L2S2 **629 passed**, L2S3 **99 passed**, database/Layer1 **59 passed** — only documented pre-existing L2S1 baseline findings remain (see §7) |
 | AC-018 | freeze wording only after AC-001..AC-017 pass with actual executed evidence | this document §6/§7 executed evidence + §8 freeze declaration |
 
@@ -483,9 +483,9 @@ shipped by the project `.env`), isolated per-test data roots
 | Targeted v6 TOCTOU/build-snapshot regressions (13 tests: 10 capture + 3 build/race) | `pytest tests/test_l3s1_schema_workspace.py::test_capture_current_run_returns_instance_and_identity_of_same_run tests/test_l3s1_schema_workspace.py::test_capture_current_runs_bulk_deterministic_order tests/test_l3s1_schema_workspace.py::test_capture_snapshot_is_frozen tests/test_l3s1_schema_workspace.py::test_capture_snapshot_isolated_from_concurrent_current_switch tests/test_l3s1_schema_workspace.py::test_capture_rejects_pointer_binding_mismatch tests/test_l3s1_schema_workspace.py::test_capture_rejects_run_manifest_binding_mismatch tests/test_l3s1_schema_workspace.py::test_capture_rejects_missing_referenced_run tests/test_l3s1_schema_workspace.py::test_capture_rejects_corrupt_referenced_run tests/test_l3s1_schema_workspace.py::test_capture_current_runs_aborts_on_first_invalid_run tests/test_l3s1_schema_workspace.py::test_capture_requires_bound_workspace_and_member tests/test_l3s1_wiki_workspace.py::test_provenance_schema_runs_match_governed_snapshot_identities tests/test_l3s1_wiki_workspace.py::test_build_uses_one_governed_capture_for_content_and_identity tests/test_l3s1_wiki_workspace.py::test_current_switch_after_capture_keeps_build_and_provenance_on_a` | **13 passed in 4.50s** (AC-015) |
 | Targeted complete build-snapshot closure regressions (12 tests: 8 definition/snapshot + 4 build) | `pytest tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_captures_exact_definition_and_runs tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_is_frozen tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_rejects_same_id_version_changed_hash tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_rejects_changed_version tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_rejects_unresolvable_definition tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_paper_subset_and_empty tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_aborts_on_invalid_run tests/test_l3s1_schema_workspace.py::test_capture_build_snapshot_requires_bound_workspace_and_member tests/test_l3s1_wiki_workspace.py::test_definition_change_after_capture_cannot_alter_current_build tests/test_l3s1_wiki_workspace.py::test_build_rejects_changed_definition_before_l2s3_and_preserves_snapshot tests/test_l3s1_wiki_workspace.py::test_complete_build_snapshot_matches_recorded_build_and_feeds_l2s3 tests/test_l3s1_wiki_workspace.py::test_failed_build_snapshot_capture_leaves_existing_wiki_and_provenance_untouched` | **12 passed in 6.23s** (AC-015) |
 | Targeted v4/v5 repair + snapshot regressions (6 repaired unit files) | `pytest tests/test_l3s1_wiki_workspace.py tests/test_l3s1_gateway_wiki_isolation.py tests/test_l3s1_grounding_snapshot.py tests/test_l3s1_grounding_readonly.py tests/test_l3s1_schema_workspace.py tests/test_l3s1_gateway_schema_isolation.py` | **122 passed** (109 v5-era + 13 v6 snapshot) |
-| Layer3 Stage1 unit suite (complete) | `pytest tests/test_l3s1_*.py` (16 files) | **225 passed in 35.16s** (200 v5-era + 13 v6 snapshot + 12 complete build snapshot) |
+| Layer3 Stage1 unit suite (complete) | `pytest tests/test_l3s1_*.py` (16 files) | **227 passed in 38.92s** (including 2 snapshot-bypass closure regressions; see §10 for the actual PowerShell command) |
 | Layer3 Stage1 integration suite (complete) | `pytest tests/integration/test_l3s1_*.py` (4 files) | **12 passed in 4.18s** |
-| Layer3 Stage1 combined unit + integration | above two | **237 passed** |
+| Layer3 Stage1 combined unit + integration | above two | **239 passed** |
 | Lifecycle/isolation/no-fallback/read-only perimeter subset | `pytest tests/test_l3s1_lifecycle_archive.py tests/test_l3s1_lifecycle_delete.py tests/test_l3s1_lifecycle_membership_revocation.py tests/test_l3s1_lifecycle_revision_boundary.py tests/test_l3s1_storage_governance.py tests/test_l3s1_workspace_domain.py tests/test_l3s1_workspace_service.py tests/test_l3s1_gateway_schema_isolation.py tests/test_l3s1_gateway_wiki_isolation.py tests/test_l3s1_grounding_readonly.py tests/test_l3s1_knowledge_bound_gateway.py tests/test_l3s1_knowledge_evidence_delegation.py tests/test_l3s1_knowledge_stale_revalidation.py` | **123 passed in 11.69s** (AC-014) |
 | Database/Layer1 regression (Workspace tables) | `pytest tests/test_stage1_database.py tests/test_database_lifecycle.py tests/test_stage5_citation.py` | **59 passed in 6.27s** |
 | L2S2 regression (Layer3 composes over L2S2) | `pytest tests/test_l2s2_*.py` (19 files) | **629 passed in 32.21s** |
@@ -556,7 +556,7 @@ recorded in §6/§7 with actual commands and counts before any freeze wording:
   (run capture proven not to run), `::test_capture_build_snapshot_rejects_changed_version`,
   `::test_capture_build_snapshot_rejects_unresolvable_definition`,
   `test_build_rejects_changed_definition_before_l2s3_and_preserves_snapshot`
-  (must-not-run L2S3 factory, manifest/provenance byte-identical, still ready),
+  (must-not-run provider composition, manifest/provenance byte-identical, still ready),
   `test_failed_build_snapshot_capture_leaves_existing_wiki_and_provenance_untouched` (C-007);
 - AC-004/AC-005 (Layer3-composed L2S3 receives ONLY the captured definition via
   `schema_definition_loader` and captured instances via `schema_instance_loader`):
@@ -591,12 +591,12 @@ recorded in §6/§7 with actual commands and counts before any freeze wording:
   valid wikis): `tests/test_l2s3_package_b_service.py::test_readonly_vector_audit_wraps_wikistore_failures`
   — green;
 - AC-014 (safety/isolation/no-fallback/read-only/revalidation/archive/two-phase-delete/
-  global-asset preservation, no mandatory workspace_id): complete L3S1 unit **225 passed**
+  global-asset preservation, no mandatory workspace_id): complete L3S1 unit **227 passed**
   + integration **12 passed** suites; perimeter subset **123 passed**;
 - AC-015: targeted build-snapshot regressions **13 + 12 = 25 passed** (v6 run-snapshot
   set + complete build snapshot closure set);
-- AC-016: complete Layer3 Stage1 unit suite **225 passed**, integration suite **12 passed**
-  (combined **237 passed**);
+- AC-016: complete Layer3 Stage1 unit suite **227 passed**, integration suite **12 passed**
+  (combined **239 passed**);
 - AC-017: affected database/Layer1 **59 passed**, L2S2 **629 passed**, L2S3 **99 passed**
   — no new failures; the only failures anywhere are the three pre-existing L2S1 scan
   failures and the `test_layer1_realset.py` collection quirk, both reproducing unchanged on
@@ -627,3 +627,42 @@ gates before the freeze label may be re-asserted.
   immutable binding by deterministic schema_hash before L2S3 runs.
 - All integration tests run fully offline (fake parsers/LLM/embedding providers, isolated
   data roots, isolated SQLite databases), consistent with the Layer2 suite conventions.
+
+## 10. P1 composition-boundary closure revalidation
+
+The final Layer3 Stage1 P1 bypass is closed. `WorkspaceWikiService` no longer accepts or
+stores `build_service_factory`; `BuildServiceFactory` is deleted and is no longer exported
+from `transit_scholar.layer3.wiki`. There is therefore no public constructor/factory seam
+that can replace the complete `WorkspaceWikiBuildService` and select a different
+SchemaDefinition or SchemaInstance source.
+
+`composition_factory` remains the safe provider-composition seam, and the additional
+`paper_metadata_loader` seam affects only non-Schema Paper metadata. In every production
+or injected-provider construction, `_build_service()` itself unconditionally binds L2S3's
+authoritative inputs to `snapshot.definition` and
+`snapshot.runs_by_paper[paper_id].instance`. The v6 run A→B race now wraps and observes
+those already-bound loaders after snapshot capture and triggers the current-run switch
+before L2S3 consumption; it never constructs a replacement L2S3 service or reloads
+`get_schema()`. The definition A→B race likewise remains post-capture/pre-consumption and
+proves the captured definition is the only definition consumed.
+
+New explicit regressions prove that the constructor rejects `build_service_factory`, the
+package has no `BuildServiceFactory` export, and an injected `composition_factory` still
+receives L2S3 with both Schema loaders bound to the captured snapshot.
+
+Actual closure verification commands and results on 2026-08-29 (PowerShell expands the
+requested wildcard groups explicitly before invoking pytest):
+
+| Scope | Actual command | Result |
+|---|---|---|
+| Workspace Wiki | `python -X utf8 -m pytest tests/test_l3s1_wiki_workspace.py -q` | **41 passed** |
+| Direct Schema/Grounding/Gateway/readonly impact | `python -X utf8 -m pytest tests/test_l3s1_schema_workspace.py tests/test_l3s1_grounding_snapshot.py tests/test_l3s1_gateway_wiki_isolation.py tests/test_l3s1_grounding_readonly.py -q` | **76 passed** |
+| Complete L3S1 unit | `$unitTests = Get-ChildItem tests/test_l3s1_*.py \| ForEach-Object { $_.FullName }; python -X utf8 -m pytest $unitTests -q` | **227 passed in 38.92s** |
+| Complete L3S1 integration | `$integrationTests = Get-ChildItem tests/integration/test_l3s1_*.py \| ForEach-Object { $_.FullName }; python -X utf8 -m pytest $integrationTests -q` | **12 passed in 4.89s** |
+| Complete L2S2 | `$l2s2Tests = Get-ChildItem tests/test_l2s2_*.py \| ForEach-Object { $_.FullName }; python -X utf8 -m pytest $l2s2Tests -q` | **629 passed in 34.89s** |
+| Complete L2S3 | `$l2s3Tests = Get-ChildItem tests/test_l2s3_*.py \| ForEach-Object { $_.FullName }; python -X utf8 -m pytest $l2s3Tests -q` | **99 passed in 9.15s** |
+
+All relevant acceptance and regression gates are green after removing the bypass. Layer3
+Stage1 therefore remains formally **Freeze-ready / FROZEN**; the non-blocking P2 items
+(deep snapshot immutability, semantic Wiki embedding-provider wiring, and L2S2 cross-file
+schema identity hardening) remain explicitly outside this closure.

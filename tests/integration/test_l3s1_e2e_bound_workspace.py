@@ -51,7 +51,6 @@ from transit_scholar.layer2.schema_extraction import (
 from transit_scholar.layer2.schema_extraction.models import FieldResult
 from transit_scholar.layer2.wiki import (
     PaperMetadata,
-    WorkspaceWikiBuildService,
     create_production_wiki_composition,
 )
 from transit_scholar.layer3.grounding import (
@@ -152,37 +151,26 @@ def add_plain_paper(session, *, paper_id: str, title: str):
     return paper
 
 
-def offline_wiki_factory(session):
+def offline_wiki_kwargs(session):
     """Offline L2S3 build composition through Workspace-specific roots."""
 
-    def factory(workspace_id, layout):
-        from transit_scholar.layer2.schema_extraction.api import get_schema
+    def metadata_loader(paper_id):
+        paper = session.get(PaperRow, paper_id)
+        if paper is None or not paper.title:
+            return None
+        return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
 
-        storage = layout.schema_storage()
-
-        def metadata_loader(paper_id):
-            paper = session.get(PaperRow, paper_id)
-            if paper is None or not paper.title:
-                return None
-            return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
-
-        return WorkspaceWikiBuildService(
-            schema_instance_loader=lambda paper_id, schema_id: get_schema(
-                paper_id, schema_id, storage=storage
-            ),
-            paper_metadata_loader=metadata_loader,
-            composition_factory=lambda context, store: (
-                create_production_wiki_composition(
-                    context,
-                    store,
-                    llm_client=_NoProposalClient(),
-                    embedding_provider=_FixedEmbedding(),
-                )
-            ),
-            wiki_storage_root=layout.wiki_store_base,
-        )
-
-    return factory
+    return {
+        "paper_metadata_loader": metadata_loader,
+        "composition_factory": lambda context, store: (
+            create_production_wiki_composition(
+                context,
+                store,
+                llm_client=_NoProposalClient(),
+                embedding_provider=_FixedEmbedding(),
+            )
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +248,7 @@ def test_e2e_bound_workspace_full_flow(session, project_tmp_path, monkeypatch, l
     wiki = WorkspaceWikiService(
         session,
         data_root=project_tmp_path,
-        build_service_factory=offline_wiki_factory(session),
+        **offline_wiki_kwargs(session),
     )
     outcome = wiki.build(ws_id)
     assert (layout.wiki_dir / "manifest.json").is_file()

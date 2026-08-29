@@ -64,7 +64,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Literal
 
 from transit_scholar.layer2.wiki.service import audit_vector_index_readonly
 from transit_scholar.layer3.storage import (
@@ -95,6 +95,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from transit_scholar.layer2.wiki.application import (
         CompositionFactory as CompositionFactory,
     )
+    from transit_scholar.layer2.wiki.application import (
+        PaperMetadataLoader as PaperMetadataLoader,
+    )
     from transit_scholar.layer2.wiki.application import WorkspaceWikiBuildService
     from transit_scholar.layer2.wiki.models import WikiSearchResult
     from transit_scholar.layer2.wiki.service import WikiService
@@ -105,26 +108,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         WorkspaceWikiSchemaBuildSnapshot as WorkspaceWikiSchemaBuildSnapshot,
     )
 
-#: Callable receiving ``(workspace_id, layout)`` and returning the L2S3 build
-#: service bound to this Workspace (injectable for deterministic tests).
-BuildServiceFactory = Callable[
-    [str, WorkspaceStorageLayout], "WorkspaceWikiBuildService"
-]
-
-
 class WorkspaceWikiService:
     """Workspace-bound Base Wiki build, status and read/search governance.
 
     ``data_root`` selects the derived-storage base (defaults to the project
-    settings data root; tests inject an isolated root). ``build_service_factory``
-    overrides the ENTIRE L2S3 ``WorkspaceWikiBuildService`` construction for
-    deterministic tests (fake loaders/composition) and keeps its
-    ``(workspace_id, layout)`` contract; the default composition wires the
-    production L2S3 service with the Workspace-specific Wiki storage root,
-    the captured SchemaDefinition (``schema_definition_loader``) and the
+    settings data root; tests inject an isolated root). Every composition wires
+    the production L2S3 service with the Workspace-specific Wiki storage root,
+    the captured SchemaDefinition (``schema_definition_loader``), and the
     already-governed captured Schema instances (``schema_instance_loader``).
-    ``composition_factory`` overrides ONLY the production provider composition
-    of the default build service (the captured-input loaders stay enforced);
+    ``composition_factory`` overrides ONLY the production provider composition,
+    while ``paper_metadata_loader`` can replace the non-Schema metadata source;
+    the captured authoritative Schema loaders stay enforced for both seams.
     ``schemas`` injects the Layer3 Schema governance service (default: a
     ``WorkspaceSchemaService`` on the same ``session``/``data_root``); ``build``
     captures ONE frozen complete build snapshot through it
@@ -137,10 +131,10 @@ class WorkspaceWikiService:
         session: "Session",
         *,
         data_root: Path | str | None = None,
-        build_service_factory: BuildServiceFactory | None = None,
         workspaces: WorkspaceService | None = None,
         schemas: "WorkspaceSchemaService | None" = None,
         composition_factory: "CompositionFactory | None" = None,
+        paper_metadata_loader: "PaperMetadataLoader | None" = None,
     ) -> None:
         self.session = session
         self.data_root = data_root
@@ -157,8 +151,12 @@ class WorkspaceWikiService:
         # governed current run, carrying instance + identity) instead of
         # loading raw Workspace-local L2S2 content twice.
         self.schemas = schemas
-        self._build_service_factory = build_service_factory
         self._composition_factory = composition_factory
+        if paper_metadata_loader is None:
+            from transit_scholar.metadata.service import read_paper_metadata
+
+            paper_metadata_loader = read_paper_metadata
+        self._paper_metadata_loader = paper_metadata_loader
 
     # ------------------------------------------------------------------
     # capability (REQ-005 / AC-009)
@@ -622,34 +620,24 @@ class WorkspaceWikiService:
         could differ from the captured snapshot is re-resolved by that build
         (C-002). ``composition_factory`` replaces only the provider
         composition when injected; the captured-input loaders stay enforced.
-        The injectable ``build_service_factory`` keeps its ``(workspace_id,
-        layout)`` contract for deterministic test composition.
+        ``paper_metadata_loader`` may replace only the non-Schema metadata
+        source and cannot affect either authoritative Schema loader.
         """
-        if self._build_service_factory is not None:
-            return self._build_service_factory(workspace_id, layout)
         from transit_scholar.layer2.wiki.application import (  # noqa: PLC0415
             WorkspaceWikiBuildService,
         )
 
+        composition_kwargs = {}
         if self._composition_factory is not None:
-            return WorkspaceWikiBuildService(
-                # REQ-002/AC-004: the captured definition — never the default
-                # ``get_schema_definition`` current-definition resolver.
-                schema_definition_loader=lambda schema_id: snapshot.definition,
-                # REQ-002/AC-005: the captured per-Paper instances — never the
-                # default current ``get_schema()`` resolver.
-                schema_instance_loader=lambda paper_id, schema_id: (
-                    snapshot.runs_by_paper[paper_id].instance
-                ),
-                composition_factory=self._composition_factory,
-                wiki_storage_root=layout.wiki_store_base,
-            )
+            composition_kwargs["composition_factory"] = self._composition_factory
         return WorkspaceWikiBuildService(
             schema_definition_loader=lambda schema_id: snapshot.definition,
             schema_instance_loader=lambda paper_id, schema_id: (
                 snapshot.runs_by_paper[paper_id].instance
             ),
+            paper_metadata_loader=self._paper_metadata_loader,
             wiki_storage_root=layout.wiki_store_base,
+            **composition_kwargs,
         )
 
     def _require_active_bound(self, workspace_id: str) -> WorkspaceRecord:
@@ -700,4 +688,4 @@ def _snapshot_covers_different_inputs(
     return sorted(recorded) != sorted(paper_ids)
 
 
-__all__ = ["WorkspaceWikiService", "BuildServiceFactory"]
+__all__ = ["WorkspaceWikiService"]

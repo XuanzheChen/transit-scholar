@@ -60,17 +60,15 @@ def create_bound_workspace(session, workspace_id="ws-ro"):
     ).workspace
 
 
-def _offline_build_factory(session):
+def _offline_build_kwargs(session):
     """Offline L2S3 build composition (fake LLM/embedding/metadata) bound to
     the Workspace-specific storage roots, mirroring the Wiki tests."""
-    from transit_scholar.layer2.schema_extraction.api import get_schema  # noqa: PLC0415
     from transit_scholar.layer2.retrieval.providers import (  # noqa: PLC0415
         EmbeddingProvider,
         ProviderInfo,
     )
     from transit_scholar.layer2.wiki import (  # noqa: PLC0415
         PaperMetadata,
-        WorkspaceWikiBuildService,
         create_production_wiki_composition,
     )
 
@@ -96,30 +94,21 @@ def _offline_build_factory(session):
         def embed_query(self, text):
             return [1.0, 0.0]
 
-    def factory(workspace_id, layout):
-        storage = layout.schema_storage()
+    def metadata_loader(paper_id):
+        paper = session.get(Paper, paper_id)
+        if paper is None or not paper.title:
+            return None
+        return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
 
-        def metadata_loader(paper_id):
-            paper = session.get(Paper, paper_id)
-            if paper is None or not paper.title:
-                return None
-            return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
-
-        return WorkspaceWikiBuildService(
-            schema_instance_loader=lambda paper_id, schema_id: get_schema(
-                paper_id, schema_id, storage=storage
-            ),
-            paper_metadata_loader=metadata_loader,
-            composition_factory=lambda context, store: create_production_wiki_composition(
-                context,
-                store,
-                llm_client=_Client(),
-                embedding_provider=_Embedding(),
-            ),
-            wiki_storage_root=layout.wiki_store_base,
-        )
-
-    return factory
+    return {
+        "paper_metadata_loader": metadata_loader,
+        "composition_factory": lambda context, store: create_production_wiki_composition(
+            context,
+            store,
+            llm_client=_Client(),
+            embedding_provider=_Embedding(),
+        ),
+    }
 
 
 def make_ready_workspace(session, project_tmp_path, *, workspace_id="ws-ro"):
@@ -138,7 +127,7 @@ def make_ready_workspace(session, project_tmp_path, *, workspace_id="ws-ro"):
     wiki = WorkspaceWikiService(
         session,
         data_root=project_tmp_path,
-        build_service_factory=_offline_build_factory(session),
+        **_offline_build_kwargs(session),
     )
     wiki.build(workspace.workspace_id)
     return workspace

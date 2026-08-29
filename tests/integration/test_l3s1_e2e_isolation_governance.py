@@ -38,7 +38,6 @@ from transit_scholar.layer2.schema_extraction import (
 )
 from transit_scholar.layer2.wiki import (
     PaperMetadata,
-    WorkspaceWikiBuildService,
     create_production_wiki_composition,
 )
 from transit_scholar.layer3.grounding import WorkspaceGroundingService
@@ -107,35 +106,24 @@ def build_ready_paper(project_tmp_path, monkeypatch, l2_config, *, title: str):
     return paper_id
 
 
-def offline_wiki_factory(session):
-    def factory(workspace_id, layout):
-        from transit_scholar.layer2.schema_extraction.api import get_schema
+def offline_wiki_kwargs(session):
+    def metadata_loader(paper_id):
+        paper = session.get(PaperRow, paper_id)
+        if paper is None or not paper.title:
+            return None
+        return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
 
-        storage = layout.schema_storage()
-
-        def metadata_loader(paper_id):
-            paper = session.get(PaperRow, paper_id)
-            if paper is None or not paper.title:
-                return None
-            return PaperMetadata(paper_id=paper.id, title=paper.title, year=2024)
-
-        return WorkspaceWikiBuildService(
-            schema_instance_loader=lambda paper_id, schema_id: get_schema(
-                paper_id, schema_id, storage=storage
-            ),
-            paper_metadata_loader=metadata_loader,
-            composition_factory=lambda context, store: (
-                create_production_wiki_composition(
-                    context,
-                    store,
-                    llm_client=_NoProposalClient(),
-                    embedding_provider=_FixedEmbedding(),
-                )
-            ),
-            wiki_storage_root=layout.wiki_store_base,
-        )
-
-    return factory
+    return {
+        "paper_metadata_loader": metadata_loader,
+        "composition_factory": lambda context, store: (
+            create_production_wiki_composition(
+                context,
+                store,
+                llm_client=_NoProposalClient(),
+                embedding_provider=_FixedEmbedding(),
+            )
+        ),
+    }
 
 
 def prepare_bound_workspace(
@@ -157,7 +145,7 @@ def prepare_bound_workspace(
     wiki = WorkspaceWikiService(
         session,
         data_root=project_tmp_path,
-        build_service_factory=offline_wiki_factory(session),
+        **offline_wiki_kwargs(session),
     )
     wiki.build(workspace.workspace_id)
     return workspace.workspace_id
@@ -219,7 +207,7 @@ def test_same_paper_same_schema_two_workspaces_stay_isolated(
     wiki = WorkspaceWikiService(
         session,
         data_root=project_tmp_path,
-        build_service_factory=offline_wiki_factory(session),
+        **offline_wiki_kwargs(session),
     )
     wiki.build(ws_a)
     assert (layout_a.wiki_dir / "manifest.json").is_file()
@@ -278,7 +266,7 @@ def test_wiki_freshness_derived_from_fingerprint_real_flow(
     wiki = WorkspaceWikiService(
         session,
         data_root=project_tmp_path,
-        build_service_factory=offline_wiki_factory(session),
+        **offline_wiki_kwargs(session),
     )
     grounder = WorkspaceGroundingService(
         session, data_root=project_tmp_path, evidence=L2S1EvidenceDelegate(config=l2_config)

@@ -106,17 +106,20 @@ def test_citation_models_in_orm():
         assert required in rnd_cols, f"missing CitationRender column: {required}"
 
 
-def test_alembic_creates_twelve_tables():
-    """T02: Alembic head upgrade yields citation and DOI enrichment tables."""
+def test_alembic_creates_fourteen_tables():
+    """T02: Alembic head upgrade yields citation, DOI enrichment, and Layer3
+    Workspace control-plane tables (workspaces + workspace_paper_memberships).
+    The exact-set assertion remains a database-schema regression guard."""
     tables = set(inspect(_engine).get_table_names())
     for required in (
         "papers", "paper_files", "paper_authors", "ingestion_jobs",
         "metadata_candidates", "paper_relations", "audit_logs",
         "citation_records", "citation_renders", "alembic_version",
         "doi_enrichment_jobs", "doi_provider_results",
+        "workspaces", "workspace_paper_memberships",
     ):
         assert required in tables, f"missing table: {required}"
-    assert len(tables) == 12
+    assert len(tables) == 14
 
 
 def test_unique_constraint_on_citation_renders():

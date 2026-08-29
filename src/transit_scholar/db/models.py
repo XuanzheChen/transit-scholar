@@ -483,3 +483,111 @@ class DOIProviderResult(Base):
         Index("ix_doi_provider_results_status", "status"),
         Index("ix_doi_provider_results_next_retry_at", "next_retry_at"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Layer3 Stage1: Workspace control plane (REQ-001/REQ-002/REQ-003/REQ-006)
+# ---------------------------------------------------------------------------
+
+#: Workspace lifecycle states (REQ-001).
+WORKSPACE_STATUSES = ("active", "archived", "deleting", "deleted")
+
+#: Workspace schema modes (REQ-003): exactly one of bound / none.
+WORKSPACE_SCHEMA_MODES = ("bound", "none")
+
+
+class Workspace(Base):
+    """Persistent Layer3 Workspace knowledge boundary (control plane).
+
+    ``schema_mode`` is bound or none. For bound mode the concrete
+    ``schema_id`` / ``schema_version`` / ``schema_hash`` triple is persisted;
+    for none mode all three columns MUST be NULL. The database CHECK
+    constraint ``ck_workspaces_schema_mode_consistency`` enforces the
+    bound-vs-none invariant independently of the service layer.
+
+    ``revision`` is a monotonic version marker advanced by every authoritative
+    mutation (membership or lifecycle change). Schema binding is immutable
+    within Layer3 Stage1, so it never advances the revision.
+    """
+
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(512), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), default="active", nullable=False
+    )
+    schema_mode: Mapped[str] = mapped_column(
+        String(16), default="none", nullable=False
+    )
+    schema_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    schema_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    schema_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    memberships: Mapped[List["WorkspacePaperMembership"]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        order_by="WorkspacePaperMembership.paper_id",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'archived', 'deleting', 'deleted')",
+            name="ck_workspaces_status",
+        ),
+        CheckConstraint(
+            "schema_mode IN ('bound', 'none')",
+            name="ck_workspaces_schema_mode",
+        ),
+        CheckConstraint(
+            "(schema_mode = 'bound' AND schema_id IS NOT NULL "
+            "AND schema_version IS NOT NULL AND schema_hash IS NOT NULL) "
+            "OR (schema_mode = 'none' AND schema_id IS NULL "
+            "AND schema_version IS NULL AND schema_hash IS NULL)",
+            name="ck_workspaces_schema_mode_consistency",
+        ),
+        CheckConstraint("revision >= 1", name="ck_workspaces_revision_positive"),
+        Index("ix_workspaces_status", "status"),
+        Index("ix_workspaces_schema_mode", "schema_mode"),
+    )
+
+
+class WorkspacePaperMembership(Base):
+    """Workspace-to-Paper membership (REQ-002).
+
+    A single global Paper MAY be visible in many Workspaces; inclusion is
+    modelled here rather than as a ``workspace_id`` column on the global
+    Paper record. The pair ``(workspace_id, paper_id)`` is unique, so a Paper
+    can never be a duplicate member of one Workspace.
+    """
+
+    __tablename__ = "workspace_paper_memberships"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("workspaces.id"), nullable=False
+    )
+    paper_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("papers.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    workspace: Mapped["Workspace"] = relationship(back_populates="memberships")
+    paper: Mapped["Paper"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "paper_id", name="uq_workspace_paper_membership_pair"
+        ),
+        Index("ix_workspace_paper_memberships_workspace_id", "workspace_id"),
+        Index("ix_workspace_paper_memberships_paper_id", "paper_id"),
+    )

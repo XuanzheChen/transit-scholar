@@ -39,7 +39,12 @@ from .models import (
     utc_now,
     validate_identifier,
 )
-from .store import WikiNotFoundError, WikiNotInitializedError, WikiStore
+from .store import (
+    WikiCorruptionError,
+    WikiNotFoundError,
+    WikiNotInitializedError,
+    WikiStore,
+)
 
 
 _INDEX_VERSION = 1
@@ -694,6 +699,161 @@ class WikiService:
                 for issue in relevant
             ]
         return self._report(relevant, fingerprint, page_id)
+
+
+def audit_vector_index_readonly(
+    store: WikiStore,
+    *,
+    index_name: str = "package_b_index.json",
+    index_version: int = _INDEX_VERSION,
+) -> list[AuditIssue]:
+    """Provider-free, side-effect-free audit of the persisted vector index.
+
+    Layer3 Stage1 readiness derivation consumes this reusable read-only helper
+    (REQ-001 / AC-004 / AC-005 / C-010): ``WorkspaceWikiService.status()`` must
+    never construct an embedding provider or rebuild derived indexes while
+    checking readiness, so the mandatory-vector-index invariants are validated
+    here without one. Returns error-severity ``AuditIssue`` records using the
+    stable L2S3 vocabulary:
+
+    - ``vector_index_missing`` — the index file, its vector metadata/vectors,
+      or a required Page/Entity vector is absent;
+    - ``vector_index_stale`` — the index source fingerprint differs from the
+      current authoritative Wiki source snapshot;
+    - ``vector_index_incompatible`` — invalid index version, malformed vector
+      records, invalid metadata dimension, or dimensionally inconsistent
+      persisted vectors.
+
+    An empty list means the mandatory vector index is present, current and
+    internally valid with complete Page/Entity coverage. Never mutates
+    storage and never calls LLM/embedding providers.
+    """
+    index = store.index_path / index_name
+    if not index.exists():
+        return [
+            AuditIssue(
+                code="vector_index_missing",
+                object_id=index_name,
+                message="mandatory vector index is absent",
+            )
+        ]
+    try:
+        payload = json.loads(index.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return [
+            AuditIssue(
+                code="vector_index_incompatible",
+                object_id=index_name,
+                message=f"vector index is not readable JSON: {type(error).__name__}",
+            )
+        ]
+    if not isinstance(payload, dict):
+        return [
+            AuditIssue(
+                code="vector_index_incompatible",
+                object_id=index_name,
+                message="vector index is not a JSON object",
+            )
+        ]
+    if payload.get("index_version") != index_version:
+        return [
+            AuditIssue(
+                code="vector_index_incompatible",
+                object_id=index_name,
+                message="vector index version is invalid",
+            )
+        ]
+    # The index must be current for the SAME authoritative source snapshot
+    # (same manifest/pages/entities/links bytes) that status() validates.
+    source_fingerprint = _audited_source_fingerprint(store)
+    if payload.get("source_fingerprint") != source_fingerprint:
+        return [
+            AuditIssue(
+                code="vector_index_stale",
+                object_id=index_name,
+                message="vector index source fingerprint is stale",
+            )
+        ]
+    metadata = payload.get("vector_metadata")
+    vectors = payload.get("vectors")
+    if not isinstance(metadata, dict) or not isinstance(vectors, list):
+        return [
+            AuditIssue(
+                code="vector_index_missing",
+                object_id=index_name,
+                message="mandatory vector metadata or vectors are absent",
+            )
+        ]
+    by_id: dict[tuple[str, str], list[object]] = {}
+    for item in vectors:
+        if not isinstance(item, dict):
+            return [
+                AuditIssue(
+                    code="vector_index_incompatible",
+                    object_id=index_name,
+                    message="vector records are malformed",
+                )
+            ]
+        kind, object_id, vector = item.get("kind"), item.get("object_id"), item.get("vector")
+        if (
+            kind not in {"page", "entity"}
+            or not isinstance(object_id, str)
+            or not isinstance(vector, list)
+            or any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in vector)
+        ):
+            return [
+                AuditIssue(
+                    code="vector_index_incompatible",
+                    object_id=index_name,
+                    message="vector records are malformed",
+                )
+            ]
+        by_id[(kind, object_id)] = vector
+    try:
+        required = [("page", page.page_id) for page in store.list_pages()]
+        required += [("entity", entity.entity_id) for entity in store.list_entities()]
+    except WikiStoreError as error:
+        raise WikiCorruptionError(
+            f"vector audit cannot read the authoritative source snapshot: {error}"
+        ) from error
+    if any(key not in by_id for key in required):
+        return [
+            AuditIssue(
+                code="vector_index_missing",
+                object_id=index_name,
+                message="required page or entity vectors are missing",
+            )
+        ]
+    dimension = metadata.get("dimension")
+    if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension < 1:
+        return [
+            AuditIssue(
+                code="vector_index_incompatible",
+                object_id=index_name,
+                message="vector metadata dimension is invalid",
+            )
+        ]
+    if any(len(by_id[key]) != dimension for key in required):
+        return [
+            AuditIssue(
+                code="vector_index_incompatible",
+                object_id=index_name,
+                message="persisted vector dimensions are incompatible",
+            )
+        ]
+    return []
+
+
+def _audited_source_fingerprint(store: WikiStore) -> str:
+    """Byte-level digest over manifest/pages/entities/links (read-only)."""
+    raw = store.read_raw_snapshot()
+    digest = hashlib.sha256()
+    for name in ("manifest", "pages", "entities", "links"):
+        digest.update(name.encode("ascii"))
+        digest.update(b"\0")
+        digest.update((raw[name]["sha256"] or "missing").encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 WikiMaintainer = WikiService

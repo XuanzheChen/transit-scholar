@@ -7,15 +7,18 @@ explicit disabled/missing semantics for no-schema Workspaces (AC-007).
 """
 
 from .errors import (
+    SchemaBindingMismatchError,
     SchemaDisabledError,
     SchemaMissingError,
     WorkspaceSchemaError,
 )
-from .service import WorkspaceSchemaService
+from .service import PaperSchemaReadiness, WorkspaceSchemaService
 
 __all__ = [
     "WorkspaceSchemaService",
+    "PaperSchemaReadiness",
     "WorkspaceSchemaError",
     "SchemaDisabledError",
     "SchemaMissingError",
+    "SchemaBindingMismatchError",
 ]

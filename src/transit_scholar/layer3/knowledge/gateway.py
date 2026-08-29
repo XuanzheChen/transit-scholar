@@ -302,10 +302,15 @@ class WorkspaceKnowledgeGateway:
         record = self.workspaces.get(self.workspace_id)
         schema_status = "disabled"
         if record.schema_mode == SCHEMA_MODE_BOUND and record.schema_binding is not None:
-            identities = self.schemas.current_run_identities(
+            # REQ-004: readiness requires a persisted run that is readable AND
+            # compatible with the immutable Workspace binding — never
+            # ``current.json`` existence alone (AC-012..AC-015).
+            readiness = self.schemas.paper_schema_readiness(
                 self.workspace_id, [paper_id]
+            ).get(paper_id)
+            schema_status = (
+                readiness.status if readiness is not None else "missing"
             )
-            schema_status = "ready" if identities.get(paper_id) else "missing"
         return WorkspacePaperView(
             workspace_id=self.workspace_id,
             paper_id=paper_id,

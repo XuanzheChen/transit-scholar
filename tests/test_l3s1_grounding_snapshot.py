@@ -18,6 +18,7 @@ normalization) across every required Grounding state:
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -608,3 +609,283 @@ def test_grounding_unknown_workspace_raises_stable_error(session, project_tmp_pa
             "does-not-exist"
         )
     assert exc_info.value.code == "workspace_not_found"
+
+
+# ---------------------------------------------------------------------------
+# REQ-002 / AC-007: wiki_read requires a production-complete Base Wiki
+# ---------------------------------------------------------------------------
+
+
+def _ready_workspace(session, project_tmp_path, *, workspace_id, paper_id):
+    service = WorkspaceService(session)
+    workspace = create_bound_workspace(session, workspace_id=workspace_id)
+    paper = add_paper(session, paper_id=paper_id, title="Completeness Grounding")
+    service.add_paper(workspace.workspace_id, paper.id)
+    WorkspaceSchemaService(session, data_root=project_tmp_path).materialize(
+        workspace.workspace_id, paper.id, llm_client=FakeLLMProvider()
+    )
+    build_wiki(session, project_tmp_path, workspace.workspace_id)
+    return workspace
+
+
+def _ground_snapshot(session, project_tmp_path, workspace_id):
+    return grounding(session, project_tmp_path, evidence=FakeEvidence()).ground(
+        workspace_id
+    )
+
+
+def _rewrite_file(path, changes):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(changes)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def test_grounding_wiki_read_false_for_partial_manifest(session, project_tmp_path):
+    """AC-007: a partial Manifest build never exposes wiki_read=true."""
+    workspace = _ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-partial", paper_id="gp1"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(layout.wiki_dir / "manifest.json", {"build_status": "partial"})
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    assert snapshot.base_wiki.status == "error"
+    assert snapshot.base_wiki.error_code == "manifest_build_partial"
+    assert snapshot.capabilities.wiki_read is False
+    assert [a.code for a in snapshot.recommended_actions] == [ACTION_REPAIR_BASE_WIKI]
+
+
+def test_grounding_wiki_read_false_for_failed_manifest(session, project_tmp_path):
+    """AC-007: a failed Manifest build never exposes wiki_read=true."""
+    workspace = _ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-failed", paper_id="gp2"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(layout.wiki_dir / "manifest.json", {"build_status": "failed"})
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    assert snapshot.base_wiki.status == "error"
+    assert snapshot.base_wiki.error_code == "manifest_build_failed"
+    assert snapshot.capabilities.wiki_read is False
+
+
+def test_grounding_wiki_read_false_for_incomplete_provenance(
+    session, project_tmp_path
+):
+    """AC-007: non-complete recorded provenance never exposes wiki_read=true."""
+    workspace = _ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-prov", paper_id="gp3"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(layout.wiki_dir / "provenance.json", {"build_status": "partial"})
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    assert snapshot.base_wiki.status == "error"
+    assert snapshot.base_wiki.error_code == "build_provenance_incomplete"
+    assert snapshot.capabilities.wiki_read is False
+
+
+def test_grounding_wiki_read_false_for_missing_vector_index(
+    session, project_tmp_path
+):
+    """AC-007: a missing mandatory vector index never exposes wiki_read=true."""
+    workspace = _ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-index", paper_id="gp4"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    index_path = layout.wiki_dir / "index" / "package_b_index.json"
+    assert index_path.is_file()
+    index_path.unlink()
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    assert snapshot.base_wiki.status == "error"
+    assert snapshot.base_wiki.error_code == "vector_index_missing"
+    assert snapshot.capabilities.wiki_read is False
+
+
+def test_grounding_wiki_read_false_for_stale_vector_index(
+    session, project_tmp_path
+):
+    """AC-007: a stale mandatory vector index never exposes wiki_read=true."""
+    workspace = _ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-stale", paper_id="gp5"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(
+        layout.wiki_dir / "index" / "package_b_index.json",
+        {"source_fingerprint": "forged-stale"},
+    )
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    assert snapshot.base_wiki.status == "error"
+    assert snapshot.base_wiki.error_code == "vector_index_stale"
+    assert snapshot.capabilities.wiki_read is False
+
+
+def test_grounding_wiki_read_false_for_incompatible_vector_index(
+    session, project_tmp_path
+):
+    """AC-007: an incompatible mandatory vector index (invalid metadata or
+    dimensions) never exposes wiki_read=true."""
+    workspace = _ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-incomp", paper_id="gp6"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(
+        layout.wiki_dir / "index" / "package_b_index.json",
+        {"vector_metadata": {"provider": "test", "model": "test", "dimension": 7}},
+    )
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    assert snapshot.base_wiki.status == "error"
+    assert snapshot.base_wiki.error_code == "vector_index_incompatible"
+    assert snapshot.capabilities.wiki_read is False
+
+
+def test_grounding_wiki_read_true_only_for_complete_current_valid_wiki(
+    session, project_tmp_path
+):
+    """REQ-002/AC-006/AC-007: the complete, current, structurally valid
+    snapshot with a valid current vector index is the ONLY wiki_read=true
+    state."""
+    workspace = _ready_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-ready", paper_id="gp7"
+    )
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    assert snapshot.base_wiki.status == "ready"
+    assert snapshot.base_wiki.error_code is None
+    assert snapshot.capabilities.wiki_read is True
+    assert snapshot.capabilities.wiki_build is True
+
+
+# ---------------------------------------------------------------------------
+# REQ-004: Grounding schema_status=ready requires a readable, binding-compatible run
+# ---------------------------------------------------------------------------
+
+
+def _rewrite_pointer(layout, paper_id, changes):
+    """Rewrite ``current.json`` with the given field changes (tamper helper)."""
+    path = layout.schema_storage().current_path(paper_id)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(changes)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _rewrite_run_manifest(layout, paper_id, run_id, changes):
+    """Rewrite ``run_manifest.json`` with the given field changes.
+
+    The run manifest is not digest-protected by L2S2, so the run stays fully
+    READABLE while its recorded Schema identity becomes binding-incompatible
+    (AC-013/AC-014).
+    """
+    path = layout.schemas_dir / paper_id / "runs" / run_id / "run_manifest.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(changes)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _schema_only_workspace(session, project_tmp_path, *, workspace_id, paper_id):
+    """A bound Workspace with ONE materialized compatible Schema run."""
+    service = WorkspaceService(session)
+    workspace = create_bound_workspace(session, workspace_id=workspace_id)
+    paper = add_paper(session, paper_id=paper_id, title="Schema Grounding")
+    service.add_paper(workspace.workspace_id, paper.id)
+    WorkspaceSchemaService(session, data_root=project_tmp_path).materialize(
+        workspace.workspace_id, paper.id, llm_client=FakeLLMProvider()
+    )
+    return workspace, paper
+
+
+def test_grounding_non_ready_when_current_pointer_references_missing_run(
+    session, project_tmp_path
+):
+    """AC-012: current.json exists but the referenced run is missing ->
+    Grounding NEVER reports schema_status=ready and exposes the explicit
+    ``schema_missing`` outcome."""
+    import shutil
+
+    workspace, paper = _schema_only_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-ptr", paper_id="gs1"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    assert (layout.schemas_dir / paper.id / "current.json").is_file()
+    run_id = layout.schema_storage().read_current(paper.id).run_id
+    shutil.rmtree(layout.schemas_dir / paper.id / "runs" / run_id)
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    paper_view = snapshot.visible_papers[0]
+    assert paper_view.schema_status == "missing"
+    assert paper_view.schema_error_code == "schema_missing"
+    assert snapshot.schema_coverage.status == "missing"
+    assert snapshot.schema_coverage.ready == 0
+    assert snapshot.capabilities.schema_ready_papers == 0
+    assert ACTION_MATERIALIZE_SCHEMA_RUNS in [
+        action.code for action in snapshot.recommended_actions
+    ]
+
+
+def test_grounding_non_ready_for_readable_run_with_version_mismatch(
+    session, project_tmp_path
+):
+    """AC-013: a READABLE persisted run whose schema_version disagrees with
+    the Workspace binding -> explicit non-ready with the stable
+    ``schema_binding_mismatch`` error code."""
+    workspace, paper = _schema_only_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-runver", paper_id="gs2"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    run_id = layout.schema_storage().read_current(paper.id).run_id
+    _rewrite_run_manifest(layout, paper.id, run_id, {"schema_version": "0.0-forged"})
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    paper_view = snapshot.visible_papers[0]
+    assert paper_view.schema_status == "missing"
+    assert paper_view.schema_error_code == "schema_binding_mismatch"
+    assert snapshot.schema_coverage.status == "missing"
+    assert snapshot.capabilities.schema_ready_papers == 0
+    # The mismatch is NEVER silently mapped to ready (AC-016).
+    assert paper_view.schema_status != "ready"
+
+
+def test_grounding_non_ready_for_pointer_hash_mismatch(session, project_tmp_path):
+    """AC-014: the normal L2S2 current pointer exposes schema_hash; a hash
+    incompatible with the Workspace binding -> explicit non-ready with the
+    stable ``schema_binding_mismatch`` error code."""
+    workspace, paper = _schema_only_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-ptrhash", paper_id="gs3"
+    )
+    layout = workspace_layout(workspace.workspace_id, data_root=project_tmp_path)
+    _rewrite_pointer(layout, paper.id, {"schema_hash": "f" * 64})
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    paper_view = snapshot.visible_papers[0]
+    assert paper_view.schema_status == "missing"
+    assert paper_view.schema_error_code == "schema_binding_mismatch"
+    assert snapshot.schema_coverage.ready == 0
+
+
+def test_grounding_ready_for_readable_binding_compatible_run(
+    session, project_tmp_path
+):
+    """AC-015: a readable, fully binding-compatible persisted run keeps every
+    surface usable — get_instance(), get_field(), current-run identity
+    derivation and Grounding schema_status=ready (with no error code)."""
+    workspace, paper = _schema_only_workspace(
+        session, project_tmp_path, workspace_id="ws-gr-ok", paper_id="gs4"
+    )
+    schemas = WorkspaceSchemaService(session, data_root=project_tmp_path)
+    instance = schemas.get_instance(workspace.workspace_id, paper.id)
+    assert instance.paper_id == paper.id
+    field = schemas.get_field(
+        workspace.workspace_id, paper.id, "research_problem.control_type"
+    )
+    assert field is not None
+    identities = schemas.current_run_identities(workspace.workspace_id, [paper.id])
+    assert identities[paper.id] is not None
+
+    snapshot = _ground_snapshot(session, project_tmp_path, workspace.workspace_id)
+    paper_view = snapshot.visible_papers[0]
+    assert paper_view.schema_status == "ready"
+    assert paper_view.schema_error_code is None
+    assert snapshot.schema_coverage.status == "complete"
+    assert snapshot.capabilities.schema_ready_papers == 1

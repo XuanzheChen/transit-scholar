@@ -12,6 +12,10 @@ Workspace's own Wiki service/store only:
 - AC-010: input changes (membership) make the built Wiki observably stale and
   the gateway returns the explicit ``wiki_stale`` degraded outcome instead of
   silently reading non-current facts;
+- REQ-002/AC-008: partial/failed Manifest builds, non-complete provenance and
+  missing/stale/incompatible mandatory vector indexes never return Wiki search
+  results through the gateway — the explicit corrupt/error boundary is
+  surfaced instead;
 - AC-009: no-schema Workspaces report ``wiki_unsupported`` through the
   gateway with no fallback construction.
 
@@ -22,6 +26,7 @@ through the real L2S2 public API with an offline fake LLM.
 
 from __future__ import annotations
 
+import json
 import shutil
 
 import pytest
@@ -279,3 +284,105 @@ def test_gateway_wiki_unsupported_for_no_schema_workspace(session, project_tmp_p
     assert not workspace_layout(
         ws.workspace_id, data_root=project_tmp_path
     ).derived_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# REQ-002 / AC-008: search never serves partial/failed/index-invalid Wikis
+# ---------------------------------------------------------------------------
+
+
+def _ready_bound_workspace(session, project_tmp_path, *, workspace_id, paper_id):
+    """A bound Workspace with one materialized member and a built Base Wiki."""
+    paper = add_paper(session, paper_id, "Gateway Completeness Paper")
+    ws = create_bound_workspace(session, "Completeness", workspace_id)
+    service = WorkspaceService(session)
+    service.add_paper(ws.workspace_id, paper.id)
+    materialize(session, project_tmp_path, ws.workspace_id, paper.id)
+    return ws
+
+
+def _rewrite_file(path, changes):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(changes)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def test_gateway_wiki_search_rejects_partial_manifest(session, project_tmp_path):
+    """AC-008: a partial Manifest build is never served as current content."""
+    ws = _ready_bound_workspace(
+        session, project_tmp_path, workspace_id="gww-partial", paper_id="gw-partial-p"
+    )
+    wiki = wiki_service(session, project_tmp_path)
+    wiki.build(ws.workspace_id)
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(layout.wiki_dir / "manifest.json", {"build_status": "partial"})
+
+    gateway = gateway_for(session, project_tmp_path, ws.workspace_id, wiki=wiki)
+    status = gateway.wiki_status()
+    assert status.status == "error"
+    assert status.error_code == "manifest_build_partial"
+    with pytest.raises(WikiCorruptError) as corrupt:
+        gateway.search_wiki("regulation")
+    assert corrupt.value.code == "wiki_corrupt"
+
+
+def test_gateway_wiki_search_rejects_missing_vector_index(session, project_tmp_path):
+    """AC-008: a missing mandatory vector index is never served as current."""
+    ws = _ready_bound_workspace(
+        session, project_tmp_path, workspace_id="gww-index", paper_id="gw-index-p"
+    )
+    wiki = wiki_service(session, project_tmp_path)
+    wiki.build(ws.workspace_id)
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    index_path = layout.wiki_dir / "index" / "package_b_index.json"
+    assert index_path.is_file()
+    index_path.unlink()
+
+    gateway = gateway_for(session, project_tmp_path, ws.workspace_id, wiki=wiki)
+    status = gateway.wiki_status()
+    assert status.status == "error"
+    assert status.error_code == "vector_index_missing"
+    with pytest.raises(WikiCorruptError) as corrupt:
+        gateway.search_wiki("regulation")
+    assert corrupt.value.code == "wiki_corrupt"
+
+
+def test_gateway_wiki_search_rejects_stale_vector_index(session, project_tmp_path):
+    """AC-008: a stale mandatory vector index is never served as current."""
+    ws = _ready_bound_workspace(
+        session, project_tmp_path, workspace_id="gww-stale-idx", paper_id="gw-idx2-p"
+    )
+    wiki = wiki_service(session, project_tmp_path)
+    wiki.build(ws.workspace_id)
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(
+        layout.wiki_dir / "index" / "package_b_index.json",
+        {"source_fingerprint": "forged-stale"},
+    )
+
+    gateway = gateway_for(session, project_tmp_path, ws.workspace_id, wiki=wiki)
+    status = gateway.wiki_status()
+    assert status.status == "error"
+    assert status.error_code == "vector_index_stale"
+    with pytest.raises(WikiCorruptError) as corrupt:
+        gateway.search_wiki("regulation")
+    assert corrupt.value.code == "wiki_corrupt"
+
+
+def test_gateway_wiki_search_rejects_incomplete_provenance(session, project_tmp_path):
+    """AC-008: non-complete recorded provenance is never served as current."""
+    ws = _ready_bound_workspace(
+        session, project_tmp_path, workspace_id="gww-prov", paper_id="gw-prov-p"
+    )
+    wiki = wiki_service(session, project_tmp_path)
+    wiki.build(ws.workspace_id)
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    _rewrite_file(layout.wiki_dir / "provenance.json", {"build_status": "failed"})
+
+    gateway = gateway_for(session, project_tmp_path, ws.workspace_id, wiki=wiki)
+    status = gateway.wiki_status()
+    assert status.status == "error"
+    assert status.error_code == "build_provenance_incomplete"
+    with pytest.raises(WikiCorruptError) as corrupt:
+        gateway.search_wiki("regulation")
+    assert corrupt.value.code == "wiki_corrupt"

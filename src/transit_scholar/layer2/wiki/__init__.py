@@ -32,6 +32,7 @@ from .service import (
     WikiServiceError,
     WikiValidationError,
     WikiWorkspaceMismatchError,
+    audit_vector_index_readonly,
 )
 from .store import (
     WikiConflictError,
@@ -87,6 +88,7 @@ __all__ = [
     "WikiService", "WikiMaintainer", "WikiServiceError", "WikiValidationError",
     "WikiWorkspaceMismatchError", "WikiIndexError", "WikiAuditError",
     "WikiEmbeddingUnavailableError", "WikiEmbeddingProviderError",
+    "audit_vector_index_readonly",
     "FieldCard", "FieldCardError", "FieldCardValidationError", "build_field_cards",
     "EntityProposal", "EntityProposalRequest", "EntityProposalResult",
     "EntityProposalRunner", "StructuredOutputProvider", "build_entity_proposal_request",

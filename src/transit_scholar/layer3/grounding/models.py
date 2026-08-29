@@ -50,6 +50,13 @@ class GroundedPaper(BaseModel):
     canonical parse pointer and retrieval index; ``schema_status`` is derived
     from the Workspace schema mode and the Workspace-owned current Schema run
     (``disabled`` / ``missing`` / ``ready``, AC-014). Nothing here is built.
+
+    ``schema_error_code`` carries the stable Layer3 boundary code when a
+    bound Workspace's Paper Schema content is NOT ready for an explicit
+    reason (``schema_missing`` for absent/corrupt/unreadable runs,
+    ``schema_binding_mismatch`` for a run whose persisted Schema identity is
+    incompatible with the immutable Workspace binding — REQ-004/AC-016);
+    it is ``None`` for ready/disabled Papers.
     """
 
     workspace_id: str
@@ -58,6 +65,7 @@ class GroundedPaper(BaseModel):
     paper_status: str = "active"
     l2s1_ready: bool = False
     schema_status: PaperSchemaStatus = "disabled"
+    schema_error_code: str | None = None
 
 
 class SchemaCoverage(BaseModel):

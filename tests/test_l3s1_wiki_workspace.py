@@ -11,6 +11,11 @@ Proves:
   Wiki fingerprint non-current -> derived ``stale`` with no persisted boolean
   flag;
 - AC-011: unchanged authoritative inputs + intact artifacts -> ``ready``;
+- REQ-001/AC-001..AC-006: ``ready`` is production completeness — a partial or
+  failed ``WikiManifest`` build_status, a non-complete recorded provenance,
+  or a missing/stale/incompatible mandatory persistent vector index maps to
+  an explicit ``error`` outcome, and only a complete/current/valid snapshot
+  with a current compatible vector index is ``ready`` and searchable;
 - REQ-006/AC-024: the L2S3 ``WorkspaceWikiBuildService``/``WikiStore``/
   ``WikiService`` composition is reused through Workspace-specific storage
   roots.
@@ -22,6 +27,7 @@ are produced through the real L2S2 public API with an offline fake LLM.
 
 from __future__ import annotations
 
+import json
 import shutil
 
 import pytest
@@ -459,3 +465,170 @@ def test_rebuild_recovers_from_corrupt_provenance(session, project_tmp_path):
     rebuilt = wiki.build(ws.workspace_id)
     assert rebuilt.provenance.build_revision == 1
     assert wiki.status(ws.workspace_id).status == "ready"
+
+
+# ---------------------------------------------------------------------------
+# REQ-001 / AC-001..AC-006: ready is production completeness
+# ---------------------------------------------------------------------------
+
+
+def _built_wiki(session, project_tmp_path, *, workspace_id="ws-ac", paper_id="ac-p"):
+    """A bound Workspace with one materialized member and a built Base Wiki."""
+    paper = add_paper(session, paper_id=paper_id, title="Completeness Paper")
+    ws = create_bound_workspace(session, workspace_id=workspace_id)
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    WorkspaceSchemaService(session, data_root=project_tmp_path).materialize(
+        ws.workspace_id, paper.id, llm_client=FakeLLMProvider()
+    )
+    wiki = wiki_service(session, project_tmp_path)
+    wiki.build(ws.workspace_id)
+    assert wiki.status(ws.workspace_id).status == "ready"
+    return wiki, ws
+
+
+def _rewrite_json(path, changes):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(changes)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _index_path(project_tmp_path, workspace_id):
+    layout = workspace_layout(workspace_id, data_root=project_tmp_path)
+    return layout.wiki_dir / "index" / "package_b_index.json"
+
+
+def test_partial_manifest_is_not_ready(session, project_tmp_path):
+    """AC-001: partial WikiManifest build_status never derives ready."""
+    wiki, ws = _built_wiki(session, project_tmp_path)
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    _rewrite_json(layout.wiki_dir / "manifest.json", {"build_status": "partial"})
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "error"
+    assert status.error_code == "manifest_build_partial"
+    assert status.manifest_status == "partial"
+    with pytest.raises(WikiCorruptError) as corrupt:
+        wiki.search(ws.workspace_id, "completeness")
+    assert corrupt.value.code == "wiki_corrupt"
+
+
+def test_failed_manifest_is_not_ready(session, project_tmp_path):
+    """AC-002: failed WikiManifest build_status never derives ready."""
+    wiki, ws = _built_wiki(session, project_tmp_path, workspace_id="ws-ac2")
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    _rewrite_json(layout.wiki_dir / "manifest.json", {"build_status": "failed"})
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "error"
+    assert status.error_code == "manifest_build_failed"
+    assert status.manifest_status == "failed"
+    with pytest.raises(WikiCorruptError) as corrupt:
+        wiki.search(ws.workspace_id, "completeness")
+    assert corrupt.value.code == "wiki_corrupt"
+
+
+@pytest.mark.parametrize("provenance_status", ["partial", "failed"])
+def test_non_complete_provenance_is_not_ready(session, project_tmp_path, provenance_status):
+    """AC-003: non-complete recorded provenance is never ready, even when the
+    authoritative JSON/JSONL source files are readable and the fingerprint
+    matches the current inputs."""
+    wiki, ws = _built_wiki(
+        session, project_tmp_path, workspace_id="ws-ac3", paper_id="ac-p3"
+    )
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    _rewrite_json(
+        layout.wiki_dir / "provenance.json", {"build_status": provenance_status}
+    )
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "error"
+    assert status.error_code == "build_provenance_incomplete"
+    # The authoritative source files are still readable (integrity checks
+    # would pass); the provenance completeness gate alone blocks ready.
+    assert (layout.wiki_dir / "manifest.json").is_file()
+    assert (layout.wiki_dir / "pages.jsonl").is_file()
+    with pytest.raises(WikiCorruptError) as corrupt:
+        wiki.search(ws.workspace_id, "completeness")
+    assert corrupt.value.code == "wiki_corrupt"
+
+
+def test_missing_vector_index_is_explicit_error(session, project_tmp_path):
+    """AC-004: an absent mandatory persistent vector index is an explicit
+    stable error outcome and the Wiki is never exposed as current/ready."""
+    wiki, ws = _built_wiki(session, project_tmp_path, workspace_id="ws-ac4")
+    index_path = _index_path(project_tmp_path, ws.workspace_id)
+    assert index_path.is_file()
+    index_path.unlink()
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "error"
+    assert status.error_code == "vector_index_missing"
+    with pytest.raises(WikiCorruptError) as corrupt:
+        wiki.search(ws.workspace_id, "completeness")
+    assert corrupt.value.code == "wiki_corrupt"
+
+
+def test_stale_vector_index_is_explicit_error(session, project_tmp_path):
+    """AC-005: a vector index stale for the current authoritative Wiki source
+    fingerprint is an explicit error, never ready."""
+    wiki, ws = _built_wiki(session, project_tmp_path, workspace_id="ws-ac5")
+    _rewrite_json(_index_path(project_tmp_path, ws.workspace_id), {"source_fingerprint": "stale-forged"})
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "error"
+    assert status.error_code == "vector_index_stale"
+
+
+def test_vector_index_incompatible_dimensions_is_error(session, project_tmp_path):
+    """AC-005: invalid vector dimensions/metadata are an explicit error."""
+    wiki, ws = _built_wiki(session, project_tmp_path, workspace_id="ws-ac5b")
+    _rewrite_json(
+        _index_path(project_tmp_path, ws.workspace_id),
+        {"vector_metadata": {"provider": "test", "model": "test", "dimension": 3}},
+    )
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "error"
+    assert status.error_code == "vector_index_incompatible"
+
+
+def test_vector_index_incomplete_coverage_is_error(session, project_tmp_path):
+    """AC-005: missing required Page/Entity vector coverage is an explicit
+    error."""
+    wiki, ws = _built_wiki(session, project_tmp_path, workspace_id="ws-ac5c")
+    index_path = _index_path(project_tmp_path, ws.workspace_id)
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    assert data["vectors"], "the offline build writes page vectors"
+    data["vectors"] = data["vectors"][1:]
+    index_path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "error"
+    assert status.error_code == "vector_index_missing"
+
+
+def test_complete_current_valid_wiki_is_ready_and_searchable(session, project_tmp_path):
+    """AC-006: matching provenance, complete provenance/manifest build status,
+    structurally valid assets and a current compatible vector index with
+    complete required coverage derive ready and remain searchable."""
+    wiki, ws = _built_wiki(session, project_tmp_path, workspace_id="ws-ac6")
+    index_path = _index_path(project_tmp_path, ws.workspace_id)
+    assert index_path.is_file()
+
+    status = wiki.status(ws.workspace_id)
+    assert status.status == "ready"
+    assert status.error_code is None
+    assert status.manifest_status == "complete"
+
+    hits = wiki.search(ws.workspace_id, "completeness", mode="lexical").hits
+    assert hits
+
+    # The L2S3 provider-free vector audit independently confirms the index.
+    from transit_scholar.layer2.wiki import audit_vector_index_readonly
+
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    record = WorkspaceService(session).get(ws.workspace_id)
+    memberships = WorkspaceService(session).list_memberships(ws.workspace_id)
+    context = derive_workspace_context(record, memberships)
+    store = layout.wiki_store(context)
+    assert audit_vector_index_readonly(store) == []

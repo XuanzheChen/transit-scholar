@@ -30,11 +30,16 @@ class WorkspaceWikiStatus(BaseModel):
       unsupported in Layer3 Stage1 (REQ-005 / AC-009);
     - ``missing`` — schema-bound but no snapshot exists in the Workspace's own
       Wiki boundary (AC-008);
-    - ``ready`` — the recorded input fingerprint matches the current inputs
-      and the artifacts pass integrity checks (AC-011);
+    - ``ready`` — the recorded input fingerprint matches the current inputs,
+      the recorded provenance and the persisted Manifest build are both
+      ``complete``, the artifacts pass integrity checks, and a current,
+      compatible mandatory persistent vector index with complete Page/Entity
+      coverage exists (REQ-001 / AC-006);
     - ``stale`` — artifacts exist but the current authoritative inputs no
       longer match the recorded fingerprint (AC-010);
-    - ``error`` — artifacts fail integrity checks or provenance is corrupt.
+    - ``error`` — artifacts fail integrity checks, provenance is corrupt or
+      non-complete, the Manifest build is partial/failed, or the mandatory
+      vector index is missing/stale/incompatible (AC-001..AC-005).
     """
 
     workspace_id: str

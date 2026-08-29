@@ -36,8 +36,24 @@ class SchemaMissingError(WorkspaceSchemaError):
     code = "schema_missing"
 
 
+class SchemaBindingMismatchError(WorkspaceSchemaError):
+    """The persisted Workspace Schema binding is not satisfied (REQ-003/REQ-004).
+
+    Raised when the currently resolved ``SchemaDefinition`` (schema_id /
+    schema_version / deterministic schema_hash) differs from the immutable
+    binding persisted at Workspace creation (materialization, AC-009/AC-010),
+    or when a persisted Workspace Schema run or its current pointer records a
+    Schema identity incompatible with that binding (reads/Grounding,
+    AC-012..AC-016). Always carries the stable ``schema_binding_mismatch``
+    code and is never silently mapped to ready.
+    """
+
+    code = "schema_binding_mismatch"
+
+
 __all__ = [
     "WorkspaceSchemaError",
     "SchemaDisabledError",
     "SchemaMissingError",
+    "SchemaBindingMismatchError",
 ]

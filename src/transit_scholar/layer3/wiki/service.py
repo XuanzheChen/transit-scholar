@@ -13,7 +13,13 @@ No-schema Workspaces report Base Wiki build capability as unsupported
 fingerprint (REQ-007): the recorded fingerprint of the last successful build
 is compared with one recomputed from the current Workspace identity, Schema
 binding, membership, and current Workspace Schema run identities (AC-010 /
-AC-011). No ``wiki_stale``/``wiki_ready`` boolean is ever persisted.
+AC-011). ``ready`` is a production-completeness state (REQ-001): the recorded
+provenance and the persisted ``WikiManifest`` must both report
+``build_status=complete``, the authoritative snapshot must pass the existing
+WikiStore integrity checks, and the mandatory persistent vector index must
+exist, be current for the same authoritative source fingerprint, and have
+valid vector metadata with complete Page/Entity coverage (AC-001..AC-006).
+No ``wiki_stale``/``wiki_ready`` boolean is ever persisted.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal
 
+from transit_scholar.layer2.wiki.service import audit_vector_index_readonly
 from transit_scholar.layer3.storage import (
     BuildProvenanceError,
     WorkspaceStorageLayout,
@@ -176,18 +183,24 @@ class WorkspaceWikiService:
         """Derive the Base Wiki status from authoritative state only.
 
         Read-only: never mutates Schema/Wiki storage, DB or provenance, and
-        never calls LLM/embedding providers. The recorded input fingerprint is
-        recomputed from the current Workspace identity, Schema binding,
-        membership and current Workspace Schema run identities:
+        never calls LLM/embedding providers or rebuilds indexes. The recorded
+        input fingerprint is recomputed from the current Workspace identity,
+        Schema binding, membership and current Workspace Schema run identities:
 
         - fingerprint mismatch (or no recorded fingerprint) -> ``stale`` —
           the snapshot is observably non-current (AC-010);
         - provenance bound to a different Workspace -> ``error`` with
           ``workspace_mismatch`` (REQ-005 boundary: a foreign snapshot is
           never treated as this Workspace's Wiki);
+        - recorded provenance ``build_status`` other than ``complete`` ->
+          ``error`` with ``build_provenance_incomplete`` (REQ-001/AC-003);
         - exact fingerprint match -> the snapshot is then verified through the
-          existing WikiStore integrity checks: intact -> ``ready`` (AC-011),
-          otherwise ``error``.
+          existing WikiStore integrity checks plus the production-completeness
+          conditions of REQ-001: a ``partial``/``failed`` ``WikiManifest``
+          build_status, or a missing/stale/incompatible mandatory persistent
+          vector index, maps to ``error`` with a stable code (AC-001/AC-002/
+          AC-004/AC-005); only a complete, current, structurally valid snapshot
+          with a valid current vector index is ``ready`` (AC-006).
         """
         record = self.workspaces.get(workspace_id)
         layout = workspace_layout(workspace_id, data_root=self.data_root)
@@ -254,6 +267,19 @@ class WorkspaceWikiService:
                 built_at=_parse_built_at(provenance.built_at),
                 error_code="input_fingerprint_mismatch",
             )
+        if provenance.build_status != "complete":
+            # AC-003: an input-current snapshot is never ready when the
+            # recorded provenance did not complete (even if every
+            # authoritative JSON/JSONL source file is readable).
+            return WorkspaceWikiStatus(
+                workspace_id=record.workspace_id,
+                status="error",
+                error_code="build_provenance_incomplete",
+                fingerprint=fingerprint,
+                recorded_fingerprint=provenance.input_fingerprint,
+                build_revision=provenance.build_revision,
+                built_at=_parse_built_at(provenance.built_at),
+            )
         # Inputs unchanged: the snapshot is this Workspace's own current
         # build; verify it through the existing WikiStore integrity checks.
         try:
@@ -265,6 +291,49 @@ class WorkspaceWikiService:
                 workspace_id=record.workspace_id,
                 status="error",
                 error_code=getattr(exc, "code", "wiki_corrupt") or "wiki_corrupt",
+            )
+        if manifest.build_status == "partial":
+            # AC-001: a partial Manifest build never maps inputs-current to
+            # ready.
+            return WorkspaceWikiStatus(
+                workspace_id=record.workspace_id,
+                status="error",
+                error_code="manifest_build_partial",
+                manifest_status="partial",
+                fingerprint=fingerprint,
+                recorded_fingerprint=provenance.input_fingerprint,
+                build_revision=provenance.build_revision,
+                built_at=_parse_built_at(provenance.built_at),
+            )
+        if manifest.build_status == "failed":
+            # AC-002: a failed Manifest build never maps inputs-current to
+            # ready.
+            return WorkspaceWikiStatus(
+                workspace_id=record.workspace_id,
+                status="error",
+                error_code="manifest_build_failed",
+                manifest_status="failed",
+                fingerprint=fingerprint,
+                recorded_fingerprint=provenance.input_fingerprint,
+                build_revision=provenance.build_revision,
+                built_at=_parse_built_at(provenance.built_at),
+            )
+        # The mandatory persistent vector index must exist and be current for
+        # the SAME authoritative source fingerprint, with valid vector metadata
+        # and complete Page/Entity vector coverage (REQ-001 / C-010). The L2S3
+        # read-only helper audits it provider-free; the first issue's stable
+        # code becomes the derived error_code (AC-004/AC-005).
+        vector_issues = audit_vector_index_readonly(store)
+        if vector_issues:
+            return WorkspaceWikiStatus(
+                workspace_id=record.workspace_id,
+                status="error",
+                error_code=vector_issues[0].code,
+                manifest_status=manifest.build_status,
+                fingerprint=fingerprint,
+                recorded_fingerprint=provenance.input_fingerprint,
+                build_revision=provenance.build_revision,
+                built_at=_parse_built_at(provenance.built_at),
             )
         return WorkspaceWikiStatus(
             workspace_id=record.workspace_id,

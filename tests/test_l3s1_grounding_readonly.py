@@ -184,9 +184,9 @@ class RecordingSchemas:
         self.delegate = delegate
         self.calls: list[tuple] = []
 
-    def current_run_identities(self, workspace_id: str, paper_ids):
-        self.calls.append(("current_run_identities", workspace_id, tuple(paper_ids)))
-        return self.delegate.current_run_identities(workspace_id, paper_ids)
+    def paper_schema_readiness(self, workspace_id: str, paper_ids):
+        self.calls.append(("paper_schema_readiness", workspace_id, tuple(paper_ids)))
+        return self.delegate.paper_schema_readiness(workspace_id, paper_ids)
 
     def materialize(self, *args, **kwargs):
         raise AssertionError(f"WorkspaceSchemaService.materialize: {_MUTATION_MSG}")
@@ -265,7 +265,7 @@ def test_grounding_invokes_only_read_only_collaborators(session, project_tmp_pat
     for call in workspaces.calls:
         assert call[0] in {"get", "list_memberships"}
     for call in schemas.calls:
-        assert call[0] == "current_run_identities"
+        assert call[0] == "paper_schema_readiness"
     for call in wiki.calls:
         assert call[0] == "status"
     for call in evidence.calls:
@@ -277,7 +277,7 @@ def test_grounding_invokes_only_read_only_collaborators(session, project_tmp_pat
     ]
     assert schemas.calls == [
         (
-            "current_run_identities",
+            "paper_schema_readiness",
             workspace.workspace_id,
             ("pa", "pb"),
         )

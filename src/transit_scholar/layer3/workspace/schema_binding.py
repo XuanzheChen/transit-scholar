@@ -72,10 +72,33 @@ def binding_for(schema_definition: "SchemaDefinition") -> SchemaBinding:
     )
 
 
+def matches_binding(
+    binding: SchemaBinding,
+    *,
+    schema_id: str,
+    schema_version: str,
+    schema_hash: str,
+) -> bool:
+    """Whether a persisted identity triple equals the Workspace binding.
+
+    Shared REQ-003/REQ-004 predicate: materialization (current
+    SchemaDefinition), read paths (current pointer and persisted run
+    manifest) and Grounding readiness must all require the exact same
+    ``schema_id``, ``schema_version`` and ``schema_hash`` as the immutable
+    Workspace binding before content is treated as usable.
+    """
+    return (
+        binding.schema_id == schema_id
+        and binding.schema_version == schema_version
+        and binding.schema_hash == schema_hash
+    )
+
+
 __all__ = [
     "SCHEMA_MODE_BOUND",
     "SCHEMA_MODE_NONE",
     "SCHEMA_MODES",
     "compute_schema_hash",
     "binding_for",
+    "matches_binding",
 ]

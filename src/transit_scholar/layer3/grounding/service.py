@@ -146,22 +146,31 @@ class WorkspaceGroundingService:
 
     def _schema_status_by_paper(
         self, record: WorkspaceRecord, paper_ids: list[str]
-    ) -> dict[str, PaperSchemaStatus]:
-        """Per-Paper Workspace Schema status (disabled/missing/ready).
+    ) -> dict[str, tuple[PaperSchemaStatus, str | None]]:
+        """Per-Paper Workspace Schema status (disabled/missing/ready) plus the
+        stable boundary error code when the content is explicitly non-ready.
 
         For a no-schema Workspace every Paper is ``disabled`` and the
         Workspace Schema storage is never inspected (AC-007: no-schema
         Workspaces MUST NOT materialize/expose Schema content, not even by
-        inspection fallback). For bound mode only the Workspace's own current
-        pointers are read (AC-020).
+        inspection fallback). For bound mode the persisted current run itself
+        is validated — readable through the L2S2 integrity checks and
+        compatible with the immutable Workspace binding — so
+        ``schema_status=ready`` means actually usable Workspace Schema content
+        (REQ-004/AC-012..AC-015); a missing/corrupt/unreadable or
+        binding-incompatible run is ``missing`` with the explicit
+        ``schema_missing`` / ``schema_binding_mismatch`` error code.
         """
         if record.schema_mode != SCHEMA_MODE_BOUND or record.schema_binding is None:
-            return {paper_id: "disabled" for paper_id in paper_ids}
-        identities = self.schemas.current_run_identities(
+            return {paper_id: ("disabled", None) for paper_id in paper_ids}
+        readiness = self.schemas.paper_schema_readiness(
             record.workspace_id, paper_ids
         )
         return {
-            paper_id: ("ready" if identities.get(paper_id) else "missing")
+            paper_id: (
+                readiness[paper_id].status,
+                readiness[paper_id].error_code,
+            )
             for paper_id in paper_ids
         }
 
@@ -169,8 +178,9 @@ class WorkspaceGroundingService:
         self,
         record: WorkspaceRecord,
         paper_id: str,
-        schema_status: PaperSchemaStatus,
+        schema_status: tuple[PaperSchemaStatus, str | None],
     ) -> GroundedPaper:
+        status, error_code = schema_status
         paper = self.session.get(Paper, paper_id)
         return GroundedPaper(
             workspace_id=record.workspace_id,
@@ -178,14 +188,15 @@ class WorkspaceGroundingService:
             title=paper.title if paper is not None else None,
             paper_status=paper.status if paper is not None else "active",
             l2s1_ready=self.evidence.l2s1_ready(paper_id),
-            schema_status=schema_status,
+            schema_status=status,
+            schema_error_code=error_code,
         )
 
     def _schema_coverage(
         self,
         record: WorkspaceRecord,
         paper_ids: list[str],
-        schema_status: dict[str, PaperSchemaStatus],
+        schema_status: dict[str, tuple[PaperSchemaStatus, str | None]],
     ) -> SchemaCoverage:
         total = len(paper_ids)
         if record.schema_mode != SCHEMA_MODE_BOUND or record.schema_binding is None:
@@ -200,7 +211,7 @@ class WorkspaceGroundingService:
                 status="disabled",
             )
         ready = sum(
-            1 for status in schema_status.values() if status == "ready"
+            1 for status, _ in schema_status.values() if status == "ready"
         )
         missing = total - ready
         if total == 0:
@@ -234,6 +245,10 @@ class WorkspaceGroundingService:
         )
         has_members = bool(paper_ids)
         wiki_build = active and bound and has_members
+        # REQ-002 / AC-007: wiki_read requires a production-complete Base Wiki.
+        # Any partial/failed/stale/missing/corrupt/index-invalid Base Wiki is
+        # exposed with wiki_read=false — never as current/ready content.
+        wiki_read = wiki_build and base_wiki.status == "ready"
         return WorkspaceCapabilities(
             workspace_id=record.workspace_id,
             knowledge_access=active,
@@ -242,7 +257,7 @@ class WorkspaceGroundingService:
             schema_read=active and bound,
             schema_materialization=active and bound,
             wiki_build=wiki_build,
-            wiki_read=wiki_build and base_wiki.status in {"ready", "stale", "error"},
+            wiki_read=wiki_read,
             evidence_ready_papers=sum(1 for paper in visible_papers if paper.l2s1_ready),
             schema_ready_papers=coverage.ready,
         )
@@ -271,7 +286,7 @@ class WorkspaceGroundingService:
         missing_schema = sorted(
             paper_id
             for paper_id in paper_ids
-            if schema_status.get(paper_id) == "missing"
+            if schema_status.get(paper_id, ("missing", None))[0] == "missing"
         )
         if missing_schema:
             actions.append(

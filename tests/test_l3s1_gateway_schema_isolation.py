@@ -12,13 +12,18 @@ Workspace-specific Schema storage root only:
   path): content stranded in a Workspace's root never re-authorizes a
   removed Paper;
 - no-schema Workspaces report ``schema_disabled`` through the gateway with no
-  fallback read (AC-007).
+  fallback read (AC-007);
+- REQ-004: a persisted run (or pointer) whose Schema identity is incompatible
+  with the Workspace binding is rejected through the gateway with the stable
+  ``schema_binding_mismatch`` code and never derives ready (AC-013/AC-016).
 
 Extraction runs are fully offline (fake LLM provider through the real L2S2
 public API, mirroring the T-004 suite).
 """
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -28,7 +33,11 @@ from transit_scholar.layer2.schema_extraction import (
     get_schema_definition,
 )
 from transit_scholar.layer3.knowledge import WorkspaceKnowledgeGateway
-from transit_scholar.layer3.schema import SchemaDisabledError, SchemaMissingError
+from transit_scholar.layer3.schema import (
+    SchemaBindingMismatchError,
+    SchemaDisabledError,
+    SchemaMissingError,
+)
 from transit_scholar.layer3.schema.service import WorkspaceSchemaService
 from transit_scholar.layer3.storage import workspace_layout
 from transit_scholar.layer3.workspace import (
@@ -56,6 +65,14 @@ class RecordingSchema:
 
     def current_run_identities(self, workspace_id, paper_ids=None):
         return {paper_id: None for paper_id in (paper_ids or [])}
+
+    def paper_schema_readiness(self, workspace_id, paper_ids=None):
+        return {
+            paper_id: type(
+                "Readiness", (), {"status": "missing", "error_code": None}
+            )()
+            for paper_id in (paper_ids or [])
+        }
 
 
 def add_paper(session, paper_id="gs-p1", title="Schema Shared Paper") -> Paper:
@@ -261,3 +278,37 @@ def test_no_schema_workspace_gateway_schema_is_disabled(session, project_tmp_pat
         gateway.get_schema_field(paper.id, "research_problem.control_type")
     # No Schema storage boundary is ever materialized for the no-schema WS.
     assert not workspace_layout(ws.workspace_id, data_root=project_tmp_path).derived_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# REQ-004: binding-incompatible persisted content is rejected at the gateway
+# ---------------------------------------------------------------------------
+
+
+def test_gateway_rejects_binding_incompatible_pointer_with_stable_code(
+    session, project_tmp_path
+):
+    """AC-013/AC-016: current.json whose schema_version disagrees with the
+    Workspace binding is rejected through the gateway with the stable
+    ``schema_binding_mismatch`` code, and the derived Paper view never
+    reports ready."""
+    paper = add_paper(session, paper_id="gw-bind")
+    ws = create_bound_workspace(session, "Bind Gate", "gws-bind")
+    WorkspaceService(session).add_paper(ws.workspace_id, paper.id)
+    schema = schema_service(session, project_tmp_path)
+    schema.materialize(ws.workspace_id, paper.id, llm_client=FakeLLMProvider())
+
+    layout = workspace_layout(ws.workspace_id, data_root=project_tmp_path)
+    pointer_path = layout.schemas_dir / paper.id / "current.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer["schema_version"] = "0.0-forged"
+    pointer_path.write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8")
+
+    gateway = gateway_for(session, project_tmp_path, ws.workspace_id)
+    with pytest.raises(SchemaBindingMismatchError) as exc_info:
+        gateway.get_schema_instance(paper.id)
+    assert exc_info.value.code == "schema_binding_mismatch"
+    with pytest.raises(SchemaBindingMismatchError):
+        gateway.get_schema_field(paper.id, "research_problem.control_type")
+    # The derived Paper view is explicitly non-ready, never ready (REQ-004).
+    assert gateway.get_paper(paper.id).schema_status == "missing"

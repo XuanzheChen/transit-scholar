@@ -252,6 +252,26 @@ class WorkspaceKnowledgeGateway:
         self._require_current()
         return self.wiki.search(self.workspace_id, query, limit=limit, mode=mode)
 
+    def resolve_wiki_hit_paper_ids(self, hit: Any) -> list[str]:
+        """Resolve a current Wiki search hit to member Paper identities."""
+        self._require_current()
+        derived = self.wiki.status(self.workspace_id)
+        if derived.status != "ready":
+            raise RuntimeError(
+                f"workspace Wiki is not ready for discovery: {derived.status}"
+            )
+        wiki = self.wiki.get_wiki_service(self.workspace_id)
+        if hit.type == "page":
+            paper_ids = [wiki.get_page(hit.object_id).paper_id]
+        elif hit.type == "entity":
+            paper_ids = [
+                page.paper_id for page in wiki.find_pages_by_entity(hit.object_id)
+            ]
+        else:
+            paper_ids = []
+        member_ids = {paper.paper_id for paper in self.list_papers()}
+        return sorted(set(paper_ids) & member_ids)
+
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------

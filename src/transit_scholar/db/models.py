@@ -591,3 +591,154 @@ class WorkspacePaperMembership(Base):
         Index("ix_workspace_paper_memberships_workspace_id", "workspace_id"),
         Index("ix_workspace_paper_memberships_paper_id", "paper_id"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Layer3 Stage2: framework-neutral research execution identities
+# ---------------------------------------------------------------------------
+
+AGENT_EXECUTION_STATUSES = (
+    "created",
+    "running",
+    "paused",
+    "completed",
+    "failed",
+    "cancelled",
+)
+
+
+class AgentRun(Base):
+    """One durable Agent task bound to a Workspace revision."""
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("workspaces.id"), nullable=False
+    )
+    user_goal: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="created", nullable=False)
+    workspace_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace_sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    workspace: Mapped["Workspace"] = relationship()
+    research_sessions: Mapped[List["ResearchSession"]] = relationship(
+        back_populates="agent_run",
+        cascade="all, delete-orphan",
+        order_by="ResearchSession.created_at, ResearchSession.id",
+    )
+    trace_events: Mapped[List["AgentTraceEvent"]] = relationship(
+        back_populates="agent_run",
+        cascade="all, delete-orphan",
+        order_by="AgentTraceEvent.sequence",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('created', 'running', 'paused', 'completed', 'failed', 'cancelled')",
+            name="ck_agent_runs_status",
+        ),
+        CheckConstraint(
+            "workspace_revision >= 1", name="ck_agent_runs_workspace_revision_positive"
+        ),
+        Index("ix_agent_runs_workspace_id", "workspace_id"),
+        Index("ix_agent_runs_status", "status"),
+    )
+
+
+class ResearchSession(Base):
+    """One independently executable research question within an AgentRun."""
+
+    __tablename__ = "research_sessions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    agent_run_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("agent_runs.id"), nullable=False
+    )
+    research_question: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="created", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    agent_run: Mapped["AgentRun"] = relationship(back_populates="research_sessions")
+    research_state: Mapped["ResearchState | None"] = relationship(
+        back_populates="research_session", cascade="all, delete-orphan", uselist=False
+    )
+    trace_events: Mapped[List["AgentTraceEvent"]] = relationship(
+        back_populates="research_session"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('created', 'running', 'paused', 'completed', 'failed', 'cancelled')",
+            name="ck_research_sessions_status",
+        ),
+        Index("ix_research_sessions_agent_run_id", "agent_run_id"),
+        Index("ix_research_sessions_status", "status"),
+    )
+
+
+class ResearchState(Base):
+    """Durable, framework-neutral working state for one ResearchSession."""
+
+    __tablename__ = "research_states"
+
+    research_session_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("research_sessions.id"), primary_key=True
+    )
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    research_session: Mapped["ResearchSession"] = relationship(
+        back_populates="research_state"
+    )
+
+
+class AgentTraceEvent(Base):
+    """An append-only execution event, ordered within one AgentRun."""
+
+    __tablename__ = "agent_trace_events"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    agent_run_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("agent_runs.id"), nullable=False
+    )
+    research_session_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("research_sessions.id"), nullable=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    agent_run: Mapped["AgentRun"] = relationship(back_populates="trace_events")
+    research_session: Mapped["ResearchSession | None"] = relationship(
+        back_populates="trace_events"
+    )
+
+    __table_args__ = (
+        CheckConstraint("sequence >= 1", name="ck_agent_trace_events_sequence_positive"),
+        UniqueConstraint(
+            "agent_run_id", "sequence", name="uq_agent_trace_events_run_sequence"
+        ),
+        Index("ix_agent_trace_events_agent_run_sequence", "agent_run_id", "sequence"),
+        Index("ix_agent_trace_events_research_session_id", "research_session_id"),
+        Index("ix_agent_trace_events_event_type", "event_type"),
+    )

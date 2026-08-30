@@ -149,6 +149,14 @@ class WorkspaceService:
         """Read the authoritative Workspace state (AC-001)."""
         return WorkspaceRecord.from_row(self._get(workspace_id))
 
+    def require_active(self, workspace_id: str) -> WorkspaceRecord:
+        """Read a Workspace and require its active lifecycle state.
+
+        Higher layers use this guard when creation must be bound to the current
+        Workspace boundary without reproducing Workspace lifecycle semantics.
+        """
+        return WorkspaceRecord.from_row(self._get_active(workspace_id))
+
     def list_workspaces(self) -> list[WorkspaceRecord]:
         """All Workspaces in deterministic (created_at, id) order."""
         rows = self.session.execute(

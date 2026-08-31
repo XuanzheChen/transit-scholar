@@ -144,14 +144,17 @@ class ResearchQueryLedgerService:
         research_session_id: str,
         source_query_id: str,
         evidence: ResearchEvidence,
-        evidence_id: str | None = None,
     ) -> EvidenceRecord:
         """Persist one caller-selected retrieval result as a stable snapshot."""
         research_session = self._get_session(research_session_id)
         self._get_owned_query(research_session.id, source_query_id)
         if not isinstance(evidence, ResearchEvidence):
             raise InvalidEvidenceInputError("evidence must be a ResearchEvidence")
-        record_id = _non_empty(evidence_id, "evidence_id") if evidence_id else evidence.evidence_id
+        self._validate_evidence_provenance(
+            research_session=research_session,
+            source_query_id=source_query_id,
+            evidence=evidence,
+        )
         try:
             source_metadata = {
                 "source_kind": evidence.source_kind,
@@ -162,6 +165,7 @@ class ResearchQueryLedgerService:
                 "section": evidence.section,
             }
             retrieval_provenance = {
+                "retrieval_evidence_id": evidence.evidence_id,
                 "query_provenance": (
                     evidence.query_provenance.model_dump(mode="json")
                     if evidence.query_provenance is not None else None
@@ -171,7 +175,7 @@ class ResearchQueryLedgerService:
                 "final_rank": evidence.final_rank,
             }
             row = EvidenceRow(
-                id=_non_empty(record_id, "evidence_id"),
+                id=_new_id(),
                 research_session_id=research_session.id,
                 source_query_id=source_query_id,
                 locator_json=json.dumps(
@@ -191,6 +195,42 @@ class ResearchQueryLedgerService:
         self.session.flush()
         self.session.refresh(row)
         return EvidenceRecord.from_row(row)
+
+    @staticmethod
+    def _validate_evidence_provenance(
+        *,
+        research_session: ResearchSession,
+        source_query_id: str,
+        evidence: ResearchEvidence,
+    ) -> None:
+        query_provenance = evidence.query_provenance
+        if (
+            query_provenance is not None
+            and query_provenance.query_id != source_query_id
+        ):
+            raise InvalidEvidenceInputError(
+                "evidence query provenance does not match source_query_id"
+            )
+        if (
+            query_provenance is not None
+            and query_provenance.session_id is not None
+            and query_provenance.session_id != research_session.id
+        ):
+            raise InvalidEvidenceInputError(
+                "evidence session provenance does not match research_session_id"
+            )
+        if evidence.locator.workspace_id != research_session.agent_run.workspace_id:
+            raise InvalidEvidenceInputError(
+                "evidence workspace provenance does not match the research session workspace"
+            )
+        if (
+            evidence.paper_provenance is not None
+            and evidence.locator.paper_id is not None
+            and evidence.paper_provenance.paper_id != evidence.locator.paper_id
+        ):
+            raise InvalidEvidenceInputError(
+                "evidence paper provenance does not match locator.paper_id"
+            )
 
     def get_evidence(
         self, *, research_session_id: str, evidence_id: str

@@ -18,43 +18,46 @@ from transit_scholar.layer3.ledger import (
 from transit_scholar.layer3.workspace import WorkspaceService
 
 
-def _session_id(session) -> str:
+def _session_context(session) -> tuple[str, str]:
     workspace = WorkspaceService(session).create(
         name=f"Claim Evidence Workspace {uuid.uuid4().hex}"
     ).workspace
     run = AgentRunService(session).create_agent_run(
         workspace_id=workspace.workspace_id, user_goal="Claim evidence test"
     )
-    return AgentRunService(session).create_research_session(
+    research_session_id = AgentRunService(session).create_research_session(
         agent_run_id=run.agent_run_id, research_question="Test question"
     ).research_session_id
+    return research_session_id, workspace.workspace_id
 
 
-def _evidence(evidence_id: str) -> ResearchEvidence:
+def _evidence(evidence_id: str, workspace_id: str) -> ResearchEvidence:
     return ResearchEvidence(
         evidence_id=evidence_id,
-        locator=EvidenceLocator(workspace_id="workspace", source_kind="paper", paper_id="paper"),
+        locator=EvidenceLocator(
+            workspace_id=workspace_id, source_kind="paper", paper_id="paper"
+        ),
         text=f"Evidence {evidence_id}",
         source_kind="paper",
     )
 
 
-def _admit(ledger, research_session_id: str, evidence_id: str):
+def _admit(ledger, research_session_id: str, workspace_id: str, evidence_id: str):
     query = ledger.create_query(
         research_session_id=research_session_id, query_text=f"Query {evidence_id}"
     )
     return ledger.admit_evidence(
         research_session_id=research_session_id,
         source_query_id=query.query_id,
-        evidence=_evidence(evidence_id),
+        evidence=_evidence(evidence_id, workspace_id),
     )
 
 
 def test_claim_evidence_supports_contradictions_many_to_many_and_unlink(session):
-    research_session_id = _session_id(session)
+    research_session_id, workspace_id = _session_context(session)
     ledger = ResearchQueryLedgerService(session)
-    supporting = _admit(ledger, research_session_id, "supporting")
-    contradicting = _admit(ledger, research_session_id, "contradicting")
+    supporting = _admit(ledger, research_session_id, workspace_id, "supporting")
+    contradicting = _admit(ledger, research_session_id, workspace_id, "contradicting")
     first_claim = ledger.create_claim(research_session_id=research_session_id, statement="Claim one")
     second_claim = ledger.create_claim(research_session_id=research_session_id, statement="Claim two")
 
@@ -98,12 +101,16 @@ def test_claim_evidence_supports_contradictions_many_to_many_and_unlink(session)
 
 
 def test_claim_evidence_rejects_cross_session_missing_and_invalid_references(session):
-    first_session_id = _session_id(session)
-    second_session_id = _session_id(session)
+    first_session_id, first_workspace_id = _session_context(session)
+    second_session_id, second_workspace_id = _session_context(session)
     ledger = ResearchQueryLedgerService(session)
     claim = ledger.create_claim(research_session_id=first_session_id, statement="Claim")
-    local_evidence = _admit(ledger, first_session_id, "local-evidence")
-    evidence = _admit(ledger, second_session_id, "other-session-evidence")
+    local_evidence = _admit(
+        ledger, first_session_id, first_workspace_id, "local-evidence"
+    )
+    evidence = _admit(
+        ledger, second_session_id, second_workspace_id, "other-session-evidence"
+    )
 
     with pytest.raises(EvidenceOwnershipError):
         ledger.link_evidence_to_claim(

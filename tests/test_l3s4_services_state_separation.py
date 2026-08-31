@@ -53,7 +53,7 @@ def test_public_services_persist_ledger_independently_of_research_state(session)
         evidence=ResearchEvidence(
             evidence_id="evidence-1",
             locator=EvidenceLocator(
-                workspace_id="workspace-1", source_kind="paper", paper_id="paper-1"
+                workspace_id=run.workspace_id, source_kind="paper", paper_id="paper-1"
             ),
             text="Explicitly admitted evidence",
             source_kind="paper",

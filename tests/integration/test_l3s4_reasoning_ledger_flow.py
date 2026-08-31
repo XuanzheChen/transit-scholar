@@ -16,7 +16,7 @@ from transit_scholar.layer3.ledger import (
 from transit_scholar.layer3.workspace import WorkspaceService
 
 
-def _research_session_id(session) -> str:
+def _research_session_context(session) -> tuple[str, str]:
     workspace = WorkspaceService(session).create(
         name=f"L3S4 integration workspace {uuid.uuid4().hex}"
     ).workspace
@@ -24,17 +24,18 @@ def _research_session_id(session) -> str:
         workspace_id=workspace.workspace_id,
         user_goal="Verify the Stage4 reasoning ledger lifecycle",
     )
-    return AgentRunService(session).create_research_session(
+    research_session_id = AgentRunService(session).create_research_session(
         agent_run_id=agent_run.agent_run_id,
         research_question="What does the admitted evidence establish?",
     ).research_session_id
+    return research_session_id, workspace.workspace_id
 
 
-def _evidence(evidence_id: str, text: str) -> ResearchEvidence:
+def _evidence(evidence_id: str, text: str, workspace_id: str) -> ResearchEvidence:
     return ResearchEvidence(
         evidence_id=evidence_id,
         locator=EvidenceLocator(
-            workspace_id="integration-workspace",
+            workspace_id=workspace_id,
             source_kind="paper",
             paper_id="integration-paper",
             block_id=f"block-{evidence_id}",
@@ -48,7 +49,7 @@ def _evidence(evidence_id: str, text: str) -> ResearchEvidence:
 def test_query_evidence_claim_ledger_reconstructs_after_fresh_session():
     first = SessionLocal()
     try:
-        research_session_id = _research_session_id(first)
+        research_session_id, workspace_id = _research_session_context(first)
         queries = QueryService(first)
         evidence_service = EvidenceService(first)
         claims = ClaimService(first)
@@ -61,13 +62,17 @@ def test_query_evidence_claim_ledger_reconstructs_after_fresh_session():
         supporting = evidence_service.admit_evidence(
             research_session_id=research_session_id,
             source_query_id=query.query_id,
-            evidence=_evidence("supports-delay", "The intervention reduced delay."),
+            evidence=_evidence(
+                "supports-delay", "The intervention reduced delay.", workspace_id
+            ),
         )
         contradicting = evidence_service.admit_evidence(
             research_session_id=research_session_id,
             source_query_id=query.query_id,
             evidence=_evidence(
-                "contradicts-delay", "The intervention increased delay at peak demand."
+                "contradicts-delay",
+                "The intervention increased delay at peak demand.",
+                workspace_id,
             ),
         )
         claim = claims.create_claim(

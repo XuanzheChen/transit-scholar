@@ -15,6 +15,7 @@ from transit_scholar.layer3.retrieval import (
     SchemaResult,
     WikiNavigationResult,
 )
+from transit_scholar.layer3.rerank import LLMFineRerankDiagnostics
 
 
 class RetrievalResultEnvelope(BaseModel):
@@ -33,7 +34,7 @@ class RetrievalResultEnvelope(BaseModel):
     skipped_paper_ids: list[str] = Field(default_factory=list)
     unavailable_paper_ids: list[str] = Field(default_factory=list)
     failed_paper_ids: list[str] = Field(default_factory=list)
-    rerank_diagnostics: RerankDiagnostics | None = None
+    rerank_diagnostics: LLMFineRerankDiagnostics | RerankDiagnostics | None = None
 
 
 class KnowledgeToolDefinition(BaseModel):

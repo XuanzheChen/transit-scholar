@@ -59,6 +59,9 @@ def _validate_rag(
     actions_by_id: dict[str, object],
 ) -> None:
     capabilities = context.capabilities
+    required_tool = "search_workspace_rag" if action.scope == "workspace" else "search_rag"
+    if not ({required_tool, "rag"} & capabilities.available_tools):
+        raise StrategyValidationError(f"tool_unavailable: {required_tool}")
     if action.scope == "papers" and not action.paper_ids:
         discovery_actions = [actions_by_id[action_id] for action_id in action.depends_on]
         if not any(

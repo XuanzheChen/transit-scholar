@@ -14,7 +14,11 @@ from transit_scholar.layer3.evidence import (
     ResearchEvidence,
 )
 from transit_scholar.layer3.workspace.errors import WorkspaceChangedError
-from transit_scholar.layer3.rerank import CrossPaperRanker, RerankDiagnostics
+from transit_scholar.layer3.rerank import (
+    CrossPaperRanker,
+    LLMFineRerankDiagnostics,
+    RerankDiagnostics,
+)
 
 from .models import ResearchQuery, RetrievalDiagnostic
 
@@ -45,7 +49,7 @@ class WorkspaceRagResult(BaseModel):
     failed_paper_ids: list[str] = Field(default_factory=list)
     candidate_count: int = Field(default=0, ge=0)
     ranker_provider: str = Field(min_length=1)
-    rerank_diagnostics: RerankDiagnostics | None = None
+    rerank_diagnostics: LLMFineRerankDiagnostics | RerankDiagnostics | None = None
 
 
 class WorkspaceRagRetriever:

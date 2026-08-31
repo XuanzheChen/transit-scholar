@@ -26,6 +26,7 @@ class RetrievalCapabilities(BaseModel):
     wiki_ready: bool = False
     max_actions: int = Field(default=8, ge=1)
     max_action_limit: int = Field(default=20, ge=1)
+    workspace_revision: int | None = Field(default=None, ge=1)
 
 
 class RetrievalContext(BaseModel):

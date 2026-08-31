@@ -43,7 +43,14 @@ class FakeGateway:
         return SimpleNamespace(revision=1)
 
     def list_papers(self):
-        return [SimpleNamespace(paper_id="paper-1"), SimpleNamespace(paper_id="paper-2")]
+        return [
+            SimpleNamespace(
+                paper_id="paper-1", l2s1_ready=True, schema_status="ready"
+            ),
+            SimpleNamespace(
+                paper_id="paper-2", l2s1_ready=True, schema_status="ready"
+            ),
+        ]
 
     def get_schema_instance(self, paper_id: str):
         self.schema_calls += 1
@@ -116,19 +123,19 @@ def test_expert_tools_call_gateway_directly_without_planning():
             paper_ids=["paper-1"],
         ),
     )
-    workspace_rag = tools.search_workspace_rag(
-        query, RagRetrievalAction(action_id="workspace-rag", source_query="priority")
-    )
+    with pytest.raises(RuntimeError, match="semantic WorkspaceRagRetriever"):
+        tools.search_workspace_rag(
+            query, RagRetrievalAction(action_id="workspace-rag", source_query="priority")
+        )
 
     assert schema.schema_results[0].value == "signal priority"
     assert wiki.wiki_results[0].node_id == "page-1"
     assert paper_rag.evidence_results[0].locator.paper_id == "paper-1"
-    assert len(workspace_rag.evidence_results) == 2
     assert tools.inspect_evidence(paper_rag.evidence_results[0]) == paper_rag.evidence_results[0]
     assert planner.calls == 0
     assert gateway.schema_calls == 2
     assert gateway.wiki_calls == 1
-    assert gateway.rag_calls == 3
+    assert gateway.rag_calls == 1
 
 
 @pytest.mark.parametrize(
@@ -171,7 +178,12 @@ def test_unified_tool_uses_planner_and_preserves_source_semantics():
     actions = [
         SchemaRetrievalAction(action_id="schema", source_query="method", paper_ids=["paper-1"]),
         WikiRetrievalAction(action_id="wiki", source_query="priority"),
-        RagRetrievalAction(action_id="rag", source_query="evidence"),
+        RagRetrievalAction(
+            action_id="rag",
+            source_query="evidence",
+            scope="papers",
+            paper_ids=["paper-1"],
+        ),
     ]
     planner = RecordingPlanner({"query_id": "query-1", "actions": actions})
     query = _query()
@@ -196,7 +208,7 @@ def test_unified_tool_uses_planner_and_preserves_source_semantics():
     assert result.strategy is not None
     assert len(result.schema_results) == 1
     assert len(result.wiki_results) == 1
-    assert len(result.evidence_results) == 2
+    assert len(result.evidence_results) == 1
     assert result.evidence_results[0].query_provenance.query_id == query.query_id
 
 

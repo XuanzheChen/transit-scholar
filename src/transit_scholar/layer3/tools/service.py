@@ -14,6 +14,7 @@ from transit_scholar.layer3.evidence import (
 from transit_scholar.layer3.planner import (
     HybridKnowledgeRetrievalPlanner,
     RetrievalContext,
+    assemble_retrieval_context,
 )
 from transit_scholar.layer3.retrieval import (
     RagRetrievalAction,
@@ -26,6 +27,7 @@ from transit_scholar.layer3.retrieval import (
     WikiRetrievalAction,
     WorkspaceRagRetriever,
 )
+from transit_scholar.layer3.workspace.errors import WorkspaceChangedError
 
 from .contracts import RetrievalResultEnvelope
 
@@ -78,13 +80,27 @@ class KnowledgeToolService:
         self._verify_query(query)
         if self.planner is None:
             raise RuntimeError("retrieve_knowledge requires an injected retrieval planner")
-        resolved_context = context or self._build_context(query)
-        if resolved_context.query != query:
-            raise ValueError("retrieval context query must match the requested query")
+        expected_revision = self.gateway.current_state().revision
+        requested_context = context
+        if requested_context is None and self.context_factory is not None:
+            requested_context = self._build_context(query)
+        resolved_context = assemble_retrieval_context(
+            query,
+            self.gateway,
+            requested=requested_context,
+            available_tools=self._available_tools(),
+        )
+        self._require_revision(expected_revision)
         planned = self.planner.plan(resolved_context)
+        self._require_revision(expected_revision)
         if not planned.is_valid or planned.strategy is None:
             return RetrievalResultEnvelope(query=query, diagnostics=planned.diagnostics)
-        return self._execute_strategy(query, planned.strategy, planned.diagnostics)
+        return self._execute_strategy(
+            query,
+            planned.strategy,
+            planned.diagnostics,
+            expected_revision=expected_revision,
+        )
 
     def search_schema(
         self, query: ResearchQuery, action: SchemaRetrievalAction
@@ -196,8 +212,9 @@ class KnowledgeToolService:
                 failed_paper_ids=result.failed_paper_ids,
                 rerank_diagnostics=result.rerank_diagnostics,
             )
-        return self._search_rag(
-            query, action, [paper.paper_id for paper in self.gateway.list_papers()]
+        raise RuntimeError(
+            "search_workspace_rag requires an injected semantic "
+            "WorkspaceRagRetriever/CrossPaperRanker"
         )
 
     def inspect_evidence(self, evidence: ResearchEvidence) -> ResearchEvidence:
@@ -205,6 +222,15 @@ class KnowledgeToolService:
         self.gateway.current_state()
         if evidence.locator.workspace_id != self.gateway.workspace_id:
             raise ValueError("evidence belongs to a different workspace")
+        if evidence.locator.source_kind.casefold() == "paper":
+            paper_id = evidence.locator.paper_id
+            if not paper_id:
+                raise ValueError("Paper-backed evidence is missing paper_id")
+            get_paper = getattr(self.gateway, "get_paper", None)
+            if callable(get_paper):
+                get_paper(paper_id)
+            else:
+                self._require_workspace_papers([paper_id])
         return evidence
 
     def _execute_strategy(
@@ -212,12 +238,15 @@ class KnowledgeToolService:
         query: ResearchQuery,
         strategy: RetrievalStrategy,
         diagnostics: list[RetrievalDiagnostic],
+        *,
+        expected_revision: int,
     ) -> RetrievalResultEnvelope:
         envelope = RetrievalResultEnvelope(
             query=query, strategy=strategy, diagnostics=list(diagnostics)
         )
         discovered_by_action: dict[str, list[str]] = {}
         for action in strategy.actions:
+            self._require_revision(expected_revision)
             if isinstance(action, SchemaRetrievalAction):
                 result = self.search_schema(query, action)
             elif isinstance(action, WikiRetrievalAction):
@@ -267,6 +296,9 @@ class KnowledgeToolService:
             envelope.failed_paper_ids.extend(result.failed_paper_ids)
             if result.rerank_diagnostics is not None:
                 envelope.rerank_diagnostics = result.rerank_diagnostics
+            self._require_revision(expected_revision)
+        self._require_revision(expected_revision)
+        envelope.workspace_revision = expected_revision
         return envelope
 
     def _search_rag(
@@ -328,9 +360,24 @@ class KnowledgeToolService:
         )
 
     def _build_context(self, query: ResearchQuery) -> RetrievalContext:
-        if self.context_factory is None:
-            raise RuntimeError("retrieve_knowledge requires a retrieval context or context_factory")
+        if self.context_factory is None:  # pragma: no cover - caller guards this
+            raise RuntimeError("retrieval context factory is not configured")
         return self.context_factory(query)
+
+    def _available_tools(self) -> set[str]:
+        tools = {"search_schema", "search_wiki", "search_rag"}
+        if self.workspace_rag_retriever is not None:
+            tools.add("search_workspace_rag")
+        return tools
+
+    def _require_revision(self, expected_revision: int) -> None:
+        current_revision = self.gateway.current_state().revision
+        if current_revision != expected_revision:
+            raise WorkspaceChangedError(
+                "workspace changed during unified retrieval; partial results were discarded",
+                expected_revision=expected_revision,
+                current_revision=current_revision,
+            )
 
     def _verify_query(self, query: ResearchQuery) -> None:
         if query.workspace_id != self.gateway.workspace_id:

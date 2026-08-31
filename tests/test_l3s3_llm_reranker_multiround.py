@@ -73,10 +73,10 @@ def test_multiround_reranking_regroups_survivors_and_runs_final_listwise_compari
     assert reranker.diagnostics.actual_llm_entry_count == 8
     assert reranker.diagnostics.effective_llm_entry_count == 6
     assert reranker.diagnostics.effective_final_top_k == 2
-    assert reranker.diagnostics.group_sizes == [[3, 3]]
-    assert reranker.diagnostics.round_elimination_quotas == [2]
-    assert reranker.diagnostics.per_group_quotas == [[1, 1]]
-    assert reranker.diagnostics.survivor_counts == [6, 4]
+    assert reranker.diagnostics.group_sizes == [[3, 3], [4]]
+    assert reranker.diagnostics.round_elimination_quotas == [2, 2]
+    assert reranker.diagnostics.per_group_quotas == [[1, 1], [2]]
+    assert reranker.diagnostics.survivor_counts == [6, 4, 2]
     assert reranker.diagnostics.final_listwise_comparison_performed is True
     assert len(provider.prompts) == 3
 

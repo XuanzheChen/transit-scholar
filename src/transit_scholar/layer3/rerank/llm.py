@@ -81,6 +81,14 @@ class LLMFineReranker:
         for round_ in schedule.rounds:
             if len(survivors) <= self.final_comparison_capacity:
                 survivors = self._rank_group(query, survivors, events, "final")
+                remaining_eliminations = (
+                    len(survivors) - schedule.effective_final_top_k
+                )
+                group_sizes.append([len(survivors)])
+                round_quotas.append(remaining_eliminations)
+                per_group_quotas.append([remaining_eliminations])
+                survivors = survivors[: schedule.effective_final_top_k]
+                survivor_counts.append(len(survivors))
                 final_listwise = True
                 break
             groups = regroup_candidates(survivors, group_size=self.config.group_size, seed=self.config.seed + round_.round_number)
@@ -98,8 +106,14 @@ class LLMFineReranker:
 
         if not final_listwise and len(survivors) <= self.final_comparison_capacity and len(survivors) > 1:
             survivors = self._rank_group(query, survivors, events, "final")
+            remaining_eliminations = len(survivors) - schedule.effective_final_top_k
+            group_sizes.append([len(survivors)])
+            round_quotas.append(remaining_eliminations)
+            per_group_quotas.append([remaining_eliminations])
+            survivors = survivors[: schedule.effective_final_top_k]
+            survivor_counts.append(len(survivors))
             final_listwise = True
-        result = [candidate.candidate_id for candidate in survivors[: schedule.effective_final_top_k]]
+        result = [candidate.candidate_id for candidate in survivors]
         self.diagnostics = LLMFineRerankDiagnostics(
             initial_candidate_count=len(candidate_list), configured_entry_candidates=self.config.entry_candidates,
             actual_llm_entry_count=len(candidate_list), effective_llm_entry_count=schedule.effective_entry_count,

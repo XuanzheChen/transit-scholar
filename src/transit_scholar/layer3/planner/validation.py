@@ -47,6 +47,10 @@ def _validate_schema(action: SchemaRetrievalAction, context: RetrievalContext) -
     invalid_fields = set(action.field_ids) - capabilities.schema_field_ids
     if invalid_fields:
         raise StrategyValidationError(f"invalid_schema_field: {sorted(invalid_fields)!r}")
+    if not action.paper_ids:
+        if not capabilities.schema_ready_paper_ids:
+            raise StrategyValidationError("schema_unavailable")
+        return
     _validate_papers(action.paper_ids, capabilities.eligible_paper_ids)
     unavailable = set(action.paper_ids) - capabilities.schema_ready_paper_ids
     if unavailable:
@@ -62,6 +66,10 @@ def _validate_rag(
     required_tool = "search_workspace_rag" if action.scope == "workspace" else "search_rag"
     if not ({required_tool, "rag"} & capabilities.available_tools):
         raise StrategyValidationError(f"tool_unavailable: {required_tool}")
+    if action.scope == "workspace":
+        if not capabilities.l2s1_ready_paper_ids:
+            raise StrategyValidationError("rag_unavailable")
+        return
     if action.scope == "papers" and not action.paper_ids:
         discovery_actions = [actions_by_id[action_id] for action_id in action.depends_on]
         if not any(
@@ -73,9 +81,7 @@ def _validate_rag(
                 "paper-scoped RAG without paper_ids requires a Wiki discovery dependency"
             )
         return
-    paper_ids = (
-        capabilities.eligible_paper_ids if action.scope == "workspace" else set(action.paper_ids)
-    )
+    paper_ids = set(action.paper_ids)
     _validate_papers(paper_ids, capabilities.eligible_paper_ids)
     unavailable = paper_ids - capabilities.l2s1_ready_paper_ids
     if unavailable:

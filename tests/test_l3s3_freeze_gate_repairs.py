@@ -25,6 +25,7 @@ from transit_scholar.layer3.retrieval import (
     SchemaRetrievalAction,
     WikiRetrievalAction,
     WorkspaceRagResult,
+    WorkspaceRagRetriever,
 )
 from transit_scholar.layer3.tools import KnowledgeToolService, RetrievalResultEnvelope
 from transit_scholar.layer3.workspace.errors import WorkspaceChangedError
@@ -108,6 +109,113 @@ def test_workspace_rag_without_semantic_ranker_fails_instead_of_concatenating():
             _query(),
             RagRetrievalAction(action_id="workspace-rag", source_query="evidence"),
         )
+
+
+class PartialReadyGateway:
+    workspace_id = "workspace-1"
+
+    def __init__(self):
+        self.schema_reads = []
+        self.evidence_reads = []
+
+    def current_state(self):
+        return SimpleNamespace(revision=7)
+
+    def list_papers(self):
+        return [
+            SimpleNamespace(
+                paper_id="paper-1",
+                title="Ready",
+                l2s1_ready=True,
+                schema_status="ready",
+            ),
+            SimpleNamespace(
+                paper_id="paper-2",
+                title="Pending",
+                l2s1_ready=False,
+                schema_status="missing",
+            ),
+        ]
+
+    def get_schema_instance(self, paper_id):
+        self.schema_reads.append(paper_id)
+        if paper_id != "paper-1":
+            raise RuntimeError("schema unavailable")
+        return SimpleNamespace(
+            fields={"method": FieldResult(value="holding", status="explicit")}
+        )
+
+    def search_evidence(self, paper_id, query, *, top_k):
+        self.evidence_reads.append(paper_id)
+        return SimpleNamespace(
+            status="ok",
+            hits=[
+                SimpleNamespace(
+                    source_refs=[
+                        SimpleNamespace(
+                            block_id=f"{paper_id}-block", char_start=0, char_end=8
+                        )
+                    ],
+                    chunk_id=f"{paper_id}-chunk",
+                    pages=[1],
+                    text=f"Evidence from {paper_id}",
+                    section_path=["Results"],
+                    retrieval_method="l2s1-hybrid",
+                    rank=1,
+                    score=0.5,
+                )
+            ],
+        )
+
+
+class IdentityCrossPaperRanker:
+    provider_name = "identity-cross-paper"
+
+    def rerank(self, query, candidates, *, top_k):
+        return [candidate.candidate_id for candidate in candidates[:top_k]]
+
+
+def test_unified_workspace_rag_searches_ready_papers_and_skips_pending_members():
+    gateway = PartialReadyGateway()
+    planner = HybridKnowledgeRetrievalPlanner(
+        StaticPlannerProvider(
+            [RagRetrievalAction(action_id="rag", source_query="evidence")]
+        )
+    )
+    service = KnowledgeToolService(
+        gateway,
+        planner=planner,
+        workspace_rag_retriever=WorkspaceRagRetriever(
+            gateway, IdentityCrossPaperRanker()
+        ),
+    )
+
+    result = service.retrieve_knowledge(_query())
+
+    assert result.strategy is not None
+    assert result.searched_paper_ids == ["paper-1"]
+    assert result.skipped_paper_ids == ["paper-2"]
+    assert gateway.evidence_reads == ["paper-1"]
+    assert [item.paper_provenance.paper_id for item in result.evidence_results] == [
+        "paper-1"
+    ]
+
+
+def test_schema_without_explicit_scope_reads_only_schema_ready_papers():
+    gateway = PartialReadyGateway()
+    planner = HybridKnowledgeRetrievalPlanner(
+        StaticPlannerProvider(
+            [SchemaRetrievalAction(action_id="schema", source_query="method")]
+        )
+    )
+
+    result = KnowledgeToolService(gateway, planner=planner).retrieve_knowledge(_query())
+
+    assert result.strategy is not None
+    assert [item.paper_id for item in result.schema_results] == ["paper-1"]
+    # One authoritative capability probe plus one execution read; the pending
+    # Paper is never read.
+    assert gateway.schema_reads == ["paper-1", "paper-1"]
 
 
 class IdentityEvidenceRanker:

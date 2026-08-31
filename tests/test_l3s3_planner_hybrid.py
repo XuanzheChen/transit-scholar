@@ -96,6 +96,27 @@ def test_semantic_provider_can_select_all_required_ordered_paths(actions):
     assert "keyword" not in provider.prompts[0].lower()
 
 
+def test_workspace_rag_strategy_allows_partial_l2s1_readiness():
+    action = RagRetrievalAction(action_id="rag", source_query="evidence")
+
+    result = HybridKnowledgeRetrievalPlanner(
+        RecordingPlanner({"query_id": "query-1", "actions": [action]})
+    ).plan(_context(l2s1_ready_paper_ids={"paper-1"}))
+
+    assert result.is_valid
+    assert result.strategy is not None
+
+
+def test_workspace_rag_strategy_requires_at_least_one_ready_paper():
+    strategy = RetrievalStrategy(
+        query_id="query-1",
+        actions=[RagRetrievalAction(action_id="rag", source_query="evidence")],
+    )
+
+    with pytest.raises(StrategyValidationError, match="rag_unavailable"):
+        validate_strategy(strategy, _context(l2s1_ready_paper_ids=set()))
+
+
 @pytest.mark.parametrize(
     ("actions", "overrides", "error"),
     [

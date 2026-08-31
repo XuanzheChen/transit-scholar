@@ -108,8 +108,20 @@ class KnowledgeToolService:
         """Execute direct structured Schema retrieval without planning."""
         self._verify_query(query)
         results: list[SchemaResult] = []
-        workspace_paper_ids = self._workspace_paper_ids()
-        paper_ids = action.paper_ids or workspace_paper_ids
+        paper_views = self.gateway.list_papers()
+        workspace_paper_ids = [paper.paper_id for paper in paper_views]
+        if action.paper_ids:
+            paper_ids = action.paper_ids
+        elif any(hasattr(paper, "schema_status") for paper in paper_views):
+            paper_ids = [
+                paper.paper_id
+                for paper in paper_views
+                if getattr(paper, "schema_status", None) == "ready"
+            ]
+        else:
+            # Lightweight composition gateways predating schema readiness
+            # metadata retain their existing all-member behavior.
+            paper_ids = workspace_paper_ids
         self._require_workspace_papers(paper_ids, workspace_paper_ids)
         for paper_id in paper_ids:
             instance = self.gateway.get_schema_instance(paper_id)

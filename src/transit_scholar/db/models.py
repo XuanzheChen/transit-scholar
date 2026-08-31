@@ -606,6 +606,10 @@ AGENT_EXECUTION_STATUSES = (
     "cancelled",
 )
 
+RESEARCH_QUERY_STATUSES = ("active", "completed", "abandoned")
+CLAIM_STATUSES = ("proposed", "supported", "conflicting", "rejected")
+CLAIM_EVIDENCE_RELATIONS = ("supports", "contradicts")
+
 
 class AgentRun(Base):
     """One durable Agent task bound to a Workspace revision."""
@@ -677,6 +681,22 @@ class ResearchSession(Base):
     trace_events: Mapped[List["AgentTraceEvent"]] = relationship(
         back_populates="research_session"
     )
+    research_queries: Mapped[List["ResearchQueryRecord"]] = relationship(
+        back_populates="research_session",
+        cascade="all, delete-orphan",
+        foreign_keys="ResearchQueryRecord.research_session_id",
+        order_by="ResearchQueryRecord.created_at, ResearchQueryRecord.id",
+    )
+    evidence_records: Mapped[List["EvidenceRecord"]] = relationship(
+        back_populates="research_session",
+        cascade="all, delete-orphan",
+        order_by="EvidenceRecord.created_at, EvidenceRecord.id",
+    )
+    claim_records: Mapped[List["ClaimRecord"]] = relationship(
+        back_populates="research_session",
+        cascade="all, delete-orphan",
+        order_by="ClaimRecord.created_at, ClaimRecord.id",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -685,6 +705,150 @@ class ResearchSession(Base):
         ),
         Index("ix_research_sessions_agent_run_id", "agent_run_id"),
         Index("ix_research_sessions_status", "status"),
+    )
+
+
+class ResearchQueryRecord(Base):
+    """Durable query ledger entry owned by exactly one ResearchSession."""
+
+    __tablename__ = "research_query_records"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    research_session_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("research_sessions.id"), nullable=False
+    )
+    query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    parent_query_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("research_query_records.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    research_session: Mapped["ResearchSession"] = relationship(
+        back_populates="research_queries", foreign_keys=[research_session_id]
+    )
+    parent_query: Mapped[Optional["ResearchQueryRecord"]] = relationship(
+        remote_side=[id], foreign_keys=[parent_query_id]
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'completed', 'abandoned')",
+            name="ck_research_query_records_status",
+        ),
+        Index("ix_research_query_records_research_session_id", "research_session_id"),
+        Index("ix_research_query_records_status", "status"),
+        Index("ix_research_query_records_parent_query_id", "parent_query_id"),
+    )
+
+
+class EvidenceRecord(Base):
+    """An immutable snapshot of ResearchEvidence admitted into a session."""
+
+    __tablename__ = "evidence_records"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    research_session_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("research_sessions.id"), nullable=False
+    )
+    source_query_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("research_query_records.id"), nullable=False
+    )
+    locator_json: Mapped[str] = mapped_column(Text, nullable=False)
+    text_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    source_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    retrieval_provenance_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    research_session: Mapped["ResearchSession"] = relationship(
+        back_populates="evidence_records"
+    )
+    source_query: Mapped["ResearchQueryRecord"] = relationship(
+        foreign_keys=[source_query_id]
+    )
+    claim_evidence_links: Mapped[List["ClaimEvidenceLink"]] = relationship(
+        back_populates="evidence_record", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_evidence_records_research_session_id", "research_session_id"),
+        Index("ix_evidence_records_source_query_id", "source_query_id"),
+    )
+
+
+class ClaimRecord(Base):
+    """An explicitly created research proposition owned by one session."""
+
+    __tablename__ = "claim_records"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    research_session_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("research_sessions.id"), nullable=False
+    )
+    statement: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="proposed", nullable=False)
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    research_session: Mapped["ResearchSession"] = relationship(
+        back_populates="claim_records"
+    )
+    evidence_links: Mapped[List["ClaimEvidenceLink"]] = relationship(
+        back_populates="claim_record", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('proposed', 'supported', 'conflicting', 'rejected')",
+            name="ck_claim_records_status",
+        ),
+        Index("ix_claim_records_research_session_id", "research_session_id"),
+        Index("ix_claim_records_status", "status"),
+    )
+
+
+class ClaimEvidenceLink(Base):
+    """One explicit support or contradiction relation between claim and evidence."""
+
+    __tablename__ = "claim_evidence_links"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    claim_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("claim_records.id"), nullable=False
+    )
+    evidence_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("evidence_records.id"), nullable=False
+    )
+    relation: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    claim_record: Mapped["ClaimRecord"] = relationship(back_populates="evidence_links")
+    evidence_record: Mapped["EvidenceRecord"] = relationship(
+        back_populates="claim_evidence_links"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "relation IN ('supports', 'contradicts')",
+            name="ck_claim_evidence_links_relation",
+        ),
+        UniqueConstraint("claim_id", "evidence_id", name="uq_claim_evidence_links_pair"),
+        Index("ix_claim_evidence_links_claim_id", "claim_id"),
+        Index("ix_claim_evidence_links_evidence_id", "evidence_id"),
     )
 
 

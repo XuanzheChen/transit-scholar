@@ -106,7 +106,7 @@ def test_citation_models_in_orm():
         assert required in rnd_cols, f"missing CitationRender column: {required}"
 
 
-def test_alembic_creates_eighteen_tables():
+def test_alembic_creates_twenty_two_tables():
     """Alembic head includes citation, DOI, Workspace, and Stage2 state tables.
 
     The exact-set assertion remains a database-schema regression guard.
@@ -119,9 +119,13 @@ def test_alembic_creates_eighteen_tables():
         "doi_enrichment_jobs", "doi_provider_results",
         "workspaces", "workspace_paper_memberships", "agent_runs", "research_sessions",
         "research_states", "agent_trace_events",
+        "research_query_records",
+        "evidence_records",
+        "claim_records",
+        "claim_evidence_links",
     ):
         assert required in tables, f"missing table: {required}"
-    assert len(tables) == 18
+    assert len(tables) == 22
 
 
 def test_unique_constraint_on_citation_renders():

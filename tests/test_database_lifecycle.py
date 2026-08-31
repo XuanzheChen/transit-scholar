@@ -50,7 +50,7 @@ from transit_scholar.db.models import Paper, PaperFile  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-FROZEN_HEAD = "b8c9d0e1f2a3"
+FROZEN_HEAD = "e5f6a7b8c9d0"
 
 #: Prefix of the exact target-bound per-call authorization phrase required
 #: by ``rebuild_database`` (see ``lifecycle._authorization_phrase``).
@@ -74,6 +74,10 @@ EXPECTED_BUSINESS_TABLES = {
     "research_sessions",
     "research_states",
     "agent_trace_events",
+    "research_query_records",
+    "evidence_records",
+    "claim_records",
+    "claim_evidence_links",
 }
 
 

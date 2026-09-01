@@ -17,6 +17,7 @@ from .role_runtime import (
     RoleExecutionStore,
     RoleRuntime,
 )
+from .run_runtime import RunResearchRuntime
 from transit_scholar.layer3.agent.models import StructuredOutputRepairContext
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "RoleExecutionStore",
     "RoleRuntime",
     "StructuredOutputRepairContext",
+    "RunResearchRuntime",
 ]

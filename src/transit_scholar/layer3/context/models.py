@@ -28,6 +28,7 @@ CONTEXT_SECTIONS = frozenset(
         "accepted_evidence",
         "claims",
         "claim_evidence_links",
+        "session_handoff",
     }
 )
 
@@ -58,6 +59,7 @@ class RuntimeContextSnapshot(BaseModel):
     accepted_evidence: tuple[EvidenceRecord, ...] = ()
     claims: tuple[ClaimRecord, ...] = ()
     claim_evidence_links: tuple[ClaimEvidenceLink, ...] = ()
+    session_handoff: Any | None = None
 
 
 class RoleContext(BaseModel):

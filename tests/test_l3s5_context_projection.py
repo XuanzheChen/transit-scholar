@@ -6,6 +6,7 @@ import json
 import pytest
 
 from transit_scholar.layer3.agent import ContextPolicy, built_in_role_registry
+from transit_scholar.layer3.runtime import RoleRuntime
 from transit_scholar.layer3.context import (
     ContextBudgetExceededError,
     RoleContextProjector,
@@ -151,3 +152,27 @@ def test_projection_serialization_and_limits_are_deterministic():
     )
     with pytest.raises(ContextBudgetExceededError):
         RoleContextProjector().project(snapshot, too_small)
+
+
+def test_projected_context_reaches_semantic_policy_decision():
+    registry = built_in_role_registry()
+    role = registry.get("query_planning")
+    context = RoleContextProjector().project(_snapshot(), role)
+
+    class Policy:
+        def decide(self, definition, role_input, state, role_context):
+            assert role_context is context
+            assert role_context.sections["queries"][0]["query_text"] == "adaptive bus control"
+            assert "claims" not in role_context.sections
+            return {"completed": True, "proposed_queries": ["refined"]}
+
+    result = RoleRuntime(registry).execute(
+        role,
+        {"research_session_id": "session-1", "research_question": "Question"},
+        Policy(),
+        agent_run_id="run-1",
+        research_session_id="session-1",
+        role_context=context,
+    )
+
+    assert result.status == "completed"

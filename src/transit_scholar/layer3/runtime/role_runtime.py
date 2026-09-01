@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import os
-from pathlib import Path
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from transit_scholar.layer3.agent.models import (
     RoleExecution,
     RolePolicy,
     RoleResult,
+    StructuredOutputRepairContext,
 )
 from transit_scholar.layer3.agent.registry import RoleRegistry
 
@@ -106,6 +108,11 @@ class RoleRuntime:
         agent_run_id: str,
         research_session_id: str,
         role_execution_id: str | None = None,
+        role_context: object | None = None,
+        action_planner: Callable[
+            [RoleDefinition, BaseModel, object | None], Iterable[object]
+        ]
+        | None = None,
     ) -> RoleResult:
         registered = self.registry.get(role_definition.role_id)
         if registered != role_definition:
@@ -129,6 +136,14 @@ class RoleRuntime:
             if execution.status != "running":
                 return self._result(execution)
             if execution.working_state.operation_in_flight is not None:
+                abandoned = execution.working_state.operation_in_flight
+                execution.working_state.intermediate_artifacts.append(
+                    {
+                        "action": abandoned.get("action"),
+                        "failure": "in_flight_operation_abandoned_during_recovery",
+                    }
+                )
+                execution.working_state.usage.failures += 1
                 execution.working_state.operation_in_flight = None
                 self._boundary(
                     execution, "role.recovery", classification="in_flight_operation_abandoned"
@@ -146,20 +161,24 @@ class RoleRuntime:
                 if output is None:
                     execution.working_state.operation_in_flight = {"kind": "provider"}
                     self._boundary(execution, "role.step", classification="decision_started")
-                    output = self._decide(execution, registered, validated_input, policy)
+                    output = self._decide(
+                        execution, registered, validated_input, policy, role_context
+                    )
                     execution.working_state.current_step += 1
                     execution.working_state.last_output = output.model_dump(mode="json")
                     execution.working_state.next_action_index = 0
                     execution.working_state.operation_in_flight = None
                     self._boundary(execution, "role.result", classification="decision_validated")
                 actions = tuple(self._actions(output))
+                if action_planner is not None:
+                    actions += tuple(action_planner(registered, output, role_context))
                 for action_index in range(execution.working_state.next_action_index, len(actions)):
                     action = actions[action_index]
                     if self.action_executor is None:
                         raise RuntimeError(
                             "Role output contains actions but no action executor is configured"
                         )
-                    if execution.working_state.usage.tool_calls >= registered.runtime_profile.max_tool_calls:
+                    if execution.working_state.usage.tool_calls >= execution.runtime_profile.max_tool_calls:
                         execution.end(status="terminated", reason="max_tool_calls")
                         break
                     execution.working_state.next_action_index = action_index + 1
@@ -238,16 +257,31 @@ class RoleRuntime:
             failure_message=execution.failure_message,
         )
 
-    def _decide(self, execution, role, role_input, policy):
+    def _decide(self, execution, role, role_input, policy, role_context=None):
         profile = execution.runtime_profile
         provider_retries = 0
         repair_retries = 0
+        repair_context = None
         while True:
             if execution.working_state.usage.llm_calls >= profile.max_llm_calls:
                 raise _BudgetTermination("max_llm_calls")
             execution.working_state.usage.llm_calls += 1
             try:
-                raw_output = policy.decide(role, role_input, execution.working_state)
+                parameters = inspect.signature(policy.decide).parameters
+                if len(parameters) >= 5:
+                    raw_output = policy.decide(
+                        role,
+                        role_input,
+                        execution.working_state,
+                        role_context,
+                        repair_context,
+                    )
+                elif len(parameters) >= 4:
+                    raw_output = policy.decide(
+                        role, role_input, execution.working_state, role_context
+                    )
+                else:
+                    raw_output = policy.decide(role, role_input, execution.working_state)
             except ProviderRetryableError:
                 if provider_retries >= profile.provider_retry_limit:
                     raise
@@ -257,10 +291,15 @@ class RoleRuntime:
                 continue
             try:
                 return role.output_contract.model_validate(raw_output)
-            except ValidationError:
+            except ValidationError as exc:
                 if repair_retries >= profile.structured_output_repair_limit:
                     raise
                 repair_retries += 1
+                repair_context = StructuredOutputRepairContext(
+                    invalid_output=self._json_value(raw_output),
+                    validation_errors=tuple(exc.errors(include_url=False)),
+                    attempt=repair_retries,
+                )
                 execution.working_state.retries.structured_output_repairs += 1
                 self._boundary(
                     execution, "role.retry", classification="structured_output_repair"

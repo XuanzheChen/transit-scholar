@@ -15,6 +15,8 @@ from transit_scholar.layer3.evidence import EvidenceLocator, ResearchEvidence
 from transit_scholar.layer3.execution import AgentRunService
 from transit_scholar.layer3.ledger import ResearchReasoningLedgerService
 from transit_scholar.layer3.runtime import MainResearchRuntime, MainRuntimeConfig, RoleRuntime
+from transit_scholar.layer3.tools import RetrievalResultEnvelope
+from transit_scholar.layer3.retrieval import ResearchQuery
 from transit_scholar.layer3.trace import AgentTraceService
 from transit_scholar.layer3.workspace import WorkspaceService
 
@@ -88,7 +90,10 @@ def test_database_backed_role_chain_persists_ledgers_trace_and_provenance(sessio
 
     class Knowledge:
         def retrieve_knowledge(self, query):
-            return [evidence_by_query[query.query_id]]
+            return RetrievalResultEnvelope(
+                query=ResearchQuery.model_validate(query),
+                evidence_results=[evidence_by_query[query.query_id]],
+            )
 
     base_registry = built_in_role_registry({
         role: RoleRuntimeProfile(max_steps=1, max_tool_calls=5) for role in RoleId

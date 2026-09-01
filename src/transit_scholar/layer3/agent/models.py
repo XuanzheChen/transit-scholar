@@ -199,6 +199,14 @@ class RetryState(BaseModel):
     structured_output_repairs: int = Field(default=0, ge=0)
 
 
+class StructuredOutputRepairContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    invalid_output: Any
+    validation_errors: tuple[dict[str, Any], ...]
+    attempt: int = Field(ge=1)
+
+
 class RoleWorkingState(BaseModel):
     """Temporary, recoverable Role state distinct from the research ledger."""
 
@@ -257,7 +265,12 @@ class RoleResult(BaseModel):
 
 class RolePolicy(Protocol):
     def decide(
-        self, definition: RoleDefinition, role_input: BaseModel, state: RoleWorkingState
+        self,
+        definition: RoleDefinition,
+        role_input: BaseModel,
+        state: RoleWorkingState,
+        role_context: object | None = None,
+        repair_context: StructuredOutputRepairContext | None = None,
     ) -> BaseModel: ...
 
 

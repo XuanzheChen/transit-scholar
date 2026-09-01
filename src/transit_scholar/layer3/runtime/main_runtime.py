@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,7 +18,8 @@ from transit_scholar.layer3.agent import (
     RoleRegistry,
     RoleResult,
 )
-from transit_scholar.layer3.context import RoleContextProjector
+from transit_scholar.layer3.context import RetrievedEvidenceContext, RoleContextProjector
+from transit_scholar.layer3.tools import RetrievalResultEnvelope
 
 from .config import MainRuntimeConfig
 from .role_runtime import RoleRuntime
@@ -45,6 +47,22 @@ class MainRuntimeResult(BaseModel):
     failure_message: str | None = None
 
 
+class MainRuntimeState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_run_id: str
+    research_session_id: str
+    status: str = "running"
+    next_role_id: RoleId = RoleId.RESEARCH_COORDINATOR
+    current_role_execution_id: str | None = None
+    usage: MainRuntimeUsage = Field(default_factory=MainRuntimeUsage)
+    role_results: list[RoleResult] = Field(default_factory=list)
+    latest_retrieval_observation: list[dict[str, Any]] = Field(default_factory=list)
+    final_response: FinalResponseArtifact | None = None
+    termination_reason: str | None = None
+    failure_message: str | None = None
+
+
 class ContextBuilder(Protocol):
     def build(self, *, agent_run_id: str, research_session_id: str, **kwargs: Any) -> object: ...
 
@@ -59,6 +77,11 @@ class ExecutionService(Protocol):
 
 class TraceSink(Protocol):
     def append_event(self, **event: Any) -> object: ...
+
+
+class MainRuntimeStateStore(Protocol):
+    def save_research_state(self, **kwargs: Any) -> object: ...
+    def load_research_state(self, **kwargs: Any) -> object: ...
 
 
 RoleInputFactory = Callable[[RoleId, object], BaseModel | dict[str, object]]
@@ -86,6 +109,7 @@ class MainResearchRuntime:
         action_planner: ActionPlanner | None = None,
         action_executor: object | None = None,
         is_cancelled: Callable[[], bool] | None = None,
+        state_store: MainRuntimeStateStore | None = None,
     ) -> None:
         self.registry = registry
         self.role_runtime = role_runtime
@@ -98,23 +122,62 @@ class MainResearchRuntime:
         self.role_input_factory = role_input_factory or self._default_role_input
         self.action_planner = action_planner
         self.action_executor = action_executor
+        if (
+            action_executor is not None
+            and getattr(self.role_runtime, "action_executor", None) is None
+        ):
+            self.role_runtime.action_executor = action_executor
         self.is_cancelled = is_cancelled or (lambda: False)
+        self.state_store = state_store
 
     def execute(self, *, agent_run_id: str, research_session_id: str) -> MainRuntimeResult:
+        state = MainRuntimeState(
+            agent_run_id=agent_run_id, research_session_id=research_session_id
+        )
+        return self._execute_state(state, resumed=False)
+
+    def resume_session(
+        self, *, agent_run_id: str, research_session_id: str
+    ) -> MainRuntimeResult:
+        if self.state_store is None:
+            raise RuntimeError("resume_session requires a durable Main Runtime state store")
+        record = self.state_store.load_research_state(
+            agent_run_id=agent_run_id, research_session_id=research_session_id
+        )
+        payload = getattr(record, "payload", None) if record is not None else None
+        if not isinstance(payload, dict) or "l3s5" not in payload:
+            raise LookupError("No durable L3S5 continuation state exists for this session")
+        state = MainRuntimeState.model_validate(payload["l3s5"])
+        if (
+            state.agent_run_id != agent_run_id
+            or state.research_session_id != research_session_id
+        ):
+            raise ValueError("Persisted Main Runtime state belongs to another session")
+        return self._execute_state(state, resumed=True)
+
+    def _execute_state(self, state: MainRuntimeState, *, resumed: bool) -> MainRuntimeResult:
+        agent_run_id = state.agent_run_id
+        research_session_id = state.research_session_id
         run = self.execution_service.get_agent_run(agent_run_id)
         session = self.execution_service.get_research_session(agent_run_id, research_session_id)
-        usage = MainRuntimeUsage()
-        results: list[RoleResult] = []
-        final_response = None
-        status = "running"
-        reason = "unknown"
-        failure_message = None
-        next_role = RoleId.RESEARCH_COORDINATOR
-        retrieved_evidence: list[object] = []
+        usage = state.usage
+        results = state.role_results
+        final_response = state.final_response
+        status = state.status
+        reason = state.termination_reason or "unknown"
+        failure_message = state.failure_message
+        next_role = state.next_role_id
+        retrieved_evidence: list[object] = list(state.latest_retrieval_observation)
+        if status != "running":
+            return self._state_result(state)
         self.execution_service.update_research_session_status(
             agent_run_id, research_session_id, "running"
         )
-        self._trace(agent_run_id, research_session_id, "runtime.start", usage)
+        self._trace(
+            agent_run_id, research_session_id,
+            "runtime.resume" if resumed else "runtime.start", usage,
+        )
+        self._save_state(state)
 
         while status == "running":
             reason = self._limit_reason(usage)
@@ -136,12 +199,31 @@ class MainResearchRuntime:
                 )
                 projected = self.projector.project(snapshot, role)
                 role_input = self.role_input_factory(next_role, projected)
+                role_execution_id = state.current_role_execution_id or uuid4().hex
+                state.current_role_execution_id = role_execution_id
+                state.next_role_id = next_role
+                self._save_state(state)
                 role_result = self.role_runtime.execute(
                     role,
                     role_input,
                     policy,
                     agent_run_id=agent_run_id,
                     research_session_id=research_session_id,
+                    role_context=projected,
+                    action_planner=(
+                        (
+                            lambda definition, output, context: self.action_planner(
+                                definition,
+                                output.model_dump(mode="json")
+                                if isinstance(output, BaseModel)
+                                else output,
+                                context,
+                            )
+                        )
+                        if self.action_planner is not None
+                        else None
+                    ),
+                    role_execution_id=role_execution_id,
                 )
             except Exception as exc:
                 usage.failures += 1
@@ -157,6 +239,7 @@ class MainResearchRuntime:
                 break
 
             results.append(role_result)
+            state.current_role_execution_id = None
             usage.steps += 1
             usage.llm_calls += role_result.working_state.usage.llm_calls
             usage.tool_calls += role_result.working_state.usage.tool_calls
@@ -180,45 +263,57 @@ class MainResearchRuntime:
                 continue
 
             output = role_result.output or {}
-            if self.action_planner is not None:
-                if self.action_executor is None:
-                    usage.failures += 1
-                    failure_message = "An action planner requires an action executor"
-                    status, reason = self._failure_outcome(usage)
-                    continue
-                try:
-                    actions = self.action_planner(role, output, projected)
-                    for action in actions:
-                        action_result = self.action_executor.execute(action, role)
-                        if action.action_type.value == "RETRIEVE_QUERY":
-                            value = getattr(action_result, "value", None)
-                            retrieved_evidence = list(value or ())
-                        usage.tool_calls += 1
-                        self._trace(
-                            agent_run_id,
-                            research_session_id,
-                            "runtime.action",
-                            usage,
-                            role_id=next_role.value,
-                            role_execution_id=role_result.role_execution_id,
-                            action_type=action.action_type.value,
-                            action_result=self._json_value(action_result),
-                        )
-                except Exception as exc:
-                    usage.failures += 1
-                    failure_message = str(exc)
-                    status, reason = self._failure_outcome(usage)
+            if (
+                self.action_planner is not None
+                and self.action_executor is not None
+                and not isinstance(self.role_runtime, RoleRuntime)
+            ):
+                previous_tool_calls = role_result.working_state.usage.tool_calls
+                for action in self.action_planner(role, output, projected):
+                    action_result = self.action_executor.execute(action, role)
+                    role_result.working_state.usage.tool_calls += 1
+                    role_result.working_state.intermediate_artifacts.append(
+                        {
+                            "action": self._json_value(action),
+                            "result": self._json_value(action_result),
+                        }
+                    )
+                usage.tool_calls += (
+                    role_result.working_state.usage.tool_calls - previous_tool_calls
+                )
+            # Specialist actions are executed inside RoleRuntime. Retrieval
+            # observations are recovered from the committed action boundary.
+            if role_result.working_state.intermediate_artifacts:
+                for artifact in role_result.working_state.intermediate_artifacts:
+                    action = artifact.get("action", {})
                     self._trace(
                         agent_run_id,
                         research_session_id,
-                        "runtime.failure",
+                        "runtime.action",
                         usage,
                         role_id=next_role.value,
                         role_execution_id=role_result.role_execution_id,
-                        failure_message=failure_message,
+                        action_type=action.get("action_type"),
+                        action_result=artifact.get("result"),
                     )
-                    next_role = RoleId.RESEARCH_COORDINATOR
-                    continue
+                    if action.get("action_type") == "RETRIEVE_QUERY":
+                        value = artifact.get("result")
+                        if isinstance(value, dict) and "value" in value:
+                            value = value["value"]
+                        if isinstance(value, RetrievalResultEnvelope):
+                            value = value.evidence_results
+                        if isinstance(value, dict) and "evidence_results" in value:
+                            value = value["evidence_results"]
+                        retrieved_evidence = [
+                            item
+                            if isinstance(item, dict)
+                            else RetrievedEvidenceContext(
+                                evidence_id=item.evidence_id,
+                                payload=item.model_dump(mode="json"),
+                            ).model_dump(mode="json")
+                            for item in (value or [])
+                        ]
+                        state.latest_retrieval_observation = list(retrieved_evidence)
             if next_role == RoleId.FINAL_SYNTHESIS and output.get("completed"):
                 final_response = FinalSynthesisRole.finalize(role_input, output)
                 status, reason = "completed", "semantic_completion"
@@ -234,6 +329,14 @@ class MainResearchRuntime:
                     next_role = RoleId(selected)
             else:
                 next_role = RoleId.RESEARCH_COORDINATOR
+            state.next_role_id = next_role
+            state.usage = usage
+            state.role_results = results
+            state.status = status
+            state.termination_reason = reason
+            state.failure_message = failure_message
+            state.final_response = final_response
+            self._save_state(state)
 
         session_status = "completed" if status == "completed" else (
             "cancelled" if reason == "cancelled" else "failed"
@@ -245,15 +348,41 @@ class MainResearchRuntime:
             agent_run_id, research_session_id, "runtime.completion", usage,
             status=status, termination_reason=reason,
         )
+        state.status = status
+        state.termination_reason = reason
+        state.failure_message = failure_message
+        state.final_response = final_response
+        state.usage = usage
+        state.role_results = results
+        self._save_state(state)
+        return self._state_result(state)
+
+    @staticmethod
+    def _state_result(state: MainRuntimeState) -> MainRuntimeResult:
         return MainRuntimeResult(
-            agent_run_id=agent_run_id,
-            research_session_id=research_session_id,
-            status=status,
-            termination_reason=reason,
-            usage=usage,
-            role_results=results,
-            final_response=final_response,
-            failure_message=failure_message,
+            agent_run_id=state.agent_run_id,
+            research_session_id=state.research_session_id,
+            status=state.status,
+            termination_reason=state.termination_reason,
+            usage=state.usage,
+            role_results=state.role_results,
+            final_response=state.final_response,
+            failure_message=state.failure_message,
+        )
+
+    def _save_state(self, state: MainRuntimeState) -> None:
+        if self.state_store is None:
+            return
+        existing = self.state_store.load_research_state(
+            agent_run_id=state.agent_run_id,
+            research_session_id=state.research_session_id,
+        )
+        payload = dict(getattr(existing, "payload", {}) or {})
+        payload["l3s5"] = state.model_dump(mode="json")
+        self.state_store.save_research_state(
+            agent_run_id=state.agent_run_id,
+            research_session_id=state.research_session_id,
+            payload=payload,
         )
 
     def _limit_reason(self, usage: MainRuntimeUsage) -> str | None:
@@ -327,5 +456,5 @@ AgentRuntime = MainResearchRuntime
 
 __all__ = [
     "AgentRuntime", "FinalResponseArtifact", "MainResearchRuntime",
-    "MainRuntimeResult", "MainRuntimeUsage",
+    "MainRuntimeResult", "MainRuntimeState", "MainRuntimeStateStore", "MainRuntimeUsage",
 ]

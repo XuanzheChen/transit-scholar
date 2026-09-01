@@ -37,6 +37,17 @@ class RepairPolicy:
         return {"completed": True, "proposed_queries": ["query"]}
 
 
+class FeedbackRepairPolicy:
+    def __init__(self):
+        self.repair_contexts = []
+
+    def decide(self, definition, role_input, state, role_context, repair_context):
+        self.repair_contexts.append(repair_context)
+        if repair_context is None:
+            return {"completed": True, "unexpected": "field"}
+        return {"completed": True, "proposed_queries": ["corrected query"]}
+
+
 def test_provider_retry_does_not_increment_agentic_step():
     result = _execute(
         ProviderRetryPolicy(),
@@ -63,6 +74,22 @@ def test_structured_output_repair_does_not_increment_agentic_step():
     assert result.working_state.current_step == 1
     assert result.working_state.usage.llm_calls == 2
     assert result.working_state.retries.structured_output_repairs == 1
+
+
+def test_structured_output_repair_receives_validation_feedback():
+    policy = FeedbackRepairPolicy()
+    result = _execute(
+        policy,
+        max_steps=1,
+        max_llm_calls=2,
+        structured_output_repair_limit=1,
+    )
+
+    assert result.status == "completed"
+    feedback = policy.repair_contexts[1]
+    assert feedback.invalid_output == {"completed": True, "unexpected": "field"}
+    assert feedback.validation_errors
+    assert feedback.attempt == 1
 
 
 def test_llm_budget_exhaustion_returns_structured_termination():

@@ -109,3 +109,27 @@ def test_resume_before_llm_call_restarts_decision_from_persisted_boundary():
     assert result.status == "completed"
     assert result.working_state.current_step == 1
     assert result.working_state.usage.llm_calls == 1
+
+
+def test_recovery_uses_persisted_profile_instead_of_new_registry_profile():
+    store = InMemoryRoleExecutionStore()
+    role, runtime = _runtime(store, object())
+    original_boundary = runtime._boundary
+
+    def crash_after_start(execution, event_type, **payload):
+        original_boundary(execution, event_type, **payload)
+        if event_type == "role.start":
+            raise Crash()
+
+    runtime._boundary = crash_after_start
+    with pytest.raises(Crash):
+        _execute(runtime, role, CompletingPolicy())
+
+    changed = role.model_copy(
+        update={"runtime_profile": role.runtime_profile.model_copy(update={"max_llm_calls": 0})}
+    )
+    resumed = RoleRuntime(RoleRegistry([changed]), store, action_executor=object())
+    result = _execute(resumed, changed, CompletingPolicy())
+
+    assert result.status == "completed"
+    assert result.working_state.usage.llm_calls == 1

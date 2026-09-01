@@ -18,6 +18,7 @@ class SessionOutcome(BaseModel):
     claim_refs: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
+    source_provenance: list[dict[str, Any]] = Field(default_factory=list)
     final_response: str | None = None
     final_summary: str | None = None
     failure_reason: str | None = None

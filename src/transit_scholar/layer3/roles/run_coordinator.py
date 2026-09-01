@@ -10,7 +10,18 @@ from transit_scholar.layer3.run_context import RunContextSnapshot
 
 
 class OptionalPlanningPolicy:
-    """Small deterministic default policy, replaceable with a governed policy."""
+    """Small deterministic default policy, replaceable with a governed policy.
+
+    A fresh run still needs an initial semantic route.  In production this
+    lightweight policy provides a deterministic baseline until a richer policy
+    is injected; importantly, it never treats an empty prior state as proof
+    that the user's goal is already complete.
+    """
+
+    _planning_markers = (
+        "compare", "comprehensive", "multiple", "several", "plan",
+        "investigate", "research", "analyze", "analysis", "review",
+    )
 
     def __call__(self, snapshot: RunContextSnapshot) -> RunDecision:
         if snapshot.research_plan is not None:
@@ -23,6 +34,19 @@ class OptionalPlanningPolicy:
                 mode="planned_research",
                 proposed_questions=[*snapshot.unresolved_items, *snapshot.conflicting_items],
             )
+
+        if not snapshot.session_outcomes and snapshot.research_plan is None:
+            goal = snapshot.user_goal.strip()
+            normalized = goal.casefold()
+            requires_plan = (
+                len(goal.split()) >= 20
+                or any(marker in normalized for marker in self._planning_markers)
+                or any(token in normalized for token in (" and ", " vs ", " versus "))
+            )
+            if requires_plan:
+                return RunDecision(mode="planned_research", proposed_questions=[goal])
+            return RunDecision(mode="direct_session", proposed_questions=[goal])
+
         return RunDecision(mode="complete", completion_reason="research_sufficient")
 
 

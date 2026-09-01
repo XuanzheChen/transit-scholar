@@ -49,6 +49,10 @@ class RunResearchRuntime:
                 artifact = self.synthesis(snapshot) if self.synthesis else RunFinalResponseArtifact(answer_text=decision.completion_reason or "", contributing_session_ids=[o.research_session_id for o in outcomes], completion_reason=decision.completion_reason)
                 if not isinstance(artifact, RunFinalResponseArtifact):
                     artifact = RunFinalResponseArtifact.model_validate(artifact)
+                artifact = artifact.model_copy(update={
+                    "status": "completed",
+                    "completion_reason": decision.completion_reason or artifact.completion_reason,
+                })
                 return self._result(state, outcomes, plan, "semantic_completion", artifact)
             if decision.mode == "planned_research":
                 state.planning_round += 1
@@ -91,14 +95,21 @@ class RunResearchRuntime:
                 question, sid = (decision.proposed_questions[0] if decision.proposed_questions else snapshot.user_goal), uuid4().hex
             if len(outcomes) >= self.config.max_sessions:
                 return self._result(state, outcomes, plan, "max_sessions")
-            state.current_research_session_id = sid
-            self._event(agent_run_id, "run.session.created", {"research_session_id": sid, "research_question": question})
-            self._event(agent_run_id, "run.session.started", {"research_session_id": sid}, sid)
-            self._persist(state, outcomes, plan)
             handoff = self.handoff_projector.project(snapshot, current_research_question=question, config=self.config)
             try:
+                # A real L3S5 runtime may only run against an authoritative
+                # L3S2 execution service. Callable test doubles remain valid.
+                if hasattr(self.session_runtime, "execute") and self.execution_service is None:
+                    raise RuntimeError("execution_service is required for L3S5 session execution")
                 session = self._create_session(agent_run_id=agent_run_id, research_session_id=sid, research_question=question, handoff_context=handoff)
-                raw = self.session_runtime.execute(agent_run_id=agent_run_id, research_session_id=sid) if hasattr(self.session_runtime, "execute") else self.session_runtime(session, handoff)
+                state.current_research_session_id = sid
+                self._event(agent_run_id, "run.session.created", {"research_session_id": sid, "research_question": question})
+                self._persist(state, outcomes, plan)
+                self._event(agent_run_id, "run.session.started", {"research_session_id": sid}, sid)
+                if hasattr(self.session_runtime, "execute"):
+                    raw = self.session_runtime.execute(agent_run_id=agent_run_id, research_session_id=sid, session_handoff=handoff)
+                else:
+                    raw = self.session_runtime(session, handoff)
                 outcome = self._adapt_outcome(raw, sid, question)
             except Exception as exc:
                 outcome = SessionOutcome(research_session_id=sid, research_question=question, status="failed", failure_reason=str(exc))
@@ -132,12 +143,30 @@ class RunResearchRuntime:
         if plan:
             item = next((i for i in plan.items if i.research_session_id == sid), None)
             question = item.research_question if item else None
+        if question is None and self.execution_service is not None:
+            persisted = self.execution_service.get_research_session(state.agent_run_id, sid)
+            question = getattr(persisted, "research_question", None)
+            if question is None and isinstance(persisted, dict):
+                question = persisted.get("research_question")
         question = question or "Resumed research session"
+        snapshot = self.snapshot_builder.build(
+            agent_run=run, session_outcomes=outcomes, research_plan=plan,
+            orchestration_state=state,
+        )
+        handoff = self.handoff_projector.project(
+            snapshot, current_research_question=question, config=self.config
+        )
         try:
             if hasattr(self.session_runtime, "resume_session"):
-                raw = self.session_runtime.resume_session(agent_run_id=state.agent_run_id, research_session_id=sid)
+                raw = self.session_runtime.resume_session(
+                    agent_run_id=state.agent_run_id, research_session_id=sid,
+                    session_handoff=handoff,
+                )
             else:
-                raw = self.session_runtime.execute(agent_run_id=state.agent_run_id, research_session_id=sid)
+                raw = self.session_runtime.execute(
+                    agent_run_id=state.agent_run_id, research_session_id=sid,
+                    session_handoff=handoff,
+                )
             outcome = self._adapt_outcome(raw, sid, question)
         except Exception as exc:
             outcome = SessionOutcome(research_session_id=sid, research_question=question, status="failed", failure_reason=str(exc))
@@ -163,7 +192,14 @@ class RunResearchRuntime:
                 agent_run_id=kwargs["agent_run_id"], research_session_id=kwargs["research_session_id"],
                 research_question=kwargs["research_question"],
             )
-            service.get_research_session(kwargs["agent_run_id"], kwargs["research_session_id"])
+            persisted = service.get_research_session(kwargs["agent_run_id"], kwargs["research_session_id"])
+            persisted_id = getattr(persisted, "research_session_id", None)
+            persisted_question = getattr(persisted, "research_question", None)
+            if isinstance(persisted, dict):
+                persisted_id = persisted.get("research_session_id")
+                persisted_question = persisted.get("research_question")
+            if persisted_id != kwargs["research_session_id"] or persisted_question != kwargs["research_question"]:
+                raise RuntimeError("authoritative L3S2 ResearchSession does not match selected Session")
             return session
         return self.session_factory(**kwargs)
 
@@ -171,22 +207,51 @@ class RunResearchRuntime:
         if isinstance(raw, SessionOutcome):
             return raw
         data = raw.model_dump(mode="python") if hasattr(raw, "model_dump") else (raw if isinstance(raw, dict) else {})
-        status = "completed" if data.get("status") in (None, "completed", "succeeded", "success") else "failed"
+        raw_status = data.get("status")
+        status = {
+            None: "completed",
+            "completed": "completed",
+            "succeeded": "completed",
+            "success": "completed",
+            "cancelled": "cancelled",
+            "canceled": "cancelled",
+            "terminated": "terminated",
+        }.get(raw_status, "failed")
         artifact = data.get("final_response")
         if hasattr(artifact, "model_dump"):
             artifact = artifact.model_dump(mode="python")
         if not isinstance(artifact, dict):
             artifact = {}
         claim_refs, evidence_refs = list(data.get("claim_refs", [])), list(data.get("evidence_refs", []))
+        source_provenance: list[dict[str, Any]] = []
         if self.ledger_service is not None:
             claims = self.ledger_service.list_claims(research_session_id=sid)
             evidence = self.ledger_service.list_evidence(research_session_id=sid)
             claim_refs = [item.get("claim_id") if isinstance(item, dict) else item.claim_id for item in claims]
             evidence_refs = [item.get("evidence_id") if isinstance(item, dict) else item.evidence_id for item in evidence]
-        answer = artifact.get("answer_text") or data.get("final_response") if isinstance(data.get("final_response"), str) else artifact.get("answer_text")
+            source_provenance = [item if isinstance(item, dict) else item.model_dump(mode="python") for item in evidence]
+        final_sources = artifact.get("source_references", [])
+        for source in final_sources:
+            if hasattr(source, "model_dump"):
+                source = source.model_dump(mode="python")
+            if isinstance(source, dict):
+                source_provenance.append(source)
+                evidence_id = source.get("evidence_id")
+                if evidence_id and evidence_id not in evidence_refs:
+                    evidence_refs.append(evidence_id)
+        source_refs = [
+            ref for ref in artifact.get(
+                "source_refs",
+                artifact.get("citation_references", data.get("source_refs", [])),
+            ) if isinstance(ref, str)
+        ]
+        if not source_refs:
+            source_refs = list(evidence_refs)
+        answer = artifact.get("answer_text") if isinstance(artifact.get("answer_text"), str) else data.get("final_response") if isinstance(data.get("final_response"), str) else None
         return SessionOutcome(research_session_id=sid, research_question=question, status=status,
-            final_response=answer, final_summary=artifact.get("completion_reason") or data.get("final_summary") or answer,
-            claim_refs=claim_refs, evidence_refs=evidence_refs, source_refs=artifact.get("source_refs", data.get("source_refs", [])),
+            final_response=answer, final_summary=artifact.get("final_summary") or artifact.get("termination_reason") or data.get("final_summary") or answer,
+            claim_refs=claim_refs, evidence_refs=evidence_refs, source_refs=source_refs,
+            source_provenance=source_provenance,
             failure_reason=data.get("failure_message"))
     @staticmethod
     def _default_session(**kwargs): return kwargs

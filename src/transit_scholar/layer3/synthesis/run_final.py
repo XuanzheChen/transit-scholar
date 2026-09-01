@@ -71,7 +71,7 @@ class RunFinalSynthesisRole:
             source_refs=refs,
             contributing_session_ids=[o.research_session_id for o in outcomes],
             status=status,
-            completion_reason="research_sufficient",
+            completion_reason=None,
             failure_metadata=failure_metadata,
         )
 

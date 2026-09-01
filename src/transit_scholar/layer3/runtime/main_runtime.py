@@ -61,6 +61,7 @@ class MainRuntimeState(BaseModel):
     final_response: FinalResponseArtifact | None = None
     termination_reason: str | None = None
     failure_message: str | None = None
+    session_handoff: Any | None = None
 
 
 class ContextBuilder(Protocol):
@@ -132,12 +133,14 @@ class MainResearchRuntime:
 
     def execute(self, *, agent_run_id: str, research_session_id: str, session_handoff: object | None = None) -> MainRuntimeResult:
         state = MainRuntimeState(
-            agent_run_id=agent_run_id, research_session_id=research_session_id
+            agent_run_id=agent_run_id, research_session_id=research_session_id,
+            session_handoff=session_handoff,
         )
         return self._execute_state(state, resumed=False, session_handoff=session_handoff)
 
     def resume_session(
-        self, *, agent_run_id: str, research_session_id: str
+        self, *, agent_run_id: str, research_session_id: str,
+        session_handoff: object | None = None,
     ) -> MainRuntimeResult:
         if self.state_store is None:
             raise RuntimeError("resume_session requires a durable Main Runtime state store")
@@ -153,7 +156,8 @@ class MainResearchRuntime:
             or state.research_session_id != research_session_id
         ):
             raise ValueError("Persisted Main Runtime state belongs to another session")
-        return self._execute_state(state, resumed=True, session_handoff=None)
+        handoff = session_handoff if session_handoff is not None else state.session_handoff
+        return self._execute_state(state, resumed=True, session_handoff=handoff)
 
     def _execute_state(self, state: MainRuntimeState, *, resumed: bool, session_handoff: object | None = None) -> MainRuntimeResult:
         agent_run_id = state.agent_run_id
@@ -166,6 +170,10 @@ class MainResearchRuntime:
         status = state.status
         reason = state.termination_reason or "unknown"
         failure_message = state.failure_message
+        if session_handoff is None:
+            session_handoff = state.session_handoff
+        elif state.session_handoff is None:
+            state.session_handoff = session_handoff
         next_role = state.next_role_id
         retrieved_evidence: list[object] = list(state.latest_retrieval_observation)
         if status != "running":

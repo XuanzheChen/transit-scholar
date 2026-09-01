@@ -14,6 +14,7 @@ from transit_scholar.layer3.agent import (
 )
 from transit_scholar.layer3.actions import CreateQueryAction
 from transit_scholar.layer3.runtime import MainResearchRuntime, MainRuntimeConfig, RoleRuntime
+from transit_scholar.layer3.context import RoleContext
 
 
 class ExecutionService:
@@ -37,7 +38,12 @@ class ContextBuilder:
 
 class Projector:
     def project(self, snapshot, role):
-        return {"role_id": role.role_id.value}
+        return RoleContext(
+            role_id=role.role_id.value,
+            sections={},
+            omitted_sections=frozenset(),
+            serialized_chars=2,
+        )
 
 
 class TraceSink:
@@ -56,6 +62,7 @@ def role_result(
     llm_calls=1,
     tool_calls=0,
     failure_message=None,
+    intermediate_artifacts=None,
 ):
     return RoleResult(
         role_execution_id=f"execution-{role_id.value}",
@@ -65,6 +72,7 @@ def role_result(
         working_state=RoleWorkingState(
             current_step=1,
             usage=RuntimeUsage(llm_calls=llm_calls, tool_calls=tool_calls),
+            intermediate_artifacts=intermediate_artifacts or [],
         ),
         termination_reason=("semantic_completion" if status == "completed" else "failure"),
         failure_message=failure_message,
@@ -295,7 +303,7 @@ def test_unregistered_role_selection_fails_structured_validation_and_never_execu
     )
 
 
-def test_main_cycle_dispatches_structured_actions_and_traces_committed_results():
+def test_main_consumes_role_action_artifacts_without_executing_role_actions():
     class RecordingExecutor:
         def __init__(self):
             self.calls = []
@@ -314,6 +322,16 @@ def test_main_cycle_dispatches_structured_actions_and_traces_committed_results()
             role_result(
                 RoleId.QUERY_PLANNING,
                 output={"completed": True, "proposed_queries": ["first query"]},
+                tool_calls=1,
+                intermediate_artifacts=[
+                    {
+                        "action": {
+                            "action_type": "CREATE_QUERY",
+                            "query_text": "first query",
+                        },
+                        "result": {"query_id": "query-1"},
+                    }
+                ],
             ),
             role_result(
                 RoleId.RESEARCH_COORDINATOR,
@@ -334,13 +352,11 @@ def test_main_cycle_dispatches_structured_actions_and_traces_committed_results()
         if role.role_id == RoleId.QUERY_PLANNING
         else []
     )
-
     result = instance.execute(agent_run_id="run-1", research_session_id="session-1")
 
     assert result.status == "completed"
     assert result.usage.tool_calls == 1
-    assert action_executor.calls[0][1] == RoleId.QUERY_PLANNING
-    assert action_executor.calls[0][0].action_type.value == "CREATE_QUERY"
+    assert action_executor.calls == []
     action_events = [event for event in trace.events if event["event_type"] == "runtime.action"]
     assert action_events[0]["payload"]["role_execution_id"] == "execution-query_planning"
     assert action_events[0]["payload"]["action_type"] == "CREATE_QUERY"

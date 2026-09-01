@@ -10,6 +10,7 @@ from transit_scholar.layer3.runtime import RoleRuntime
 from transit_scholar.layer3.context import (
     ContextBudgetExceededError,
     RoleContextProjector,
+    RetrievedEvidenceContext,
     RuntimeContextSnapshot,
     SessionContext,
 )
@@ -19,7 +20,10 @@ from transit_scholar.layer3.grounding import (
     SchemaCoverage,
     WorkspaceCapabilities,
 )
-from transit_scholar.layer3.ledger import ClaimRecord, ResearchQueryRecord
+from transit_scholar.layer3.evidence import ResearchEvidence
+from transit_scholar.layer3.ledger import EvidenceRecord, ClaimRecord, ResearchQueryRecord
+from transit_scholar.layer3.retrieval import ResearchQuery
+from transit_scholar.layer3.tools import RetrievalResultEnvelope
 from transit_scholar.layer3.wiki import WorkspaceWikiStatus
 
 
@@ -154,7 +158,7 @@ def test_projection_serialization_and_limits_are_deterministic():
         RoleContextProjector().project(snapshot, too_small)
 
 
-def test_projected_context_reaches_semantic_policy_decision():
+def test_query_planning_policy_reads_query_history_from_role_context():
     registry = built_in_role_registry()
     role = registry.get("query_planning")
     context = RoleContextProjector().project(_snapshot(), role)
@@ -169,6 +173,123 @@ def test_projected_context_reaches_semantic_policy_decision():
     result = RoleRuntime(registry).execute(
         role,
         {"research_session_id": "session-1", "research_question": "Question"},
+        Policy(),
+        agent_run_id="run-1",
+        research_session_id="session-1",
+        role_context=context,
+    )
+
+    assert result.status == "completed"
+
+
+def test_evidence_reasoning_policy_reads_envelope_evidence_text_and_provenance():
+    evidence = ResearchEvidence(
+        evidence_id="evidence-1",
+        locator={
+            "workspace_id": "workspace-1",
+            "source_kind": "paper",
+            "paper_id": "paper-1",
+            "block_id": "block-1",
+            "pages": [3],
+        },
+        text="The first study observed reduced delay.",
+        source_kind="rag",
+        retrieval_provenance={"provider": "l3s3", "action_id": "rag-1"},
+    )
+    envelope = RetrievalResultEnvelope(
+        query=ResearchQuery(
+            query_id="query-1",
+            session_id="session-1",
+            workspace_id="workspace-1",
+            query_text="transit delay",
+        ),
+        evidence_results=[evidence],
+    )
+    snapshot = _snapshot().model_copy(
+        update={
+            "retrieved_evidence": tuple(
+                RetrievedEvidenceContext(
+                    evidence_id=item.evidence_id,
+                    payload=item.model_dump(mode="json"),
+                )
+                for item in envelope.evidence_results
+            )
+        }
+    )
+    registry = built_in_role_registry()
+    role = registry.get("evidence_reasoning")
+    context = RoleContextProjector().project(snapshot, role)
+
+    class Policy:
+        def decide(self, definition, role_input, state, role_context, repair_context=None):
+            payload = role_context.sections["retrieved_evidence"][0]["payload"]
+            assert payload["text"] == "The first study observed reduced delay."
+            assert payload["retrieval_provenance"] == {
+                "provider": "l3s3",
+                "action_id": "rag-1",
+            }
+            return {"completed": True, "admitted_evidence_ids": ["evidence-1"]}
+
+    result = RoleRuntime(registry).execute(
+        role,
+        {"research_session_id": "session-1", "evidence_ids": ["evidence-1"]},
+        Policy(),
+        agent_run_id="run-1",
+        research_session_id="session-1",
+        role_context=context,
+    )
+
+    assert result.status == "completed"
+
+
+def test_claim_reasoning_policy_reads_accepted_evidence_text_and_existing_claims():
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    snapshot = _snapshot().model_copy(
+        update={
+            "accepted_evidence": (
+                EvidenceRecord(
+                    evidence_id="accepted-1",
+                    research_session_id="session-1",
+                    source_query_id="query-1",
+                    locator={
+                        "workspace_id": "workspace-1",
+                        "source_kind": "paper",
+                        "paper_id": "paper-1",
+                    },
+                    text_snapshot="Accepted evidence reports lower delay.",
+                    retrieval_provenance={"provider": "l3s3"},
+                    created_at=now,
+                ),
+            ),
+            "claims": (
+                ClaimRecord(
+                    claim_id="claim-1",
+                    research_session_id="session-1",
+                    statement="Existing claim about transit delay.",
+                    status="proposed",
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ),
+        }
+    )
+    registry = built_in_role_registry()
+    role = registry.get("claim_reasoning")
+    context = RoleContextProjector().project(snapshot, role)
+
+    class Policy:
+        def decide(self, definition, role_input, state, role_context, repair_context=None):
+            assert role_context.sections["accepted_evidence"][0]["text_snapshot"] == (
+                "Accepted evidence reports lower delay."
+            )
+            assert role_context.sections["claims"][0]["statement"] == (
+                "Existing claim about transit delay."
+            )
+            return {"completed": True, "proposed_claims": []}
+
+    result = RoleRuntime(registry).execute(
+        role,
+        {"research_session_id": "session-1", "accepted_evidence_ids": ["accepted-1"]},
         Policy(),
         agent_run_id="run-1",
         research_session_id="session-1",

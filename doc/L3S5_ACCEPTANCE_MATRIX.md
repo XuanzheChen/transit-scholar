@@ -17,10 +17,10 @@ cover RoleContext, repair feedback, persisted profiles, and in-flight recovery.
 | AC-010 | `tests/test_l3s5_final_synthesis_artifact.py::test_unstructured_or_malformed_final_output_fails_schema_validation` |
 | AC-011 | `tests/test_l3s5_final_synthesis_artifact.py::test_final_synthesis_returns_artifact_with_durable_source_provenance` |
 | AC-012 | `tests/test_l3s5_context_projection.py::test_same_snapshot_projects_observably_different_role_contexts` |
-| AC-013 | `tests/test_l3s5_retry_role_runtime.py::test_legacy_policy_without_role_context_is_not_core_conforming` |
-| AC-014 | `tests/test_l3s5_context_projection.py::test_same_snapshot_projects_observably_different_role_contexts` |
-| AC-015 | `tests/test_l3s5_context_projection.py::test_same_snapshot_projects_observably_different_role_contexts` |
-| AC-016 | `tests/test_l3s5_context_projection.py::test_same_snapshot_projects_observably_different_role_contexts` |
+| AC-013 | `tests/test_l3s5_retry_role_runtime.py::test_role_runtime_requires_a_valid_projected_role_context`; `tests/test_l3s5_retry_role_runtime.py::test_legacy_policy_without_role_context_is_not_core_conforming` |
+| AC-014 | `tests/test_l3s5_context_projection.py::test_query_planning_policy_reads_query_history_from_role_context` |
+| AC-015 | `tests/test_l3s5_context_projection.py::test_evidence_reasoning_policy_reads_envelope_evidence_text_and_provenance` |
+| AC-016 | `tests/test_l3s5_context_projection.py::test_claim_reasoning_policy_reads_accepted_evidence_text_and_existing_claims` |
 | AC-017 | `tests/test_l3s5_context_projection.py::test_omitted_context_has_no_role_input_access_path_or_memory_dependency` |
 | AC-018 | `tests/test_l3s5_role_execution_persistence.py::test_role_execution_can_be_reloaded_with_working_state_and_usage` |
 | AC-019 | `tests/test_l3s5_recovery_role_runtime.py::test_resume_after_committed_action_does_not_replay_mutation` |
@@ -39,8 +39,8 @@ cover RoleContext, repair feedback, persisted profiles, and in-flight recovery.
 | AC-032 | `tests/test_l3s5_actions_contract.py::test_executor_delegates_and_prompt_changes_cannot_bypass_validation` |
 | AC-033 | `tests/test_l3s5_context_projection.py::test_omitted_context_has_no_role_input_access_path_or_memory_dependency` |
 | AC-034 | `tests/test_l3s5_role_contracts.py::test_registry_rejects_unregistered_roles` |
-| AC-035 | `tests/test_l3s5_recovery_role_runtime.py::test_resume_after_committed_action_does_not_replay_mutation` |
-| AC-036 | `tests/test_l3s5_trace_role_runtime.py::test_committed_action_and_snapshot_survive_later_role_failure` |
+| AC-035 | `tests/test_l3s5_trace_role_runtime.py::test_role_executes_two_actions_before_completion_and_counts_both` |
+| AC-036 | `tests/test_l3s5_trace_role_runtime.py::test_zero_role_tool_budget_blocks_action_before_mutation`; `tests/test_l3s5_main_runtime_orchestration.py::test_main_consumes_role_action_artifacts_without_executing_role_actions` |
 | AC-037 | `tests/test_l3s5_trace_role_runtime.py::test_role_events_use_agent_trace_shape_and_role_identity` |
 | AC-038 | `tests/integration/test_l3s5_end_to_end_runtime.py::test_database_backed_role_chain_persists_ledgers_trace_and_provenance` |
 | AC-039 | `tests/test_l3s5_recovery_main_runtime.py::test_resume_does_not_replay_action_committed_before_main_boundary` |

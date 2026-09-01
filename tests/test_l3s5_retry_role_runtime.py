@@ -1,7 +1,10 @@
 """Retry and budget behavior for the plain-Python RoleRuntime."""
 
+import pytest
+
 from transit_scholar.layer3.agent import QueryPlanningOutput, built_in_role_registry
 from transit_scholar.layer3.runtime import ProviderRetryableError, RoleRuntime
+from transit_scholar.layer3.context import RoleContext
 
 
 def _execute(policy, **profile):
@@ -12,6 +15,7 @@ def _execute(policy, **profile):
         policy,
         agent_run_id="run-1",
         research_session_id="session-1",
+        role_context=RoleContext(role_id="query_planning", sections={}, omitted_sections=frozenset(), serialized_chars=2),
     )
 
 
@@ -107,6 +111,30 @@ def test_legacy_policy_without_role_context_is_not_core_conforming():
     assert result.status == "failed"
     assert result.working_state.retries.structured_output_repairs == 0
     assert "positional arguments" in result.failure_message
+
+
+def test_role_runtime_requires_a_valid_projected_role_context():
+    registry = built_in_role_registry()
+    runtime = RoleRuntime(registry)
+    arguments = (
+        registry.get("query_planning"),
+        {"research_session_id": "session-1", "research_question": "Question"},
+        ProviderRetryPolicy(),
+    )
+
+    with pytest.raises(TypeError, match="role_context"):
+        runtime.execute(
+            *arguments,
+            agent_run_id="run-1",
+            research_session_id="session-1",
+        )
+    with pytest.raises(TypeError, match="projected RoleContext"):
+        runtime.execute(
+            *arguments,
+            agent_run_id="run-1",
+            research_session_id="session-1",
+            role_context=None,
+        )
 
 
 def test_llm_budget_exhaustion_returns_structured_termination():

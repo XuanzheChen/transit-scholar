@@ -14,6 +14,7 @@ from transit_scholar.layer3.runtime import (
     InMemoryRoleExecutionStore,
     RoleRuntime,
 )
+from transit_scholar.layer3.context import RoleContext
 
 
 class Policy:
@@ -31,6 +32,7 @@ def test_role_execution_can_be_reloaded_with_working_state_and_usage():
         agent_run_id="run-1",
         research_session_id="session-1",
         role_execution_id="execution-1",
+        role_context=RoleContext(role_id="query_planning", sections={}, omitted_sections=frozenset(), serialized_chars=2),
     )
 
     restored = store.load("execution-1")

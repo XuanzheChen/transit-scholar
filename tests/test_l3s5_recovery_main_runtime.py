@@ -11,6 +11,7 @@ from transit_scholar.layer3.runtime import (
     MainResearchRuntime,
     RoleRuntime,
 )
+from transit_scholar.layer3.context import RoleContext
 
 
 class Crash(BaseException):
@@ -38,7 +39,12 @@ class ContextBuilder:
 
 class Projector:
     def project(self, snapshot, role):
-        return SimpleNamespace(role_id=role.role_id.value, sections={})
+        return RoleContext(
+            role_id=role.role_id.value,
+            sections={},
+            omitted_sections=frozenset(),
+            serialized_chars=2,
+        )
 
 
 class StateStore:

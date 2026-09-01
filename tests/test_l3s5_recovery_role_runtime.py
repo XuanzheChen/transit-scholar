@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from transit_scholar.layer3.agent import RoleRegistry, RoleRuntimeProfile, built_in_role_registry
 from transit_scholar.layer3.runtime import InMemoryRoleExecutionStore, RoleRuntime
+from transit_scholar.layer3.context import RoleContext
 
 
 class ActionOutput(BaseModel):
@@ -38,6 +39,7 @@ def _execute(runtime, role, policy):
         agent_run_id="run-1",
         research_session_id="session-1",
         role_execution_id="recoverable-role",
+        role_context=RoleContext(role_id=role.role_id.value, sections={}, omitted_sections=frozenset(), serialized_chars=2),
     )
 
 

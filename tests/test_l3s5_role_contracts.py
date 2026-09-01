@@ -9,6 +9,11 @@ from transit_scholar.layer3.agent import (
     built_in_role_registry,
 )
 from transit_scholar.layer3.runtime import MainRuntimeConfig, RoleRuntime
+from transit_scholar.layer3.context import RoleContext
+
+
+def _context(role_id="query_planning"):
+    return RoleContext(role_id=role_id, sections={}, omitted_sections=frozenset(), serialized_chars=2)
 
 
 class CompletingPolicy:
@@ -51,6 +56,7 @@ def test_main_and_role_budgets_are_independent_and_externally_overridable():
         CompletingPolicy(3),
         agent_run_id="run-1",
         research_session_id="session-1",
+        role_context=_context(),
     )
     assert result.status == "completed"
     assert result.working_state.current_step == 3
@@ -71,6 +77,7 @@ def test_same_runtime_contract_supports_one_and_multiple_steps():
             CompletingPolicy(complete_on),
             agent_run_id="run-1",
             research_session_id="session-1",
+            role_context=_context(),
         )
 
     assert execute(one_registry, 1).working_state.current_step == 1

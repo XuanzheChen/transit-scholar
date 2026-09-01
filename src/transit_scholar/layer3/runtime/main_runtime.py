@@ -263,24 +263,6 @@ class MainResearchRuntime:
                 continue
 
             output = role_result.output or {}
-            if (
-                self.action_planner is not None
-                and self.action_executor is not None
-                and not isinstance(self.role_runtime, RoleRuntime)
-            ):
-                previous_tool_calls = role_result.working_state.usage.tool_calls
-                for action in self.action_planner(role, output, projected):
-                    action_result = self.action_executor.execute(action, role)
-                    role_result.working_state.usage.tool_calls += 1
-                    role_result.working_state.intermediate_artifacts.append(
-                        {
-                            "action": self._json_value(action),
-                            "result": self._json_value(action_result),
-                        }
-                    )
-                usage.tool_calls += (
-                    role_result.working_state.usage.tool_calls - previous_tool_calls
-                )
             # Specialist actions are executed inside RoleRuntime. Retrieval
             # observations are recovered from the committed action boundary.
             if role_result.working_state.intermediate_artifacts:

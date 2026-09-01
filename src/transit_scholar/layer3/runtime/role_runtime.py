@@ -18,6 +18,7 @@ from transit_scholar.layer3.agent.models import (
     StructuredOutputRepairContext,
 )
 from transit_scholar.layer3.agent.registry import RoleRegistry
+from transit_scholar.layer3.context import RoleContext
 
 
 class RoleExecutionStore(Protocol):
@@ -107,12 +108,16 @@ class RoleRuntime:
         agent_run_id: str,
         research_session_id: str,
         role_execution_id: str | None = None,
-        role_context: object | None = None,
+        role_context: RoleContext,
         action_planner: Callable[
-            [RoleDefinition, BaseModel, object | None], Iterable[object]
+            [RoleDefinition, BaseModel, RoleContext], Iterable[object]
         ]
         | None = None,
     ) -> RoleResult:
+        if not isinstance(role_context, RoleContext):
+            raise TypeError("role_context must be a projected RoleContext")
+        if role_context.role_id != role_definition.role_id.value:
+            raise ValueError("RoleContext does not match the Role definition")
         registered = self.registry.get(role_definition.role_id)
         if registered != role_definition:
             raise ValueError("Role definition does not match the registered definition")
@@ -266,7 +271,7 @@ class RoleRuntime:
             failure_message=execution.failure_message,
         )
 
-    def _decide(self, execution, role, role_input, policy, role_context=None):
+    def _decide(self, execution, role, role_input, policy, role_context: RoleContext):
         profile = execution.runtime_profile
         provider_retries = 0
         repair_retries = 0

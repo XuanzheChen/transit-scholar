@@ -66,4 +66,4 @@ def test_recovery_resumes_inflight_but_not_completed():
 def test_synthesis_preserves_provenance_and_failures():
     snap=RunContextSnapshotBuilder().build(agent_run={"agent_run_id":"r","user_goal":"g"}, session_outcomes=[SessionOutcome(research_session_id="s",research_question="q",status="failed",failure_reason="x",evidence_refs=["e1"])])
     artifact=RunFinalSynthesisRole().synthesize(snap, answer_text="ok", evidence=["e1"])
-    assert artifact.status == "completed" and artifact.failure_metadata["failed_sessions"]
+    assert artifact.status != "completed" and artifact.failure_metadata["failed_sessions"]

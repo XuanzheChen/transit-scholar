@@ -12,6 +12,10 @@ from transit_scholar.layer3.run_context import (
 )
 
 
+class RunOrchestrationConfigurationError(RuntimeError):
+    """A run cannot create or start its authoritative research session."""
+
+
 class RunResearchRuntime:
     """Coordinate sessions one at a time; session behavior remains L3S5-owned."""
 
@@ -95,13 +99,18 @@ class RunResearchRuntime:
                 question, sid = (decision.proposed_questions[0] if decision.proposed_questions else snapshot.user_goal), uuid4().hex
             if len(outcomes) >= self.config.max_sessions:
                 return self._result(state, outcomes, plan, "max_sessions")
+            if self._requires_execution_service() and self.execution_service is None:
+                raise RunOrchestrationConfigurationError(
+                    "execution_service is required for L3S5 session execution"
+                )
             handoff = self.handoff_projector.project(snapshot, current_research_question=question, config=self.config)
             try:
-                # A real L3S5 runtime may only run against an authoritative
-                # L3S2 execution service. Callable test doubles remain valid.
-                if hasattr(self.session_runtime, "execute") and self.execution_service is None:
-                    raise RuntimeError("execution_service is required for L3S5 session execution")
                 session = self._create_session(agent_run_id=agent_run_id, research_session_id=sid, research_question=question, handoff_context=handoff)
+            except Exception as exc:
+                raise RunOrchestrationConfigurationError(
+                    f"failed to create research session {sid}: {exc}"
+                ) from exc
+            try:
                 state.current_research_session_id = sid
                 self._event(agent_run_id, "run.session.created", {"research_session_id": sid, "research_question": question})
                 self._persist(state, outcomes, plan)
@@ -202,6 +211,10 @@ class RunResearchRuntime:
                 raise RuntimeError("authoritative L3S2 ResearchSession does not match selected Session")
             return session
         return self.session_factory(**kwargs)
+
+    def _requires_execution_service(self) -> bool:
+        """Identify the real L3S5 runtime without rejecting test doubles."""
+        return self.session_runtime.__class__.__name__ == "MainResearchRuntime"
 
     def _adapt_outcome(self, raw: Any, sid: str, question: str) -> SessionOutcome:
         if isinstance(raw, SessionOutcome):

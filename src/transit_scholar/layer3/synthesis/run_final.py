@@ -28,6 +28,7 @@ class RunFinalSynthesisRole:
         *,
         answer_text: str | None = None,
         evidence: Iterable[Any] = (),
+        completion_authorized: bool = False,
     ) -> RunFinalResponseArtifact:
         observed = RunContextSnapshot.model_validate(snapshot)
         outcomes = [SessionOutcome.model_validate(item) for item in observed.session_outcomes]
@@ -54,7 +55,7 @@ class RunFinalSynthesisRole:
         if not answer_text or not answer_text.strip():
             raise ValueError("answer_text must not be empty")
         failed_outcomes = [outcome for outcome in outcomes if outcome.status != "completed"]
-        status = "completed"
+        status = "completed" if completion_authorized else "terminated"
         failure_metadata = {
             "failed_sessions": [
                 {

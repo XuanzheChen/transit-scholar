@@ -156,7 +156,7 @@ class MainResearchRuntime:
             or state.research_session_id != research_session_id
         ):
             raise ValueError("Persisted Main Runtime state belongs to another session")
-        handoff = session_handoff if session_handoff is not None else state.session_handoff
+        handoff = state.session_handoff if state.session_handoff is not None else session_handoff
         return self._execute_state(state, resumed=True, session_handoff=handoff)
 
     def _execute_state(self, state: MainRuntimeState, *, resumed: bool, session_handoff: object | None = None) -> MainRuntimeResult:
@@ -170,9 +170,9 @@ class MainResearchRuntime:
         status = state.status
         reason = state.termination_reason or "unknown"
         failure_message = state.failure_message
-        if session_handoff is None:
+        if state.session_handoff is not None:
             session_handoff = state.session_handoff
-        elif state.session_handoff is None:
+        elif session_handoff is not None:
             state.session_handoff = session_handoff
         next_role = state.next_role_id
         retrieved_evidence: list[object] = list(state.latest_retrieval_observation)

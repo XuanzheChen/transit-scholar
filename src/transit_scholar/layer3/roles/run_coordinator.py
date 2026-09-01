@@ -9,6 +9,42 @@ from transit_scholar.layer3.planning.models import ResearchPlan, RunDecision
 from transit_scholar.layer3.run_context import RunContextSnapshot
 
 
+class SemanticRunCoordinationPolicy:
+    """Production coordination adapter for governed semantic decision makers.
+
+    ``semantic_decider`` is intentionally injectable (an LLM/provider adapter,
+    or a deterministic test double).  The small local behavior is only a safe
+    degraded mode: it uses run state rather than lexical goal heuristics.
+    """
+
+    def __init__(self, semantic_decider: Callable[[RunContextSnapshot], Any] | None = None) -> None:
+        self.semantic_decider = semantic_decider
+
+    def __call__(self, snapshot: RunContextSnapshot) -> RunDecision:
+        if self.semantic_decider is not None:
+            decider = self.semantic_decider
+            if hasattr(decider, "decide"):
+                raw = decider.decide(snapshot)
+            else:
+                raw = decider(snapshot)
+            return RunDecision.model_validate(raw)
+        if snapshot.research_plan is not None:
+            plan = ResearchPlan.model_validate(snapshot.research_plan)
+            if any(item.status == "pending" for item in plan.items):
+                return RunDecision(mode="planned_research")
+        if snapshot.unresolved_items or snapshot.conflicting_items:
+            return RunDecision(
+                mode="planned_research",
+                proposed_questions=[*snapshot.unresolved_items, *snapshot.conflicting_items],
+            )
+        if not snapshot.session_outcomes:
+            return RunDecision(mode="direct_session", proposed_questions=[snapshot.user_goal])
+        return RunDecision(mode="complete", completion_reason="research_sufficient")
+
+
+SemanticRunCoordinatorPolicy = SemanticRunCoordinationPolicy
+
+
 class OptionalPlanningPolicy:
     """Small deterministic default policy, replaceable with a governed policy.
 
@@ -57,7 +93,7 @@ class RunCoordinatorRole:
     prompt_template = "Choose direct_session, planned_research, or complete from RunContextSnapshot."
 
     def __init__(self, policy: Callable[[RunContextSnapshot], Any] | None = None) -> None:
-        self.policy = policy or OptionalPlanningPolicy()
+        self.policy = policy if policy is not None else SemanticRunCoordinationPolicy()
 
     def decide(self, snapshot: RunContextSnapshot | Mapping[str, Any]) -> RunDecision:
         observed = RunContextSnapshot.model_validate(snapshot)
@@ -68,4 +104,4 @@ class RunCoordinatorRole:
         return self.decide(snapshot)
 
 
-__all__ = ["OptionalPlanningPolicy", "RunCoordinatorRole"]
+__all__ = ["OptionalPlanningPolicy", "SemanticRunCoordinationPolicy", "SemanticRunCoordinatorPolicy", "RunCoordinatorRole"]

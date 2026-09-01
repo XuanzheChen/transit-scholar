@@ -160,7 +160,7 @@ def test_projected_context_reaches_semantic_policy_decision():
     context = RoleContextProjector().project(_snapshot(), role)
 
     class Policy:
-        def decide(self, definition, role_input, state, role_context):
+        def decide(self, definition, role_input, state, role_context, repair_context=None):
             assert role_context is context
             assert role_context.sections["queries"][0]["query_text"] == "adaptive bus control"
             assert "claims" not in role_context.sections

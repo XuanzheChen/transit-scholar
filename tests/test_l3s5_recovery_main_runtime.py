@@ -54,17 +54,17 @@ class StateStore:
 
 
 class SelectQueryPolicy:
-    def decide(self, definition, role_input, state, role_context):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return {"completed": True, "next_role_id": "query_planning"}
 
 
 class CompleteCoordinatorPolicy:
-    def decide(self, definition, role_input, state, role_context):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return {"completed": True, "next_role_id": None}
 
 
 class QueryPolicy:
-    def decide(self, definition, role_input, state, role_context):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return {"completed": True, "proposed_queries": ["query"]}
 
 

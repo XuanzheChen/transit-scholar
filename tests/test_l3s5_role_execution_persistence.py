@@ -17,7 +17,7 @@ from transit_scholar.layer3.runtime import (
 
 
 class Policy:
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return QueryPlanningOutput(completed=True, proposed_queries=["query"])
 
 

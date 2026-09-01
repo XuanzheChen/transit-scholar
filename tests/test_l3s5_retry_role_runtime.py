@@ -19,7 +19,7 @@ class ProviderRetryPolicy:
     def __init__(self):
         self.calls = 0
 
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         self.calls += 1
         if self.calls == 1:
             raise ProviderRetryableError("temporary outage")
@@ -30,7 +30,7 @@ class RepairPolicy:
     def __init__(self):
         self.calls = 0
 
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         self.calls += 1
         if self.calls == 1:
             return {"completed": True, "unexpected": "field"}
@@ -92,6 +92,23 @@ def test_structured_output_repair_receives_validation_feedback():
     assert feedback.attempt == 1
 
 
+def test_legacy_policy_without_role_context_is_not_core_conforming():
+    class LegacyPolicy:
+        def decide(self, definition, role_input, state):
+            return {"completed": True, "proposed_queries": ["query"]}
+
+    result = _execute(
+        LegacyPolicy(),
+        max_steps=1,
+        max_llm_calls=2,
+        structured_output_repair_limit=1,
+    )
+
+    assert result.status == "failed"
+    assert result.working_state.retries.structured_output_repairs == 0
+    assert "positional arguments" in result.failure_message
+
+
 def test_llm_budget_exhaustion_returns_structured_termination():
     result = _execute(
         ProviderRetryPolicy(),
@@ -107,7 +124,7 @@ def test_llm_budget_exhaustion_returns_structured_termination():
 
 def test_policy_failure_is_isolated_in_role_result():
     class FailingPolicy:
-        def decide(self, definition, role_input, state):
+        def decide(self, definition, role_input, state, role_context, repair_context=None):
             raise RuntimeError("role-only failure")
 
     result = _execute(FailingPolicy(), max_steps=1, max_llm_calls=1, max_failures=1)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -137,17 +136,27 @@ class RoleRuntime:
                 return self._result(execution)
             if execution.working_state.operation_in_flight is not None:
                 abandoned = execution.working_state.operation_in_flight
-                execution.working_state.intermediate_artifacts.append(
-                    {
-                        "action": abandoned.get("action"),
-                        "failure": "in_flight_operation_abandoned_during_recovery",
-                    }
-                )
-                execution.working_state.usage.failures += 1
                 execution.working_state.operation_in_flight = None
-                self._boundary(
-                    execution, "role.recovery", classification="in_flight_operation_abandoned"
-                )
+                if abandoned.get("kind") == "provider":
+                    self._boundary(
+                        execution, "role.recovery", classification="provider_call_abandoned"
+                    )
+                else:
+                    execution.working_state.intermediate_artifacts.append(
+                        {
+                            "action": abandoned.get("action"),
+                            "failure": "in_flight_action_abandoned_during_recovery",
+                        }
+                    )
+                    execution.working_state.usage.failures += 1
+                    execution.end(
+                        status="terminated",
+                        reason="in_flight_action_abandoned",
+                        failure_message="Recovered an action with unknown commit outcome",
+                    )
+                    self._boundary(
+                        execution, "role.recovery", classification="in_flight_action_abandoned"
+                    )
             else:
                 self._boundary(execution, "role.recovery", classification="boundary_resumed")
 
@@ -211,7 +220,7 @@ class RoleRuntime:
             execution.working_state.usage.failures += 1
             reason = (
                 "max_failures"
-                if execution.working_state.usage.failures >= registered.runtime_profile.max_failures
+                if execution.working_state.usage.failures >= execution.runtime_profile.max_failures
                 else "unrecoverable_failure"
             )
             execution.end(status="failed", reason=reason, failure_message=str(exc))
@@ -267,21 +276,13 @@ class RoleRuntime:
                 raise _BudgetTermination("max_llm_calls")
             execution.working_state.usage.llm_calls += 1
             try:
-                parameters = inspect.signature(policy.decide).parameters
-                if len(parameters) >= 5:
-                    raw_output = policy.decide(
-                        role,
-                        role_input,
-                        execution.working_state,
-                        role_context,
-                        repair_context,
-                    )
-                elif len(parameters) >= 4:
-                    raw_output = policy.decide(
-                        role, role_input, execution.working_state, role_context
-                    )
-                else:
-                    raw_output = policy.decide(role, role_input, execution.working_state)
+                raw_output = policy.decide(
+                    role,
+                    role_input,
+                    execution.working_state,
+                    role_context,
+                    repair_context,
+                )
             except ProviderRetryableError:
                 if provider_retries >= profile.provider_retry_limit:
                     raise

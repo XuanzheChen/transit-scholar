@@ -220,7 +220,7 @@ def test_cancellation_is_deterministic_without_invoking_a_role():
 
 
 class TwoStepCoordinatorPolicy:
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return {
             "completed": state.current_step == 1,
             "next_role_id": None,
@@ -261,7 +261,7 @@ def test_role_budget_is_not_clamped_to_main_remaining_budget():
 
 
 class InvalidCoordinatorPolicy:
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return {"completed": False, "next_role_id": "invented_role"}
 
 

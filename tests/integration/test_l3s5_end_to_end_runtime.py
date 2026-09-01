@@ -25,7 +25,7 @@ class _Policy:
     def __init__(self):
         self.calls = {role: 0 for role in RoleId}
 
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         self.calls[definition.role_id] += 1
         if definition.role_id == RoleId.RESEARCH_COORDINATOR:
             sequence = [

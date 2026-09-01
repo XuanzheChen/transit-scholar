@@ -15,7 +15,7 @@ class CompletingPolicy:
     def __init__(self, complete_on: int) -> None:
         self.complete_on = complete_on
 
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return QueryPlanningOutput(
             completed=state.current_step + 1 >= self.complete_on,
             proposed_queries=[role_input.research_question],

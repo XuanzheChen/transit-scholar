@@ -21,7 +21,7 @@ class TraceSink:
 
 
 class CompletingPolicy:
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         return QueryPlanningOutput(completed=True, proposed_queries=["query"])
 
 
@@ -58,7 +58,7 @@ class ActionOutput(BaseModel):
 
 
 class ScriptedPolicy:
-    def decide(self, definition, role_input, state):
+    def decide(self, definition, role_input, state, role_context, repair_context=None):
         if state.current_step == 0:
             return ActionOutput(actions=[{"id": "committed"}])
         raise RuntimeError("failure after commit")

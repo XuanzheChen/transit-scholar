@@ -269,7 +269,7 @@ class RolePolicy(Protocol):
         definition: RoleDefinition,
         role_input: BaseModel,
         state: RoleWorkingState,
-        role_context: object | None = None,
+        role_context: object,
         repair_context: StructuredOutputRepairContext | None = None,
     ) -> BaseModel: ...
 

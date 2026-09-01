@@ -53,7 +53,18 @@ class RunFinalSynthesisRole:
             answer_text = "\n\n".join(parts) or observed.user_goal
         if not answer_text or not answer_text.strip():
             raise ValueError("answer_text must not be empty")
-        status = "completed" if outcomes and all(o.status == "completed" for o in outcomes) else "completed"
+        failed_outcomes = [outcome for outcome in outcomes if outcome.status != "completed"]
+        status = "completed"
+        failure_metadata = {
+            "failed_sessions": [
+                {
+                    "research_session_id": outcome.research_session_id,
+                    "status": outcome.status,
+                    "failure_reason": outcome.failure_reason,
+                }
+                for outcome in failed_outcomes
+            ]
+        }
         return RunFinalResponseArtifact(
             answer_text=answer_text.strip(),
             citation_refs=refs,
@@ -61,6 +72,7 @@ class RunFinalSynthesisRole:
             contributing_session_ids=[o.research_session_id for o in outcomes],
             status=status,
             completion_reason="research_sufficient",
+            failure_metadata=failure_metadata,
         )
 
     @staticmethod

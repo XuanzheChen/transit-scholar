@@ -37,6 +37,8 @@ class RoleContextProjector:
         truncated = False
         for name in sorted(policy.included_sections):
             value = snapshot_data[name]
+            if name == "session_handoff" and value is None:
+                continue
             if policy.max_items_per_section is not None and isinstance(value, list):
                 limited = value[: policy.max_items_per_section]
                 truncated = truncated or len(limited) != len(value)

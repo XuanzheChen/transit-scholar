@@ -36,6 +36,7 @@ class RuntimeContextSnapshotBuilder:
         agent_run_id: str,
         research_session_id: str,
         retrieved_evidence: Iterable[ResearchEvidence | dict[str, Any]] = (),
+        session_handoff: Any | None = None,
     ) -> RuntimeContextSnapshot:
         run = self.execution.get_agent_run(agent_run_id)
         research_session = self.execution.get_research_session(
@@ -65,6 +66,7 @@ class RuntimeContextSnapshotBuilder:
             accepted_evidence=tuple(accepted),
             claims=tuple(claims),
             claim_evidence_links=tuple(links),
+            session_handoff=session_handoff,
         )
 
     @staticmethod

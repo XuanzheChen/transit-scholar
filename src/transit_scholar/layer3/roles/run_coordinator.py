@@ -13,9 +13,6 @@ class OptionalPlanningPolicy:
     """Small deterministic default policy, replaceable with a governed policy."""
 
     def __call__(self, snapshot: RunContextSnapshot) -> RunDecision:
-        outcomes = snapshot.session_outcomes
-        if not outcomes:
-            return RunDecision(mode="direct_session")
         if snapshot.research_plan is not None:
             plan = ResearchPlan.model_validate(snapshot.research_plan)
             pending = [item for item in plan.items if item.status == "pending"]

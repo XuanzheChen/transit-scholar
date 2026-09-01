@@ -72,6 +72,7 @@ class ResearchCoordinatorRole(RoleDefinition):
             context_policy=ContextPolicy(
                 included_sections={
                     "session",
+                    "session_handoff",
                     "queries",
                     "retrieved_evidence",
                     "accepted_evidence",
@@ -92,7 +93,7 @@ class QueryPlanningRole(RoleDefinition):
             role_id=RoleId.QUERY_PLANNING,
             description="Propose and refine queries from the current research state.",
             prompt_template=QUERY_PLANNING_PROMPT,
-            context_policy=ContextPolicy(included_sections={"session", "queries"}),
+            context_policy=ContextPolicy(included_sections={"session", "queries", "session_handoff"}),
             input_contract=QueryPlanningInput,
             output_contract=QueryPlanningOutput,
             allowed_actions={"CREATE_QUERY", "UPDATE_QUERY"},

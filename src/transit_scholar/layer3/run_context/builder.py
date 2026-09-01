@@ -54,10 +54,17 @@ class SessionHandoffProjector:
         result = SessionHandoffContext(run_goal=snapshot.user_goal, current_research_question=current_research_question,
             prior_session_summaries=summaries, relevant_prior_claims=claims, unresolved_or_conflicting_items=items,
             provenance_refs=provenance)
-        while len(result.model_dump_json()) > cfg.max_serialized_chars and (result.provenance_refs or result.relevant_prior_claims or result.prior_session_summaries):
+        if len(result.model_dump_json()) > cfg.max_serialized_chars:
+            required = SessionHandoffContext(run_goal=snapshot.user_goal, current_research_question=current_research_question)
+            if len(required.model_dump_json()) > cfg.max_serialized_chars:
+                raise ValueError("max_serialized_chars is too small for required handoff content")
+        while len(result.model_dump_json()) > cfg.max_serialized_chars and (result.provenance_refs or result.relevant_prior_claims or result.prior_session_summaries or result.unresolved_or_conflicting_items):
             if result.provenance_refs: result.provenance_refs.pop()
             elif result.relevant_prior_claims: result.relevant_prior_claims.pop()
-            else: result.prior_session_summaries.pop()
+            elif result.prior_session_summaries: result.prior_session_summaries.pop()
+            else: result.unresolved_or_conflicting_items.pop()
+        if len(result.model_dump_json()) > cfg.max_serialized_chars:
+            raise ValueError("max_serialized_chars is too small for handoff content")
         return result
 
     project_handoff = project

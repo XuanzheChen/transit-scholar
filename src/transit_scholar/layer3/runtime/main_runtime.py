@@ -130,11 +130,11 @@ class MainResearchRuntime:
         self.is_cancelled = is_cancelled or (lambda: False)
         self.state_store = state_store
 
-    def execute(self, *, agent_run_id: str, research_session_id: str) -> MainRuntimeResult:
+    def execute(self, *, agent_run_id: str, research_session_id: str, session_handoff: object | None = None) -> MainRuntimeResult:
         state = MainRuntimeState(
             agent_run_id=agent_run_id, research_session_id=research_session_id
         )
-        return self._execute_state(state, resumed=False)
+        return self._execute_state(state, resumed=False, session_handoff=session_handoff)
 
     def resume_session(
         self, *, agent_run_id: str, research_session_id: str
@@ -153,9 +153,9 @@ class MainResearchRuntime:
             or state.research_session_id != research_session_id
         ):
             raise ValueError("Persisted Main Runtime state belongs to another session")
-        return self._execute_state(state, resumed=True)
+        return self._execute_state(state, resumed=True, session_handoff=None)
 
-    def _execute_state(self, state: MainRuntimeState, *, resumed: bool) -> MainRuntimeResult:
+    def _execute_state(self, state: MainRuntimeState, *, resumed: bool, session_handoff: object | None = None) -> MainRuntimeResult:
         agent_run_id = state.agent_run_id
         research_session_id = state.research_session_id
         run = self.execution_service.get_agent_run(agent_run_id)
@@ -192,11 +192,14 @@ class MainResearchRuntime:
                 status, reason = self._failure_outcome(usage)
                 break
             try:
-                snapshot = self.context_builder.build(
-                    agent_run_id=agent_run_id,
-                    research_session_id=research_session_id,
-                    retrieved_evidence=retrieved_evidence,
-                )
+                build_kwargs = {
+                    "agent_run_id": agent_run_id,
+                    "research_session_id": research_session_id,
+                    "retrieved_evidence": retrieved_evidence,
+                }
+                if session_handoff is not None:
+                    build_kwargs["session_handoff"] = session_handoff
+                snapshot = self.context_builder.build(**build_kwargs)
                 projected = self.projector.project(snapshot, role)
                 role_input = self.role_input_factory(next_role, projected)
                 role_execution_id = state.current_role_execution_id or uuid4().hex

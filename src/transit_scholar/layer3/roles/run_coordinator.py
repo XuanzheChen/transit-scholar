@@ -24,13 +24,14 @@ class SemanticRunCoordinationPolicy:
     or a deterministic test double).  The small local behavior is only a safe
     degraded mode: it uses run state rather than lexical goal heuristics.
 
-    Governed structured deciders receive a bounded ``RunCoordinatorContext``;
-    plain injected callables retain the historical snapshot contract.
+    Every injected semantic decider receives a bounded
+    ``RunCoordinatorContext``. Deterministic policies that need the complete
+    snapshot must be supplied through the explicit ``policy`` boundary.
     """
 
     def __init__(
         self,
-        semantic_decider: Callable[[RunContextSnapshot | RunCoordinatorContext], Any]
+        semantic_decider: Callable[[RunCoordinatorContext], Any]
         | None = None,
         *,
         context_projector: RunCoordinatorContextProjector | None = None,
@@ -41,26 +42,10 @@ class SemanticRunCoordinationPolicy:
             context_projector or configured_projector or RunCoordinatorContextProjector()
         )
 
-    @staticmethod
-    def _uses_projected_context(decider: Any) -> bool:
-        """Identify governed deciders whose boundary is the coordination view.
-
-        Plain injected callables retain the historical snapshot contract. A
-        custom adapter can opt into the production boundary by exposing the
-        same marker used by structured semantic deciders.
-        """
-        return (
-            isinstance(decider, StructuredRunSemanticDecider)
-            or bool(getattr(decider, "accepts_projected_context", False))
-            or callable(getattr(decider, "decide", None))
-        )
-
     def __call__(self, snapshot: RunContextSnapshot) -> RunDecision:
         if self.semantic_decider is not None:
             decider = self.semantic_decider
-            context: RunContextSnapshot | RunCoordinatorContext = snapshot
-            if self._uses_projected_context(decider):
-                context = self.context_projector.project(snapshot)
+            context = self.context_projector.project(snapshot)
             if hasattr(decider, "decide"):
                 raw = decider.decide(context)
             else:
@@ -142,7 +127,7 @@ class RunCoordinatorRole:
         self,
         policy: Callable[[RunContextSnapshot], Any] | None = None,
         *,
-        semantic_decider: Callable[[RunContextSnapshot | RunCoordinatorContext], Any]
+        semantic_decider: Callable[[RunCoordinatorContext], Any]
         | None = None,
         context_projector: RunCoordinatorContextProjector | None = None,
     ) -> None:
@@ -172,7 +157,7 @@ class RunCoordinatorRole:
 
 def build_run_coordinator(
     *,
-    semantic_decider: Callable[[RunContextSnapshot | RunCoordinatorContext], Any]
+    semantic_decider: Callable[[RunCoordinatorContext], Any]
     | None = None,
     llm_client: Any | None = None,
     llm_config: Any | None = None,
@@ -224,7 +209,7 @@ class RunCoordinatorFactory:
     def __init__(
         self,
         *,
-        semantic_decider: Callable[[RunContextSnapshot | RunCoordinatorContext], Any]
+        semantic_decider: Callable[[RunCoordinatorContext], Any]
         | None = None,
         llm_client: Any | None = None,
         llm_config: Any | None = None,

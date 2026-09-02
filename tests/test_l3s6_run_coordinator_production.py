@@ -22,23 +22,45 @@ def _snapshot(goal: str) -> dict[str, str]:
 def test_production_composition_invokes_injected_semantic_decider():
     calls = []
 
-    def decider(snapshot):
-        calls.append(snapshot)
-        return {"mode": "direct_session", "proposed_questions": [snapshot.user_goal]}
+    def decider(context):
+        calls.append(context)
+        return {"mode": "direct_session", "proposed_questions": [context.user_goal]}
 
     coordinator = build_run_coordinator(semantic_decider=decider)
-    decision = coordinator(_snapshot("focused question"))
+    snapshot = RunContextSnapshotBuilder().build(
+        agent_run={"agent_run_id": "run-1", "user_goal": "focused question"},
+        session_outcomes=[
+            SessionOutcome(
+                research_session_id="session-1",
+                research_question="question",
+                status="completed",
+                final_summary="bounded summary",
+                source_provenance=[
+                    {
+                        "text_snapshot": "SECRET-EVIDENCE-TEXT",
+                        "retrieval_history": [{"query": "private"}],
+                        "agent_trace": [{"event": "private"}],
+                    }
+                ],
+            )
+        ],
+    )
+    decision = coordinator(snapshot)
 
     assert decision == RunDecision(mode="direct_session", proposed_questions=["focused question"])
-    assert [snapshot.user_goal for snapshot in calls] == ["focused question"]
+    assert [context.user_goal for context in calls] == ["focused question"]
+    assert isinstance(calls[0], RunCoordinatorContext)
+    serialized = calls[0].model_dump_json()
+    assert "SECRET-EVIDENCE-TEXT" not in serialized
+    assert "source_provenance" not in serialized
     assert isinstance(coordinator.policy, SemanticRunCoordinationPolicy)
     assert coordinator.policy.semantic_decider is decider
 
 
 def test_same_production_composition_can_route_fresh_goals_differently():
-    def decider(snapshot):
-        mode = "planned_research" if snapshot.user_goal.startswith("broad") else "direct_session"
-        return {"mode": mode, "proposed_questions": [snapshot.user_goal]}
+    def decider(context):
+        mode = "planned_research" if context.user_goal.startswith("broad") else "direct_session"
+        return {"mode": mode, "proposed_questions": [context.user_goal]}
 
     coordinator = build_run_coordinator(semantic_decider=decider)
 

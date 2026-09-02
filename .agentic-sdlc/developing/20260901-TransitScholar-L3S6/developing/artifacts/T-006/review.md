@@ -1,4 +1,4 @@
-# Supervisor Review
+# Historical Supervisor Review (Contract v5)
 
 - Contract: v5
 - Task: T-006
@@ -8,14 +8,14 @@
 - Executor evidence: 89 lower-layer L3S2/L3S4/L3S5 regressions passed; AC-001 through AC-022 mapped in coding evidence.
 - Known environment limitation: PowerShell wildcard expansion and global temp permissions required explicit file discovery/repository-local execution; equivalent tests passed.
 
-- Contract: v4
+# Historical Supervisor Review (Contract v4)
 - Task: T-006
 - Outcome: passed
 - Scope: final task produced no product changes; all prior task changes remain within v4 Allowed Scope after removing out-of-scope package export edits.
 - Verification: 22 L3S6 unit/integration tests passed; 89 selected L3S2/L3S4/L3S5 unit/integration regressions passed; `git diff --check` passed.
 - Note: PowerShell does not expand pytest globs, so explicit discovered test paths were used.
 
-- Contract: v1
+# Historical Supervisor Review (Contract v1)
 - Task: T-006
 - Outcome: passed
 - Scope: Synthesis changes are limited to `src/transit_scholar/layer3/synthesis/**` and the predefined-role export, all within Allowed Scope.

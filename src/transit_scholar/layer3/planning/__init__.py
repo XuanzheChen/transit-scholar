@@ -6,4 +6,13 @@ from .models import (
     ResearchPlanItem,
     RunDecision,
 )
-__all__ = ["PlanItemStatus", "ResearchPlan", "ResearchPlanItem", "RunDecision"]
+from .semantic import LLMRunSemanticDecider, StructuredRunSemanticDecider
+
+__all__ = [
+    "LLMRunSemanticDecider",
+    "PlanItemStatus",
+    "ResearchPlan",
+    "ResearchPlanItem",
+    "RunDecision",
+    "StructuredRunSemanticDecider",
+]

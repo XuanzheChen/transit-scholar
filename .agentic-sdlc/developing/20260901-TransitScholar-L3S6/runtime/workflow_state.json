@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "contract_version": 4,
+  "contract_version": 5,
   "current_task": null,
   "status": "workflow_passed",
-  "attempt": 0,
+  "attempt": 1,
   "last_completed_task": "T-006",
   "last_stage": "supervisor_review",
   "execution_owner": "executor",
@@ -16,7 +16,7 @@
       "changed_at": "2026-09-01T09:06:11.614359+00:00"
     }
   ],
-  "updated_at": "2026-09-01T16:02:00+00:00",
+  "updated_at": "2026-09-02T03:20:00+00:00",
   "retry_exhaustion_history": [
     {
       "contract_version": 1,
@@ -42,9 +42,16 @@
     }
   ],
   "supervisor_completion": {
-    "contract_version": 4,
-    "tasks_completed": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006"],
+    "contract_version": 5,
+    "tasks_completed": [
+      "T-001",
+      "T-002",
+      "T-003",
+      "T-004",
+      "T-005",
+      "T-006"
+    ],
     "acceptance": "AC-001..AC-026",
-    "verification": "22 L3S6 tests passed; 89 lower-layer L3S2/L3S4/L3S5 tests passed; diff scope verified"
+    "verification": "40 L3S6 tests passed independently; 89 lower-layer L3S2/L3S4/L3S5 tests passed; diff scope verified"
   }
 }

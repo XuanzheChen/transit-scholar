@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from transit_scholar.layer3.planning.models import ResearchPlan, RunDecision
+from transit_scholar.layer3.planning import (
+    ResearchPlan,
+    RunDecision,
+    StructuredRunSemanticDecider,
+)
 from transit_scholar.layer3.run_context import RunContextSnapshot
 
 
@@ -46,12 +50,12 @@ SemanticRunCoordinatorPolicy = SemanticRunCoordinationPolicy
 
 
 class OptionalPlanningPolicy:
-    """Small deterministic default policy, replaceable with a governed policy.
+    """Small deterministic fallback policy for tests or degraded mode.
 
-    A fresh run still needs an initial semantic route.  In production this
-    lightweight policy provides a deterministic baseline until a richer policy
-    is injected; importantly, it never treats an empty prior state as proof
-    that the user's goal is already complete.
+    A fresh run still needs an initial route. This policy remains available for
+    explicit injection, but the production composition uses a semantic
+    decision-maker instead; importantly, it never treats an empty prior state
+    as proof that the user's goal is already complete.
     """
 
     _planning_markers = (
@@ -92,7 +96,16 @@ class RunCoordinatorRole:
     role_id = "run_coordinator"
     prompt_template = "Choose direct_session, planned_research, or complete from RunContextSnapshot."
 
-    def __init__(self, policy: Callable[[RunContextSnapshot], Any] | None = None) -> None:
+    def __init__(
+        self,
+        policy: Callable[[RunContextSnapshot], Any] | None = None,
+        *,
+        semantic_decider: Callable[[RunContextSnapshot], Any] | None = None,
+    ) -> None:
+        if policy is not None and semantic_decider is not None:
+            raise ValueError("provide policy or semantic_decider, not both")
+        if semantic_decider is not None:
+            policy = SemanticRunCoordinationPolicy(semantic_decider=semantic_decider)
         self.policy = policy if policy is not None else SemanticRunCoordinationPolicy()
 
     def decide(self, snapshot: RunContextSnapshot | Mapping[str, Any]) -> RunDecision:
@@ -104,4 +117,78 @@ class RunCoordinatorRole:
         return self.decide(snapshot)
 
 
-__all__ = ["OptionalPlanningPolicy", "SemanticRunCoordinationPolicy", "SemanticRunCoordinatorPolicy", "RunCoordinatorRole"]
+def build_run_coordinator(
+    *,
+    semantic_decider: Callable[[RunContextSnapshot], Any] | None = None,
+    llm_client: Any | None = None,
+    llm_config: Any | None = None,
+    policy: Callable[[RunContextSnapshot], Any] | None = None,
+) -> RunCoordinatorRole:
+    """Build the production coordinator with an explicit semantic boundary.
+
+    Supplying ``policy`` is an explicit override for deterministic tests or a
+    deliberately selected degraded mode. Without it, the role always receives
+    a concrete structured semantic decider; no implicit deterministic policy is
+    selected by this production composition.
+    """
+    if policy is not None and any(value is not None for value in (semantic_decider, llm_client, llm_config)):
+        raise ValueError("policy cannot be combined with semantic coordinator dependencies")
+    if policy is not None:
+        return RunCoordinatorRole(policy=policy)
+    decider = (
+        semantic_decider
+        if semantic_decider is not None
+        else StructuredRunSemanticDecider(llm_client, llm_config=llm_config)
+    )
+    return RunCoordinatorRole(semantic_decider=decider)
+
+
+build_production_run_coordinator = build_run_coordinator
+create_production_run_coordinator = build_run_coordinator
+
+
+def build_fallback_run_coordinator(
+    policy: Callable[[RunContextSnapshot], Any] | None = None,
+) -> RunCoordinatorRole:
+    """Build a coordinator using an explicitly selected deterministic policy."""
+    return RunCoordinatorRole(
+        policy=policy if policy is not None else OptionalPlanningPolicy()
+    )
+
+
+class RunCoordinatorFactory:
+    """Reusable production composition object with injectable LLM boundary."""
+
+    def __init__(
+        self,
+        *,
+        semantic_decider: Callable[[RunContextSnapshot], Any] | None = None,
+        llm_client: Any | None = None,
+        llm_config: Any | None = None,
+    ) -> None:
+        self.semantic_decider = semantic_decider
+        self.llm_client = llm_client
+        self.llm_config = llm_config
+
+    def build(self) -> RunCoordinatorRole:
+        return build_run_coordinator(
+            semantic_decider=self.semantic_decider,
+            llm_client=self.llm_client,
+            llm_config=self.llm_config,
+        )
+
+    __call__ = build
+
+
+__all__ = [
+    "OptionalPlanningPolicy",
+    "RunCoordinatorFactory",
+    "RunCoordinatorRole",
+    "SemanticRunCoordinationPolicy",
+    "SemanticRunCoordinatorPolicy",
+    "StructuredRunSemanticDecider",
+    "build_fallback_run_coordinator",
+    "build_production_run_coordinator",
+    "build_run_coordinator",
+    "create_production_run_coordinator",
+]

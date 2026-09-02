@@ -51,7 +51,14 @@ def test_real_l3s2_creation_precedes_l3s5_and_provenance_adapts():
 
 
 def test_missing_execution_service_is_run_failure_without_fake_outcome():
-    runtime = type("MainResearchRuntime", (), {"execute": lambda self, **kwargs: None})()
+    runtime = type(
+        "AuthoritativeRuntime",
+        (),
+        {
+            "requires_authoritative_session": True,
+            "execute": lambda self, **kwargs: None,
+        },
+    )()
     try:
         RunResearchRuntime(session_runtime=runtime, coordinator=lambda snapshot: RunDecision(mode="direct_session", proposed_questions=["q"])).execute(agent_run_id="r", user_goal="g")
     except RunOrchestrationConfigurationError:

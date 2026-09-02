@@ -12,6 +12,30 @@ from transit_scholar.layer3.run_context import (
 )
 
 
+_CAPABILITY_UNSET = object()
+_RUNTIME_CAPABILITIES = (
+    "requires_authoritative_session",
+    "requires_execution_service",
+)
+_RUNTIME_WRAPPER_ATTRIBUTES = (
+    "__wrapped__",
+    "wrapped",
+    "wrapped_runtime",
+    "_wrapped_runtime",
+    "runtime",
+    "_runtime",
+    "target",
+    "_target",
+    "inner",
+    "_inner",
+    "delegate",
+    "_delegate",
+    "session_runtime",
+    "_session_runtime",
+    "func",
+)
+
+
 class RunOrchestrationConfigurationError(RuntimeError):
     """A run cannot create or start its authoritative research session."""
 
@@ -24,9 +48,11 @@ class RunResearchRuntime:
                  execution_service: Any | None = None, ledger_service: Any | None = None,
                  config: RunRuntimeConfig | None = None, snapshot_builder: Any | None = None,
                  handoff_projector: Any | None = None, trace: Any | None = None,
-                 is_cancelled: Callable[[], bool] | None = None, state_store: Any | None = None):
+                 is_cancelled: Callable[[], bool] | None = None, state_store: Any | None = None,
+                 requires_execution_service: bool | None = None):
         self.session_runtime, self.coordinator, self.synthesis = session_runtime, coordinator, synthesis
         self.execution_service, self.ledger_service = execution_service, ledger_service
+        self._requires_execution_service_override = requires_execution_service
         self.session_factory = session_factory or self._default_session
         self.config = config or RunRuntimeConfig()
         self.snapshot_builder = snapshot_builder or RunContextSnapshotBuilder()
@@ -110,11 +136,11 @@ class RunResearchRuntime:
                 raise RunOrchestrationConfigurationError(
                     f"failed to create research session {sid}: {exc}"
                 ) from exc
+            state.current_research_session_id = sid
+            self._persist(state, outcomes, plan)
+            self._event(agent_run_id, "run.session.created", {"research_session_id": sid, "research_question": question})
+            self._event(agent_run_id, "run.session.started", {"research_session_id": sid}, sid)
             try:
-                state.current_research_session_id = sid
-                self._event(agent_run_id, "run.session.created", {"research_session_id": sid, "research_question": question})
-                self._persist(state, outcomes, plan)
-                self._event(agent_run_id, "run.session.started", {"research_session_id": sid}, sid)
                 if hasattr(self.session_runtime, "execute"):
                     raw = self.session_runtime.execute(agent_run_id=agent_run_id, research_session_id=sid, session_handoff=handoff)
                 else:
@@ -213,8 +239,103 @@ class RunResearchRuntime:
         return self.session_factory(**kwargs)
 
     def _requires_execution_service(self) -> bool:
-        """Identify the real L3S5 runtime without rejecting test doubles."""
-        return self.session_runtime.__class__.__name__ == "MainResearchRuntime"
+        """Return whether this runtime has opted into authoritative Session persistence."""
+        capability = self._runtime_capability()
+        if capability is True:
+            return True
+        if self._requires_execution_service_override is not None:
+            return bool(self._requires_execution_service_override)
+        return False
+
+    def _runtime_capability(self) -> bool | None:
+        pending = [self.session_runtime]
+        seen: set[int] = set()
+        observed = False
+        while pending:
+            runtime = pending.pop()
+            runtime_id = id(runtime)
+            if runtime_id in seen:
+                continue
+            seen.add(runtime_id)
+
+            if self._is_main_research_runtime(runtime):
+                return True
+            capability = self._read_capability(runtime)
+            if capability is not None:
+                observed = True
+                if capability:
+                    return True
+
+            owner = self._safe_getattr(runtime, "__self__")
+            if owner is not _CAPABILITY_UNSET and self._looks_like_runtime(owner):
+                pending.append(owner)
+
+            for attribute in _RUNTIME_WRAPPER_ATTRIBUTES:
+                wrapped = self._safe_getattr(runtime, attribute)
+                if wrapped is not _CAPABILITY_UNSET and self._looks_like_runtime(wrapped):
+                    pending.append(wrapped)
+            try:
+                values = vars(runtime).values()
+            except TypeError:
+                values = ()
+            for wrapped in values:
+                if self._looks_like_runtime(wrapped):
+                    pending.append(wrapped)
+        return False if observed else None
+
+    @staticmethod
+    def _is_main_research_runtime(runtime: Any) -> bool:
+        try:
+            from .main_runtime import MainResearchRuntime
+            return isinstance(runtime, MainResearchRuntime)
+        except (ImportError, TypeError):
+            return False
+
+    @classmethod
+    def _read_capability(cls, runtime: Any) -> bool | None:
+        observed = False
+        for attribute in _RUNTIME_CAPABILITIES:
+            value = cls._safe_getattr(runtime, attribute)
+            if value is _CAPABILITY_UNSET:
+                continue
+            if callable(value):
+                try:
+                    value = value()
+                except Exception:
+                    continue
+            if value is None:
+                continue
+            observed = True
+            if bool(value):
+                return True
+        return False if observed else None
+
+    @classmethod
+    def _looks_like_runtime(cls, value: Any) -> bool:
+        if value is None or isinstance(value, (str, bytes, int, float, bool)):
+            return False
+        if cls._is_main_research_runtime(value):
+            return True
+        if cls._read_capability(value) is not None:
+            return True
+        if cls._safe_getattr(value, "__wrapped__") is not _CAPABILITY_UNSET:
+            return True
+        owner = cls._safe_getattr(value, "__self__")
+        if owner is not _CAPABILITY_UNSET and (
+            cls._is_main_research_runtime(owner)
+            or cls._read_capability(owner) is not None
+        ):
+            return True
+        return callable(cls._safe_getattr(value, "execute")) or callable(
+            cls._safe_getattr(value, "resume_session")
+        )
+
+    @staticmethod
+    def _safe_getattr(value: Any, attribute: str) -> Any:
+        try:
+            return getattr(value, attribute)
+        except Exception:
+            return _CAPABILITY_UNSET
 
     def _adapt_outcome(self, raw: Any, sid: str, question: str) -> SessionOutcome:
         if isinstance(raw, SessionOutcome):

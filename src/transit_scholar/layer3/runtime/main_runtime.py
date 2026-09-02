@@ -95,6 +95,9 @@ ActionPlanner = Callable[
 class MainResearchRuntime:
     """Execute predefined Roles until completion or a deterministic limit."""
 
+    requires_authoritative_session = True
+    requires_execution_service = True
+
     def __init__(
         self,
         *,

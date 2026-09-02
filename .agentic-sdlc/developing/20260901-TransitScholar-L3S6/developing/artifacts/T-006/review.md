@@ -1,5 +1,13 @@
 # Supervisor Review
 
+- Contract: v5
+- Task: T-006
+- Outcome: passed
+- Scope: verification-only; no product files changed.
+- Independent verification: explicit L3S6 unit/integration discovery passed 40 tests; `git diff --check` passed.
+- Executor evidence: 89 lower-layer L3S2/L3S4/L3S5 regressions passed; AC-001 through AC-022 mapped in coding evidence.
+- Known environment limitation: PowerShell wildcard expansion and global temp permissions required explicit file discovery/repository-local execution; equivalent tests passed.
+
 - Contract: v4
 - Task: T-006
 - Outcome: passed

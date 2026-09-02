@@ -52,6 +52,11 @@ class RunRuntimeConfig(BaseModel):
     max_claims_per_session: int = Field(default=20, ge=0)
     max_handoff_items: int = Field(default=100, ge=0)
     max_serialized_chars: int = Field(default=12000, ge=1)
+    max_coordination_claims: int = Field(default=100, ge=0)
+    max_coordination_claim_refs: int = Field(default=100, ge=0)
+    max_coordination_unresolved_items: int = Field(default=50, ge=0)
+    max_coordination_conflicting_items: int = Field(default=50, ge=0)
+    max_coordination_plan_items: int = Field(default=50, ge=0)
 
 
 class RunContextSnapshot(BaseModel):
@@ -67,6 +72,52 @@ class RunContextSnapshot(BaseModel):
     unresolved_items: list[str] = Field(default_factory=list)
     conflicting_items: list[str] = Field(default_factory=list)
     orchestration_state: RunOrchestrationState | None = None
+
+
+class RunCoordinatorSessionSummary(BaseModel):
+    """Research-result view of one prior Session for run-level planning."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    research_session_id: str = Field(min_length=1)
+    research_question: str = Field(min_length=1)
+    status: SessionOutcomeStatus
+    final_summary: str | None = None
+    failure_reason: str | None = None
+    claim_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+
+
+class RunCoordinatorContext(BaseModel):
+    """Bounded, run-level semantic context supplied to the coordinator."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_run_id: str = Field(min_length=1)
+    user_goal: str = Field(min_length=1)
+    research_plan: dict[str, Any] | None = None
+    prior_sessions: list[RunCoordinatorSessionSummary] = Field(default_factory=list)
+    key_claims: list[str] = Field(default_factory=list)
+    claim_refs: list[str] = Field(default_factory=list)
+    unresolved_items: list[str] = Field(default_factory=list)
+    conflicting_items: list[str] = Field(default_factory=list)
+    active_session_ids: list[str] = Field(default_factory=list)
+    failed_session_ids: list[str] = Field(default_factory=list)
+    orchestration_state: dict[str, Any] | None = None
+
+    @property
+    def prior_session_summaries(self) -> list[RunCoordinatorSessionSummary]:
+        """Compatibility/readability alias for the bounded Session view."""
+        return self.prior_sessions
+
+    @property
+    def completed_sessions(self) -> list[RunCoordinatorSessionSummary]:
+        return [session for session in self.prior_sessions if session.status == "completed"]
+
+    @property
+    def failed_sessions(self) -> list[RunCoordinatorSessionSummary]:
+        return [session for session in self.prior_sessions if session.status != "completed"]
 
 
 class SessionHandoffContext(BaseModel):

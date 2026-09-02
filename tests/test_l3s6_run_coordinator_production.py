@@ -1,9 +1,17 @@
+import pytest
+
 from transit_scholar.layer3.planning import RunDecision, StructuredRunSemanticDecider
 from transit_scholar.layer3.roles.run_coordinator import (
     OptionalPlanningPolicy,
+    RunCoordinatorRole,
     SemanticRunCoordinationPolicy,
     build_fallback_run_coordinator,
     build_run_coordinator,
+)
+from transit_scholar.layer3.run_context import (
+    RunContextSnapshotBuilder,
+    RunCoordinatorContext,
+    SessionOutcome,
 )
 
 
@@ -63,9 +71,48 @@ def test_structured_production_decider_invokes_injected_llm_client():
     assert "semantic goal" in client.calls[0][0][1]["content"]
 
 
+def test_production_structured_decider_boundary_receives_projected_context():
+    class Client:
+        def generate_structured(self, messages, output_schema, metadata):
+            return {"mode": "complete", "completion_reason": "sufficient"}
+
+    class CapturingDecider(StructuredRunSemanticDecider):
+        def __init__(self):
+            super().__init__(Client())
+            self.contexts = []
+
+        def decide(self, context):
+            self.contexts.append(context)
+            return super().decide(context)
+
+    snapshot = RunContextSnapshotBuilder().build(
+        agent_run={"agent_run_id": "run-1", "user_goal": "semantic goal"},
+        session_outcomes=[
+            SessionOutcome(
+                research_session_id="session-1",
+                research_question="question",
+                status="completed",
+                final_summary="bounded summary",
+                source_provenance=[{"text_snapshot": "SECRET-EVIDENCE-TEXT"}],
+            )
+        ],
+    )
+    decider = CapturingDecider()
+
+    assert build_run_coordinator(semantic_decider=decider)(snapshot).mode == "complete"
+    assert len(decider.contexts) == 1
+    assert isinstance(decider.contexts[0], RunCoordinatorContext)
+    assert "SECRET-EVIDENCE-TEXT" not in decider.contexts[0].model_dump_json()
+
+
 def test_deterministic_fallback_is_explicitly_injectable():
     coordinator = build_fallback_run_coordinator()
 
     assert isinstance(coordinator.policy, OptionalPlanningPolicy)
     assert coordinator(_snapshot("short focused question")).mode == "direct_session"
     assert coordinator(_snapshot("compare several approaches in a review")).mode == "planned_research"
+
+
+def test_bare_role_construction_requires_explicit_policy_or_semantic_decider():
+    with pytest.raises(ValueError, match="requires an explicit policy or semantic_decider"):
+        RunCoordinatorRole()

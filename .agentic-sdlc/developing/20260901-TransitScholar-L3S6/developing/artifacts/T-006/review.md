@@ -22,3 +22,15 @@
 - Verification: `RunFinalSynthesisRole` validates run snapshots, combines outcomes from multiple Sessions, retains evidence/source references and contributing Session IDs, and rejects supplied references absent from durable outcome provenance. It introduces no Run-level Claim Ledger or Memory dependency.
 - Focused pytest: no `tests/test_l3s6_run_final_synthesis_*.py` files exist; import smoke succeeded.
 - Risks: dedicated synthesis tests and end-to-end runtime coverage remain the responsibility of T-007.
+
+# Supervisor Review — v6
+
+- Contract: v6
+- Task: T-006
+- Outcome: passed; workflow accepted.
+- Scope: the sole T-006 change is the allowed Layer3 freeze-evidence document; all cumulative v6 product/test changes remain within their task scopes and no forbidden architecture was introduced.
+- Independent verification: all 48 tests from discovered L3S6 files passed; all 89 tests from relevant discovered L3S2/L3S4/L3S5 files passed; `git diff --check` passed.
+- Semantic evidence: production governed deciders receive bounded `RunCoordinatorContext`; exact recorded LLM input excludes raw Evidence text, `source_provenance`, AgentTrace, retrieval/provider/Role/prompt histories while retaining bounded summaries, Claims/references, gaps, and orchestration state.
+- Construction evidence: canonical production factory retains a concrete `StructuredRunSemanticDecider`; bare role construction fails explicitly; deterministic fallback remains explicit.
+- Metadata evidence: current workflow state, this review, and final result identify Contract v6 and only AC-001 through AC-021.
+- Accepted criteria: AC-001, AC-012, AC-015, AC-018, AC-019, AC-020, AC-021; cumulative task evidence covers AC-001 through AC-021.

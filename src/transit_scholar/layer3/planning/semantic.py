@@ -7,7 +7,11 @@ from typing import Any
 
 from transit_scholar.layer3.planning.models import RunDecision
 from transit_scholar.layer3.prompts import build_run_coordination_prompt
-from transit_scholar.layer3.run_context import RunContextSnapshot
+from transit_scholar.layer3.run_context import (
+    RunContextSnapshot,
+    RunCoordinatorContext,
+    RunCoordinatorContextProjector,
+)
 
 
 def resolve_runtime_llm_client(config: Any | None = None) -> Any:
@@ -27,23 +31,34 @@ class StructuredRunSemanticDecider:
     explicit provider failure when a production run actually needs a decision.
     """
 
+    accepts_projected_context = True
+
     def __init__(
         self,
         client: Any | None = None,
         *,
         llm_config: Any | None = None,
         client_resolver: Callable[[Any | None], Any] = resolve_runtime_llm_client,
+        context_projector: RunCoordinatorContextProjector | None = None,
     ) -> None:
         self._client = client
         self.llm_config = llm_config
         self._client_resolver = client_resolver
+        self.context_projector = context_projector or RunCoordinatorContextProjector()
 
     @property
     def client(self) -> Any | None:
         """Return an injected client without forcing lazy production resolution."""
         return self._client
 
-    def decide(self, snapshot: RunContextSnapshot) -> RunDecision:
+    def decide(
+        self, context: RunCoordinatorContext | RunContextSnapshot
+    ) -> RunDecision:
+        projected = (
+            context
+            if isinstance(context, RunCoordinatorContext)
+            else self.context_projector.project(context)
+        )
         client = self._client
         if client is None:
             client = self._client_resolver(self.llm_config)
@@ -56,17 +71,19 @@ class StructuredRunSemanticDecider:
                     "run. Return only schema-valid RunDecision JSON."
                 ),
             },
-            {"role": "user", "content": build_run_coordination_prompt(snapshot)},
+            {"role": "user", "content": build_run_coordination_prompt(projected)},
         ]
         raw = client.generate_structured(
             messages,
             RunDecision,
-            {"prompt_key": "run_coordinator", "agent_run_id": snapshot.agent_run_id},
+            {"prompt_key": "run_coordinator", "agent_run_id": projected.agent_run_id},
         )
         return RunDecision.model_validate(raw)
 
-    def __call__(self, snapshot: RunContextSnapshot) -> RunDecision:
-        return self.decide(snapshot)
+    def __call__(
+        self, context: RunCoordinatorContext | RunContextSnapshot
+    ) -> RunDecision:
+        return self.decide(context)
 
 
 LLMRunSemanticDecider = StructuredRunSemanticDecider

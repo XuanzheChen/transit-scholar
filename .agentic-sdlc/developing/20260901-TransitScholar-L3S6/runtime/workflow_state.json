@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "contract_version": 5,
+  "contract_version": 6,
   "current_task": null,
   "status": "workflow_passed",
   "attempt": 1,
   "last_completed_task": "T-006",
-  "last_stage": "supervisor_review",
+  "last_stage": "workflow_passed",
   "execution_owner": "executor",
-  "execution_owner_reason": "user started Executor execution round 2 for T-002; both retry budgets refreshed",
-  "execution_owner_updated_at": "2026-09-01T13:02:23.171638+00:00",
+  "execution_owner_reason": "v6 restart-all activation preserved Executor ownership",
+  "execution_owner_updated_at": "2026-09-02T06:13:14.4949210Z",
   "execution_owner_history": [
     {
       "owner": "executor",
@@ -16,7 +16,7 @@
       "changed_at": "2026-09-01T09:06:11.614359+00:00"
     }
   ],
-  "updated_at": "2026-09-02T03:20:00+00:00",
+  "updated_at": "2026-09-02T07:10:31.1914304Z",
   "retry_exhaustion_history": [
     {
       "contract_version": 1,
@@ -42,7 +42,7 @@
     }
   ],
   "supervisor_completion": {
-    "contract_version": 5,
+    "contract_version": 6,
     "tasks_completed": [
       "T-001",
       "T-002",
@@ -51,7 +51,7 @@
       "T-005",
       "T-006"
     ],
-    "acceptance": "AC-001..AC-026",
-    "verification": "40 L3S6 tests passed independently; 89 lower-layer L3S2/L3S4/L3S5 tests passed; diff scope verified"
+    "acceptance": "AC-001..AC-021",
+    "verification": "48 L3S6 tests and 89 relevant L3S2/L3S4/L3S5 tests passed independently; exact semantic payload, bounds, provenance exclusion, construction boundaries, metadata, and diff scope verified"
   }
 }

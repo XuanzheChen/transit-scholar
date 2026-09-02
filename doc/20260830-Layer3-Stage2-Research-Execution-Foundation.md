@@ -32,3 +32,20 @@ retrieval, reasoning, memory, claims, or an Agentic Loop.
 All public modules are usable without LangGraph or another Agent runtime framework.
 Persistence is supplied by the existing SQLAlchemy/Alembic database boundary and the
 existing Stage1 Workspace service remains authoritative for Workspace lifecycle rules.
+
+## L3S6 v6 freeze verification (2026-09-02)
+
+T-006 executed the v6 acceptance and lower-layer regression gates with repository-local
+pytest temporary directories:
+
+- L3S6 unit/integration suites: **48 passed**.
+- L3S2, L3S4, and L3S5 unit/integration regressions: **89 passed**.
+- `git diff --check`: passed.
+
+The evidence covers AC-001 through AC-021 only. The L3S6 context-projection tests capture
+the production semantic payload, enforce deterministic Session/Claim/gap and serialized
+size bounds, and verify that raw evidence text and low-level execution history are absent.
+The L3S6 orchestration and integration suites cover authoritative Session creation, real
+L3S5 execution, handoff/recovery precedence, provenance, trace ordering, completion
+ownership, and exact run limits. Production coordinator tests cover structured semantic
+composition and explicit fallback boundaries.

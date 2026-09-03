@@ -1,6 +1,9 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
+import json
+from pathlib import Path
+from types import MappingProxyType
 
 from ..knowledge_evolution.models import AgenticWikiEntry
 
@@ -8,8 +11,41 @@ from ..knowledge_evolution.models import AgenticWikiEntry
 class AgenticWikiStore:
     """In-memory, Workspace-isolated page store for promoted knowledge."""
 
-    def __init__(self) -> None:
+    def __init__(self, storage_path: str | Path | None = None) -> None:
         self._entries: dict[str, AgenticWikiEntry] = {}
+        self._storage_path = Path(storage_path) if storage_path is not None else None
+        self._cycles: set[tuple[str, str]] = set()
+        if self._storage_path and self._storage_path.exists():
+            payload = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            for item in payload.get("entries", []):
+                self._entries[item["entry_id"]] = AgenticWikiEntry.model_validate(item)
+            self._cycles = {tuple(item) for item in payload.get("cycles", [])}
+
+    @classmethod
+    def for_workspace(cls, workspace_id: str, *, base_dir: str | Path | None = None) -> "AgenticWikiStore":
+        from ..storage.paths import workspace_layout
+        layout = workspace_layout(workspace_id, base_dir=base_dir)
+        return cls(storage_path=layout.derived_dir / "agentic_wiki.json")
+
+    @property
+    def entries(self):
+        return self._entries if self._storage_path is None else MappingProxyType(self._entries)
+
+    def _persist(self) -> None:
+        if self._storage_path is None:
+            return
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        self._storage_path.write_text(json.dumps({
+            "entries": [entry.model_dump(mode="json") for entry in self._entries.values()],
+            "cycles": [list(item) for item in sorted(self._cycles)],
+        }, sort_keys=True), encoding="utf-8")
+
+    def has_promotion_cycle(self, workspace_id: str, agent_run_id: str) -> bool:
+        return self._storage_path is not None and (workspace_id, agent_run_id) in self._cycles
+
+    def mark_promotion_cycle(self, workspace_id: str, agent_run_id: str) -> None:
+        self._cycles.add((workspace_id, agent_run_id))
+        self._persist()
 
     def _check(self, workspace_id: str) -> None:
         if not workspace_id:
@@ -21,6 +57,7 @@ class AgenticWikiStore:
         if entry.workspace_id != workspace_id:
             raise PermissionError("entry belongs to another Workspace")
         self._entries[entry.entry_id] = entry
+        self._persist()
         return entry
 
     def get(self, entry_id: str, workspace_id: str) -> AgenticWikiEntry:
@@ -37,6 +74,8 @@ class AgenticWikiStore:
     def delete_workspace(self, workspace_id: str) -> None:
         self._check(workspace_id)
         self._entries = {k: v for k, v in self._entries.items() if v.workspace_id != workspace_id}
+        self._cycles = {key for key in self._cycles if key[0] != workspace_id}
+        self._persist()
 
     def maintain(self, workspace_id: str, *, claims: Any = None, evidence: Any = None, papers: Any = None) -> list[AgenticWikiEntry]:
         """Run a deterministic provenance health pass for one Workspace.
@@ -99,5 +138,6 @@ class AgenticWikiStore:
             if invalid and entry.status == "active":
                 updated = entry.model_copy(update={"status": "stale", "updated_at": now})
                 self._entries[entry.entry_id] = updated
+                self._persist()
                 changed.append(updated)
         return changed

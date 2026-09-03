@@ -3,11 +3,21 @@ from .models import KnowledgeCandidate
 
 class KnowledgePromotionRole:
     """Predefined semantic promotion component with a bounded input surface."""
-    def __init__(self, client: Any | None = None): self.client = client
+    def __init__(self, client: Any | None = None, *, require_semantic_provider: bool = False, degraded_fallback: bool = True):
+        self.client = client
+        self.require_semantic_provider = require_semantic_provider
+        self.degraded_fallback = degraded_fallback
+
+    @classmethod
+    def production(cls, client: Any | None = None) -> "KnowledgePromotionRole":
+        return cls(client, require_semantic_provider=True, degraded_fallback=False)
+
     def propose(self, normalized: dict[str, Any]) -> list[KnowledgeCandidate]:
         if self.client is not None:
             raw = self.client.generate_structured(normalized)
             return [KnowledgeCandidate.model_validate(x) for x in (raw or [])]
+        if self.require_semantic_provider and not self.degraded_fallback:
+            raise RuntimeError("semantic promotion requires an explicit semantic provider")
         claims = normalized.get("claims", [])
         if not claims: return []
         evidence_refs = tuple(e["evidence_id"] for e in normalized.get("evidence", []))

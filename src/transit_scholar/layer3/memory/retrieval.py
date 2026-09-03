@@ -1,6 +1,8 @@
 """Workspace-scoped, bounded retrieval of episodic memory."""
 from __future__ import annotations
 import re
+import json
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Iterable
 from .models import EpisodicMemoryRecord, MemorySourceKind
@@ -16,16 +18,35 @@ class EpisodicMemoryCandidate:
     record: EpisodicMemoryRecord | None = None
 
 class EpisodicMemoryStore:
-    def __init__(self, records: Iterable[EpisodicMemoryRecord] = ()) -> None:
+    @classmethod
+    def for_workspace(cls, workspace_id: str, *, base_dir: str | Path | None = None) -> "EpisodicMemoryStore":
+        from ..storage.paths import workspace_layout
+        layout = workspace_layout(workspace_id, base_dir=base_dir)
+        return cls(storage_path=layout.derived_dir / "episodic_memory.json")
+
+    def __init__(self, records: Iterable[EpisodicMemoryRecord] = (), *, storage_path: str | Path | None = None) -> None:
         self._records: dict[tuple[str, str], EpisodicMemoryRecord] = {}
+        self._storage_path = Path(storage_path) if storage_path is not None else None
+        if self._storage_path and self._storage_path.exists():
+            for item in json.loads(self._storage_path.read_text(encoding="utf-8")):
+                self.put(EpisodicMemoryRecord.model_validate(item), _persist=False)
         for record in records:
             self.put(record)
 
-    def put(self, record: EpisodicMemoryRecord) -> EpisodicMemoryRecord:
+    def _persist(self) -> None:
+        if self._storage_path is None:
+            return
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = [record.model_dump(mode="json") for record in self._records.values()]
+        self._storage_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+    def put(self, record: EpisodicMemoryRecord, *, _persist: bool = True) -> EpisodicMemoryRecord:
         existing = self._records.get(record.canonical_episode_key)
         if existing is not None and existing != record:
             raise ValueError("an AgentRun already has a canonical episodic memory record")
         self._records[record.canonical_episode_key] = record
+        if _persist:
+            self._persist()
         return record
 
     def get(self, memory_id: str, *, workspace_id: str) -> EpisodicMemoryRecord:
@@ -61,6 +82,7 @@ class EpisodicMemoryStore:
             for key, record in self._records.items()
             if record.workspace_id != workspace_id
         }
+        self._persist()
 
 class EpisodicMemoryRetriever:
     def __init__(self, store: EpisodicMemoryStore) -> None: self.store = store

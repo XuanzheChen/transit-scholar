@@ -45,7 +45,7 @@ class KnowledgePromotionService:
 
     @property
     def entries(self) -> dict[str, AgenticWikiEntry]:
-        return self.store._entries
+        return self.store.entries
 
     def get_entry(self, entry_id: str, workspace_id: str) -> AgenticWikiEntry:
         return self.store.get(entry_id, workspace_id)
@@ -137,11 +137,13 @@ class KnowledgePromotionService:
         if promotion_input.agent_run_status != "completed":
             raise ValueError("knowledge promotion requires a completed AgentRun")
         run_key = (promotion_input.workspace_id, promotion_input.agent_run_id)
-        if run_key in self._runs:
+        if run_key in self._runs or self.store.has_promotion_cycle(*run_key):
             return []
-        self._runs.add(run_key)
         normalized = self.collect(promotion_input)
-        return [self._process(candidate, normalized) for candidate in self.role.propose(normalized)]
+        candidates = [self._process(candidate, normalized) for candidate in self.role.propose(normalized)]
+        self._runs.add(run_key)
+        self.store.mark_promotion_cycle(*run_key)
+        return candidates
 
     def _process(self, candidate: KnowledgeCandidate, normalized: dict[str, Any]) -> KnowledgeCandidate:
         try:

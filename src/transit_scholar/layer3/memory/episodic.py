@@ -64,7 +64,8 @@ class EpisodicMemoryCollector:
                 continue
             seen_query_ids.add(qid)
             status = str(_get(q, "status", "completed")).lower()
-            (useful if qid in admitted else failed).append(text)
+            terminal_failure = status in {"failed", "abandoned", "cancelled", "rejected"}
+            (useful if qid in admitted and not terminal_failure else failed).append(text)
         cls = list(claims if claims is not None else (_get(agent_run, "claims", ()) or ()))
         claim_ids = tuple(
             str(claim_id)
@@ -85,9 +86,19 @@ class EpisodicMemoryCollector:
 
 
 class EpisodicMemoryDistiller:
-    def __init__(self, client: Any | None = None): self.client = client
+    def __init__(self, client: Any | None = None, *, require_semantic_provider: bool = False, degraded_fallback: bool = True):
+        self.client = client
+        self.require_semantic_provider = require_semantic_provider
+        self.degraded_fallback = degraded_fallback
+
+    @classmethod
+    def production(cls, client: Any | None = None) -> "EpisodicMemoryDistiller":
+        return cls(client, require_semantic_provider=True, degraded_fallback=False)
+
     def distill(self, normalized: NormalizedEpisodeInput) -> EpisodicSemanticOutput:
         if self.client is None:
+            if self.require_semantic_provider and not self.degraded_fallback:
+                raise RuntimeError("semantic distillation requires an explicit semantic provider")
             return EpisodicSemanticOutput(goal_summary=normalized.user_goal_raw, research_summary=normalized.final_outcome)
         bounded_input = normalized.model_dump(mode="json")
         raw = self.client.generate_structured(

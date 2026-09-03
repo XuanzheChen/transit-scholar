@@ -62,6 +62,7 @@ No ``wiki_stale``/``wiki_ready`` boolean is ever persisted.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -87,7 +88,13 @@ from .errors import (
     WikiStaleError,
     WikiUnsupportedError,
 )
-from .models import WorkspaceWikiBuildOutcome, WorkspaceWikiCapability, WorkspaceWikiStatus
+from .models import (
+    WorkspaceWikiBuildOutcome,
+    WorkspaceWikiCapability,
+    WorkspaceWikiHit,
+    WorkspaceWikiSearchResult,
+    WorkspaceWikiStatus,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sqlalchemy.orm import Session
@@ -135,6 +142,7 @@ class WorkspaceWikiService:
         schemas: "WorkspaceSchemaService | None" = None,
         composition_factory: "CompositionFactory | None" = None,
         paper_metadata_loader: "PaperMetadataLoader | None" = None,
+        agentic_wiki_store: object | None = None,
     ) -> None:
         self.session = session
         self.data_root = data_root
@@ -152,6 +160,11 @@ class WorkspaceWikiService:
         # loading raw Workspace-local L2S2 content twice.
         self.schemas = schemas
         self._composition_factory = composition_factory
+        if agentic_wiki_store is None:
+            from transit_scholar.layer3.agentic_wiki import AgenticWikiStore  # noqa: PLC0415
+
+            agentic_wiki_store = AgenticWikiStore()
+        self.agentic_wiki_store = agentic_wiki_store
         if paper_metadata_loader is None:
             from transit_scholar.metadata.service import read_paper_metadata
 
@@ -539,8 +552,9 @@ class WorkspaceWikiService:
         *,
         limit: int = 20,
         mode: Literal["lexical", "semantic"] = "lexical",
-    ) -> "WikiSearchResult":
-        """Search the Workspace-owned Base Wiki.
+        include_stale: bool = False,
+    ) -> WorkspaceWikiSearchResult:
+        """Search the Workspace-owned Base and promoted Agentic Wiki domains.
 
         Always resolves the store/service for THIS Workspace's Wiki root;
         missing snapshots raise ``WikiMissingError`` (AC-008: another
@@ -578,7 +592,63 @@ class WorkspaceWikiService:
 
         store = layout.wiki_store(context)
         wiki = WikiService(context, store)
-        return wiki.search_wiki(query, limit=limit, mode=mode)
+        base_result = wiki.search_wiki(query, limit=limit, mode=mode)
+        base_hits = [
+            WorkspaceWikiHit(
+                type=hit.type,
+                object_id=hit.object_id,
+                title=hit.title,
+                score=hit.score,
+                snippet=hit.snippet,
+                retrieval_mode=hit.retrieval_mode,
+                source_kind="base_wiki",
+            )
+            for hit in base_result.hits
+        ]
+        agentic_hits = self._search_agentic_wiki(
+            workspace_id,
+            query,
+            include_stale=include_stale,
+        )
+        combined = sorted(
+            [*base_hits, *agentic_hits],
+            key=lambda hit: (-hit.score, hit.source_kind, hit.object_id),
+        )[:max(limit, 0)]
+        return WorkspaceWikiSearchResult(
+            status="degraded" if any(hit.lifecycle_status == "stale" for hit in combined) else "ok",
+            hits=combined,
+        )
+
+    def _search_agentic_wiki(
+        self,
+        workspace_id: str,
+        query: str,
+        *,
+        include_stale: bool,
+    ) -> list[WorkspaceWikiHit]:
+        entries = self.agentic_wiki_store.list(
+            workspace_id,
+            include_stale=include_stale,
+        )
+        query_terms = set(re.findall(r"\w+", query.casefold()))
+        hits: list[WorkspaceWikiHit] = []
+        for entry in entries:
+            entry_terms = set(
+                re.findall(r"\w+", f"{entry.title} {entry.content}".casefold())
+            )
+            score = len(query_terms & entry_terms) / max(len(query_terms), 1)
+            hits.append(
+                WorkspaceWikiHit(
+                    type="entry",
+                    object_id=entry.entry_id,
+                    title=entry.title,
+                    score=score,
+                    snippet=entry.content,
+                    source_kind="agentic_wiki",
+                    lifecycle_status=entry.status if entry.status == "stale" else "active",
+                )
+            )
+        return hits
 
     def get_wiki_service(self, workspace_id: str) -> "WikiService":
         """The L2S3 ``WikiService`` bound to the Workspace's own Wiki store.

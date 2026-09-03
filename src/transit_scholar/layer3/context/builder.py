@@ -14,6 +14,7 @@ from transit_scholar.layer3.ledger import ResearchReasoningLedgerService
 from transit_scholar.layer3.state import ResearchStateService
 
 from .models import RetrievedEvidenceContext, RuntimeContextSnapshot, SessionContext
+from transit_scholar.layer3.memory import EpisodicMemoryCandidate
 
 
 class RuntimeContextSnapshotBuilder:
@@ -37,6 +38,7 @@ class RuntimeContextSnapshotBuilder:
         research_session_id: str,
         retrieved_evidence: Iterable[ResearchEvidence | dict[str, Any]] = (),
         session_handoff: Any | None = None,
+        episodic_memory: Iterable[EpisodicMemoryCandidate] = (),
     ) -> RuntimeContextSnapshot:
         run = self.execution.get_agent_run(agent_run_id)
         research_session = self.execution.get_research_session(
@@ -52,6 +54,10 @@ class RuntimeContextSnapshotBuilder:
                 research_session_id=research_session_id, claim_id=claim.claim_id
             )
         ]
+        memory = tuple(episodic_memory)
+        mismatched = [item for item in memory if item.workspace_id != run.workspace_id]
+        if mismatched:
+            raise ValueError("episodic memory workspace does not match AgentRun")
         current_retrieval = tuple(
             self._retrieved_context(item) for item in retrieved_evidence
         )
@@ -67,6 +73,7 @@ class RuntimeContextSnapshotBuilder:
             claims=tuple(claims),
             claim_evidence_links=tuple(links),
             session_handoff=session_handoff,
+            episodic_memory=memory,
         )
 
     @staticmethod

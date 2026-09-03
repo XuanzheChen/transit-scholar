@@ -5,4 +5,6 @@ from .builtin import __all__ as _builtin_all
 from .run_coordinator import OptionalPlanningPolicy, RunCoordinatorRole
 from transit_scholar.layer3.synthesis import RunFinalSynthesisRole
 
-__all__ = [*_builtin_all, "OptionalPlanningPolicy", "RunCoordinatorRole", "RunFinalSynthesisRole"]
+from transit_scholar.layer3.knowledge_evolution.roles import KnowledgePromotionRole
+
+__all__ = [*_builtin_all, "OptionalPlanningPolicy", "RunCoordinatorRole", "RunFinalSynthesisRole", "KnowledgePromotionRole"]

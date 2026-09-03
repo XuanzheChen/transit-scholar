@@ -20,6 +20,8 @@ from .models import (
     WorkspaceWikiBuildOutcome,
     WorkspaceWikiCapability,
     WorkspaceWikiStatus,
+    WorkspaceWikiHit,
+    WorkspaceWikiSearchResult,
 )
 from .service import WorkspaceWikiService
 
@@ -37,4 +39,6 @@ __all__ = [
     "WorkspaceWikiStatus",
     "WorkspaceWikiBuildOutcome",
     "WorkspaceWikiCapability",
+    "WorkspaceWikiHit",
+    "WorkspaceWikiSearchResult",
 ]

@@ -16,6 +16,7 @@ from transit_scholar.layer3.ledger import (
     ResearchQueryRecord,
 )
 from transit_scholar.layer3.state import ResearchStateRecord
+from transit_scholar.layer3.memory import EpisodicMemoryCandidate
 
 
 CONTEXT_SECTIONS = frozenset(
@@ -29,6 +30,7 @@ CONTEXT_SECTIONS = frozenset(
         "claims",
         "claim_evidence_links",
         "session_handoff",
+        "episodic_memory",
     }
 )
 
@@ -60,6 +62,7 @@ class RuntimeContextSnapshot(BaseModel):
     claims: tuple[ClaimRecord, ...] = ()
     claim_evidence_links: tuple[ClaimEvidenceLink, ...] = ()
     session_handoff: Any | None = None
+    episodic_memory: tuple[EpisodicMemoryCandidate, ...] = ()
 
 
 class RoleContext(BaseModel):

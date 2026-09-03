@@ -114,6 +114,7 @@ class MainResearchRuntime:
         action_executor: object | None = None,
         is_cancelled: Callable[[], bool] | None = None,
         state_store: MainRuntimeStateStore | None = None,
+        agentic_wiki_maintenance: Callable[[str], object] | None = None,
     ) -> None:
         self.registry = registry
         self.role_runtime = role_runtime
@@ -133,6 +134,7 @@ class MainResearchRuntime:
             self.role_runtime.action_executor = action_executor
         self.is_cancelled = is_cancelled or (lambda: False)
         self.state_store = state_store
+        self.agentic_wiki_maintenance = agentic_wiki_maintenance
 
     def execute(self, *, agent_run_id: str, research_session_id: str, session_handoff: object | None = None) -> MainRuntimeResult:
         state = MainRuntimeState(
@@ -166,6 +168,12 @@ class MainResearchRuntime:
         agent_run_id = state.agent_run_id
         research_session_id = state.research_session_id
         run = self.execution_service.get_agent_run(agent_run_id)
+        if self.agentic_wiki_maintenance is not None:
+            workspace_id = getattr(run, "workspace_id", None)
+            if workspace_id is None and isinstance(run, Mapping):
+                workspace_id = run.get("workspace_id")
+            if workspace_id:
+                self.agentic_wiki_maintenance(str(workspace_id))
         session = self.execution_service.get_research_session(agent_run_id, research_session_id)
         usage = state.usage
         results = state.role_results

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from transit_scholar.layer3.agent import ContextPolicy, RoleDefinition
+from transit_scholar.layer3.agent.models import RoleId
 
 from .models import CONTEXT_SECTIONS, RoleContext, RuntimeContextSnapshot
 
@@ -35,9 +36,23 @@ class RoleContextProjector:
         snapshot_data = snapshot.model_dump(mode="json")
         sections: dict[str, Any] = {}
         truncated = False
-        for name in sorted(policy.included_sections):
-            value = snapshot_data[name]
+        allowed_sections = set(policy.included_sections)
+        # Episodic memory is auxiliary context and is restricted to the two
+        # coordination/planning roles; policies cannot grant it to reasoning
+        # or synthesis roles by accident.
+        memory_roles = {
+            RoleId.RESEARCH_COORDINATOR,
+            RoleId.QUERY_PLANNING,
+        }
+        if role.role_id in memory_roles:
+            allowed_sections.add("episodic_memory")
+        elif "episodic_memory" in allowed_sections:
+            allowed_sections.remove("episodic_memory")
+        for name in sorted(allowed_sections):
+            value = snapshot_data.get(name)
             if name == "session_handoff" and value is None:
+                continue
+            if name == "episodic_memory" and not value:
                 continue
             if policy.max_items_per_section is not None and isinstance(value, list):
                 limited = value[: policy.max_items_per_section]

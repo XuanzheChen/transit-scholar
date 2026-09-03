@@ -74,9 +74,29 @@ class WorkspaceWikiCapability(BaseModel):
     reason: str | None = Field(default=None)
 
 
+class WorkspaceWikiHit(BaseModel):
+    """Unified hit retaining the semantic source of Wiki knowledge."""
+    type: Literal["page", "entity", "entry"]
+    object_id: str
+    title: str
+    score: float = 0.0
+    snippet: str
+    retrieval_mode: Literal["lexical", "semantic"] = "lexical"
+    source_kind: Literal["base_wiki", "agentic_wiki"]
+    lifecycle_status: Literal["active", "stale"] | None = None
+
+
+class WorkspaceWikiSearchResult(BaseModel):
+    status: Literal["ok", "degraded", "error"] = "ok"
+    hits: list[WorkspaceWikiHit] = Field(default_factory=list)
+    error_code: str | None = None
+
+
 __all__ = [
     "WikiDerivedStatus",
     "WorkspaceWikiStatus",
     "WorkspaceWikiBuildOutcome",
     "WorkspaceWikiCapability",
+    "WorkspaceWikiHit",
+    "WorkspaceWikiSearchResult",
 ]

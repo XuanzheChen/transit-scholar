@@ -49,7 +49,8 @@ class RunResearchRuntime:
                  config: RunRuntimeConfig | None = None, snapshot_builder: Any | None = None,
                  handoff_projector: Any | None = None, trace: Any | None = None,
                  is_cancelled: Callable[[], bool] | None = None, state_store: Any | None = None,
-                 requires_execution_service: bool | None = None):
+                 requires_execution_service: bool | None = None,
+                 l3s7_lifecycle: Any | None = None):
         self.session_runtime, self.coordinator, self.synthesis = session_runtime, coordinator, synthesis
         self.execution_service, self.ledger_service = execution_service, ledger_service
         self._requires_execution_service_override = requires_execution_service
@@ -58,6 +59,17 @@ class RunResearchRuntime:
         self.snapshot_builder = snapshot_builder or RunContextSnapshotBuilder()
         self.handoff_projector = handoff_projector or SessionHandoffProjector()
         self.trace, self.is_cancelled, self.state_store = trace, is_cancelled or (lambda: False), state_store
+        self.l3s7_lifecycle = l3s7_lifecycle
+        if (
+            l3s7_lifecycle is not None
+            and getattr(self.session_runtime, "agentic_wiki_maintenance", None) is None
+        ):
+            try:
+                self.session_runtime.agentic_wiki_maintenance = (
+                    l3s7_lifecycle.maintain_before_session
+                )
+            except (AttributeError, TypeError):
+                pass
 
     def execute(self, *, agent_run_id: str, user_goal: str | None = None, agent_run: Any | None = None) -> dict[str, Any]:
         run = agent_run or {"agent_run_id": agent_run_id, "user_goal": user_goal or ""}
@@ -83,7 +95,14 @@ class RunResearchRuntime:
                     "status": "completed",
                     "completion_reason": decision.completion_reason or artifact.completion_reason,
                 })
-                return self._result(state, outcomes, plan, "semantic_completion", artifact)
+                return self._result(
+                    state,
+                    outcomes,
+                    plan,
+                    "semantic_completion",
+                    artifact,
+                    agent_run=run,
+                )
             if decision.mode == "planned_research":
                 state.planning_round += 1
                 if state.planning_round > self.config.max_planning_rounds:
@@ -417,8 +436,56 @@ class RunResearchRuntime:
         elif hasattr(self.state_store, "save_state"):
             self.state_store.save_state(agent_run_id=state.agent_run_id, payload=payload)
         elif hasattr(self.state_store, "set"): self.state_store.set(state.agent_run_id, payload)
-    def _result(self, state, outcomes, plan, reason, artifact=None):
+    def _result(self, state, outcomes, plan, reason, artifact=None, agent_run=None):
         state.status = "completed" if reason == "semantic_completion" else ("cancelled" if reason == "cancelled" else "terminated"); state.termination_reason = reason
+        if state.status == "completed":
+            self._complete_agent_run(agent_run, outcomes, artifact, reason)
         self._persist(state, outcomes, plan)
         self._event(state.agent_run_id, "run.completed" if state.status == "completed" else "run.failed", {"reason": reason})
         return {"status": state.status, "termination_reason": reason, "outcomes": outcomes, "session_outcomes": outcomes, "research_plan": plan, "orchestration_state": state, "final_response": artifact}
+
+    def _complete_agent_run(self, agent_run, outcomes, artifact, reason):
+        if self.execution_service is not None and hasattr(
+            self.execution_service, "update_agent_run_status"
+        ):
+            updated_run = self.execution_service.update_agent_run_status(
+                agent_run.agent_run_id if hasattr(agent_run, "agent_run_id") else agent_run["agent_run_id"],
+                "completed",
+            )
+            if updated_run is not None:
+                if isinstance(agent_run, dict):
+                    update_data = (
+                        updated_run.model_dump(mode="python")
+                        if hasattr(updated_run, "model_dump")
+                        else updated_run
+                    )
+                    if isinstance(update_data, dict):
+                        agent_run = {**agent_run, **update_data}
+                    else:
+                        agent_run = updated_run
+                else:
+                    agent_run = updated_run
+        if self.l3s7_lifecycle is None:
+            return
+        queries, evidence, claims = [], [], []
+        if self.ledger_service is not None:
+            for outcome in outcomes:
+                session_id = outcome.research_session_id
+                if hasattr(self.ledger_service, "list_queries"):
+                    queries.extend(self.ledger_service.list_queries(research_session_id=session_id))
+                if hasattr(self.ledger_service, "list_evidence"):
+                    evidence.extend(self.ledger_service.list_evidence(research_session_id=session_id))
+                if hasattr(self.ledger_service, "list_claims"):
+                    claims.extend(self.ledger_service.list_claims(research_session_id=session_id))
+        final_outcome = getattr(artifact, "answer_text", None) or reason
+        self.l3s7_lifecycle.complete_agent_run(
+            agent_run=agent_run,
+            research_sessions=[
+                {"research_session_id": outcome.research_session_id}
+                for outcome in outcomes
+            ],
+            queries=queries,
+            evidence=evidence,
+            claims=claims,
+            final_outcome=final_outcome,
+        )

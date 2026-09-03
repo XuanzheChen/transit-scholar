@@ -4,10 +4,15 @@ import re
 import json
 import os
 import tempfile
+import errno
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Iterable
 from .models import EpisodicMemoryRecord, MemorySourceKind
+
+_UNSUPPORTED_DIRECTORY_DURABILITY_ERRNOS = frozenset({
+    errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS,
+})
 
 @dataclass(frozen=True)
 class EpisodicMemoryCandidate:
@@ -42,11 +47,12 @@ class EpisodicMemoryStore:
         for record in records:
             self.put(record)
 
-    def _persist(self) -> None:
+    def _persist(self, records: dict[tuple[str, str], EpisodicMemoryRecord] | None = None) -> None:
         if self._storage_path is None:
             return
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [record.model_dump(mode="json") for record in self._records.values()]
+        source_records = self._records if records is None else records
+        payload = [record.model_dump(mode="json") for record in source_records.values()]
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         fd, temporary_name = tempfile.mkstemp(
             prefix=f".{self._storage_path.name}.", suffix=".tmp",
@@ -60,11 +66,20 @@ class EpisodicMemoryStore:
             os.replace(temporary_name, self._storage_path)
             try:
                 directory_fd = os.open(self._storage_path.parent, os.O_RDONLY)
-            except OSError:
+            except OSError as error:
+                directory_open_unsupported = error.errno in _UNSUPPORTED_DIRECTORY_DURABILITY_ERRNOS
+                if os.name == "nt" and error.errno == errno.EACCES:
+                    directory_open_unsupported = True
+                if not directory_open_unsupported:
+                    raise
                 directory_fd = None
             if directory_fd is not None:
                 try:
-                    os.fsync(directory_fd)
+                    try:
+                        os.fsync(directory_fd)
+                    except OSError as error:
+                        if error.errno not in _UNSUPPORTED_DIRECTORY_DURABILITY_ERRNOS:
+                            raise
                 finally:
                     os.close(directory_fd)
         except BaseException:
@@ -73,7 +88,6 @@ class EpisodicMemoryStore:
             except FileNotFoundError:
                 pass
             raise
-
     def _check_workspace(self, workspace_id: str) -> None:
         if not workspace_id:
             raise ValueError("workspace_id is required")
@@ -85,9 +99,11 @@ class EpisodicMemoryStore:
         existing = self._records.get(record.canonical_episode_key)
         if existing is not None and existing != record:
             raise ValueError("an AgentRun already has a canonical episodic memory record")
-        self._records[record.canonical_episode_key] = record
+        next_records = dict(self._records)
+        next_records[record.canonical_episode_key] = record
         if _persist:
-            self._persist()
+            self._persist(next_records)
+        self._records = next_records
         return record
 
     def get(self, memory_id: str, *, workspace_id: str) -> EpisodicMemoryRecord:
@@ -118,12 +134,13 @@ class EpisodicMemoryStore:
 
     def delete_workspace(self, workspace_id: str) -> None:
         self._check_workspace(workspace_id)
-        self._records = {
+        next_records = {
             key: record
             for key, record in self._records.items()
             if record.workspace_id != workspace_id
         }
-        self._persist()
+        self._persist(next_records)
+        self._records = next_records
 
 class EpisodicMemoryRetriever:
     def __init__(self, store: EpisodicMemoryStore) -> None: self.store = store

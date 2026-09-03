@@ -53,6 +53,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         SchemaInstance,
     )
     from transit_scholar.layer2.wiki.models import WikiSearchResult
+    from transit_scholar.layer3.wiki.models import WorkspaceWikiSearchResult
     from transit_scholar.layer3.schema.service import WorkspaceSchemaService
     from transit_scholar.layer3.wiki.models import WorkspaceWikiStatus
     from transit_scholar.layer3.wiki.service import WorkspaceWikiService
@@ -161,6 +162,17 @@ class WorkspaceKnowledgeGateway:
         """The current authoritative Workspace state after full revalidation."""
         return self._require_current()
 
+    def current_source_identity(self, paper_id: str) -> str | None:
+        """Return the authoritative current parse/source version for a member Paper."""
+        self._require_current()
+        self._require_member(paper_id)
+        from transit_scholar.layer2.paths import load_current  # noqa: PLC0415
+
+        config = getattr(self.evidence, "config", None)
+        if config is None:
+            return None
+        return load_current(config.parsed_paper_dir(paper_id))
+
     # ------------------------------------------------------------------
     # visible Papers (REQ-010; AC-014 derived readiness)
     # ------------------------------------------------------------------
@@ -247,30 +259,44 @@ class WorkspaceKnowledgeGateway:
         *,
         limit: int = 20,
         mode: Literal["lexical", "semantic"] = "lexical",
-    ) -> "WikiSearchResult":
-        """Search the Workspace's own Base Wiki; explicit outcomes otherwise."""
+    ) -> "WorkspaceWikiSearchResult":
+        """Search the unified Base + Agentic Wiki surface."""
         self._require_current()
-        return self.wiki.search_base_only(
-            self.workspace_id, query, limit=limit, mode=mode
-        )
+        return self.wiki.search(self.workspace_id, query, limit=limit, mode=mode)
+
+    def search_base_wiki_only(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        mode: Literal["lexical", "semantic"] = "lexical",
+    ) -> "WikiSearchResult":
+        """Compatibility API for callers requiring Base Wiki only."""
+        self._require_current()
+        return self.wiki.search_base_only(self.workspace_id, query, limit=limit, mode=mode)
 
     def resolve_wiki_hit_paper_ids(self, hit: Any) -> list[str]:
         """Resolve a current Wiki search hit to member Paper identities."""
         self._require_current()
-        derived = self.wiki.status(self.workspace_id)
-        if derived.status != "ready":
-            raise RuntimeError(
-                f"workspace Wiki is not ready for discovery: {derived.status}"
+        if getattr(hit, "source_kind", "base_wiki") == "agentic_wiki":
+            paper_ids = self.wiki.resolve_agentic_entry_paper_ids(
+                self.workspace_id, hit.object_id
             )
-        wiki = self.wiki.get_wiki_service(self.workspace_id)
-        if hit.type == "page":
-            paper_ids = [wiki.get_page(hit.object_id).paper_id]
-        elif hit.type == "entity":
-            paper_ids = [
-                page.paper_id for page in wiki.find_pages_by_entity(hit.object_id)
-            ]
         else:
-            paper_ids = []
+            derived = self.wiki.status(self.workspace_id)
+            if derived.status != "ready":
+                raise RuntimeError(
+                    f"workspace Wiki is not ready for discovery: {derived.status}"
+                )
+            wiki = self.wiki.get_wiki_service(self.workspace_id)
+            if hit.type == "page":
+                paper_ids = [wiki.get_page(hit.object_id).paper_id]
+            elif hit.type == "entity":
+                paper_ids = [
+                    page.paper_id for page in wiki.find_pages_by_entity(hit.object_id)
+                ]
+            else:
+                paper_ids = []
         member_ids = {paper.paper_id for paper in self.list_papers()}
         return sorted(set(paper_ids) & member_ids)
 

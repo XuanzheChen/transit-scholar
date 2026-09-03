@@ -593,13 +593,23 @@ class WorkspaceWikiService:
             limit=max(limit, 0),
         )
         if not base_hits and agentic_state not in {"ok", "degraded"}:
+            if not self.workspaces.list_memberships(workspace_id):
+                raise WikiEmptyMembershipError("Workspace Base Wiki has no members")
             self._raise_base_search_error(base_state)
         source_failures = {"error", "unavailable"}
         has_usable_source = bool(base_hits or agentic_hits)
         if all(state in source_failures for state in source_status.values()):
             result_status = "error" if not has_usable_source else "degraded"
             result_error = "wiki_sources_unavailable" if not has_usable_source else None
-        elif any(state != "ok" for state in source_status.values()):
+        elif any(
+            state != "ok"
+            for source, state in source_status.items()
+            if not (
+                source == "agentic_wiki"
+                and state == "empty"
+                and base_state == "ok"
+            )
+        ):
             result_status = "degraded"
             errors = [code for code in source_errors.values() if code]
             semantic_error = "semantic_agentic_lexical"
@@ -624,6 +634,7 @@ class WorkspaceWikiService:
         errors = {
             "unsupported": WikiUnsupportedError,
             "missing": WikiMissingError,
+            "empty_membership": WikiEmptyMembershipError,
             "stale": WikiStaleError,
             "error": WikiCorruptError,
         }
@@ -764,6 +775,15 @@ class WorkspaceWikiService:
 
         layout = self._workspace_layout(workspace_id)
         return AgenticWikiStore.for_workspace(workspace_id, base_dir=layout.base_dir)
+
+    def resolve_agentic_entry_paper_ids(self, workspace_id: str, entry_id: str) -> list[str]:
+        """Return provenance-backed Paper ids for an Agentic Wiki entry.
+
+        This is intentionally read-only and keeps repository access behind the
+        Workspace Wiki service boundary.
+        """
+        entry = self._agentic_store_for_workspace(workspace_id).get(entry_id, workspace_id)
+        return sorted({str(paper_id) for paper_id in entry.paper_ids})
 
     @staticmethod
     def _source_error_state(exc: Exception) -> tuple[str, str]:

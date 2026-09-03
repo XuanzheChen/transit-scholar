@@ -96,8 +96,11 @@ def _ensure_non_empty(value: Any, label: str) -> str:
 class WorkspaceService:
     """Authoritative mutations and reads for the Workspace control plane."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, l2_config: object | None = None,
+                 data_root: Path | str | None = None) -> None:
         self.session = session
+        self.l2_config = l2_config
+        self.l2_data_root = Path(data_root) if data_root is not None else None
 
     # ------------------------------------------------------------------
     # creation / reads (REQ-001)
@@ -253,6 +256,28 @@ class WorkspaceService:
             .order_by(WorkspacePaperMembership.paper_id)
         ).scalars().all()
         return [MembershipRecord.from_row(row) for row in rows]
+
+    def current_source_versions(self, workspace_id: str) -> dict[str, str]:
+        """Return canonical L2 parse identities for current Workspace Papers."""
+        memberships = self.list_memberships(workspace_id)
+        try:
+            from transit_scholar.layer2.config import Layer2Config
+            from transit_scholar.layer2.paths import load_current
+            if self.l2_config is None:
+                from transit_scholar.config import Settings
+                settings = Settings(data_root=self.l2_data_root) if self.l2_data_root is not None else Settings()
+                config = Layer2Config.from_settings(settings)
+            else:
+                config = self.l2_config
+        except (ImportError, AttributeError, TypeError):
+            return {}
+        versions: dict[str, str] = {}
+        for membership in memberships:
+            paper_id = membership.paper_id
+            current = load_current(config.parsed_paper_dir(paper_id))
+            if current:
+                versions[paper_id] = str(current)
+        return versions
 
     # ------------------------------------------------------------------
     # lifecycle (REQ-009 / AC-016 / AC-017)

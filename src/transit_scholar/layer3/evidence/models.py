@@ -28,6 +28,8 @@ class EvidenceLocator(BaseModel):
     workspace_id: str = Field(min_length=1)
     source_kind: str = Field(min_length=1)
     paper_id: str | None = Field(default=None, min_length=1)
+    parse_run_id: str | None = Field(default=None, min_length=1)
+    canonical_source_version: str | None = Field(default=None, min_length=1)
     block_id: str | None = Field(default=None, min_length=1)
     pages: list[int] | None = None
     span: EvidenceSpan | None = None

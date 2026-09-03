@@ -61,8 +61,6 @@ class AgenticWikiStore:
     @property
     def entries(self) -> Mapping[str, AgenticWikiEntry]:
         """Return an inspection view without exposing a durable write surface."""
-        if self._storage_path is None and self.bound_workspace_id is None:
-            return self._entries
         return MappingProxyType(
             {key: value.model_copy(deep=True) for key, value in self._entries.items()}
         )
@@ -297,6 +295,7 @@ class AgenticWikiStore:
         evidence: Any = None,
         papers: Any = None,
         claim_evidence_links: Any = None,
+        source_versions: Any = None,
     ) -> list[AgenticWikiEntry]:
         """Run a deterministic provenance health pass for one Workspace."""
 
@@ -337,6 +336,13 @@ class AgenticWikiStore:
         claim_ids, claim_records = normalize(claims, "claim")
         evidence_ids, evidence_records = normalize(evidence, "evidence")
         paper_ids, paper_records = normalize(papers, "paper")
+        if source_versions is not None and isinstance(source_versions, dict):
+            for paper_id, version in source_versions.items():
+                if str(paper_id) in paper_records:
+                    paper_records[str(paper_id)] = {**(paper_records[str(paper_id)] if isinstance(paper_records[str(paper_id)], dict) else {}), "current_source_version": version}
+                elif paper_ids is not None:
+                    paper_records[str(paper_id)] = {"current_source_version": version}
+                    paper_ids.add(str(paper_id))
         link_records = self._normalize_links(claim_evidence_links)
         now = datetime.now(timezone.utc)
         changed: list[AgenticWikiEntry] = []
@@ -375,11 +381,17 @@ class AgenticWikiStore:
                     paper_record = paper_records.get(str(paper_ref))
                     if paper_record is not None:
                         evidence_version = self._provenance_value(
-                            record, "source_version", "version", "source_version_id"
+                            record, "canonical_source_version", "parse_run_id", "source_version", "version", "source_version_id"
                         )
+                        if evidence_version is None:
+                            locator = getter("locator")
+                            if locator is not None:
+                                evidence_version = self._provenance_value(
+                                    locator, "canonical_source_version", "parse_run_id", "source_version", "version", "source_version_id"
+                                )
                         paper_version = self._provenance_value(
                             paper_record,
-                            "current_source_version",
+                            "current_source_version", "canonical_source_version", "parse_run_id",
                             "source_version",
                             "version",
                             "version_id",

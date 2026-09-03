@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import inspect
 from typing import Any
 from uuid import uuid4
 
@@ -102,6 +103,28 @@ class RunResearchRuntime:
                 )
             except (AttributeError, TypeError):
                 pass
+
+    def _collect_claim_evidence_links(self, session_id: str, claims: Any) -> list[Any]:
+        getter = self.ledger_service.get_claim_evidence
+        try:
+            parameters = inspect.signature(getter).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        supports_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        links: list[Any] = []
+        for claim in claims:
+            claim_id = self._value(claim, "claim_id")
+            if supports_kwargs or {"research_session_id", "claim_id"}.issubset(parameters):
+                result = getter(research_session_id=session_id, claim_id=claim_id)
+            elif len(parameters) >= 2:
+                result = getter(session_id, claim_id)
+            else:
+                result = getter(claim_id)
+            links.extend(result or ())
+        return links
 
     def execute(self, *, agent_run_id: str, user_goal: str | None = None, agent_run: Any | None = None) -> dict[str, Any]:
         run = agent_run or self._load_agent_run(agent_run_id, user_goal)
@@ -556,18 +579,9 @@ class RunResearchRuntime:
                 if hasattr(self.ledger_service, "get_claim_evidence"):
                     if claim_evidence_links is None:
                         claim_evidence_links = []
-                    for claim in session_claims:
-                        claim_id = self._value(claim, "claim_id")
-                        try:
-                            links = self.ledger_service.get_claim_evidence(
-                                research_session_id=session_id,
-                                claim_id=claim_id,
-                            )
-                        except TypeError:
-                            links = self.ledger_service.get_claim_evidence(
-                                session_id, claim_id
-                            )
-                        claim_evidence_links.extend(links or ())
+                    claim_evidence_links.extend(
+                        self._collect_claim_evidence_links(session_id, session_claims)
+                    )
         final_outcome = getattr(artifact, "answer_text", None) or reason
         self.l3s7_lifecycle.complete_agent_run(
             agent_run=agent_run,

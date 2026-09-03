@@ -4,6 +4,7 @@ from transit_scholar.layer3.knowledge_evolution import (
     KnowledgePromotionService,
     PromotionInput,
 )
+from transit_scholar.layer3.runtime.run_runtime import RunResearchRuntime
 
 
 def _input(workspace_id="workspace-1", run_id="run-1"):
@@ -99,7 +100,7 @@ def test_non_completed_run_does_not_consume_promotion_cycle():
 def test_existing_workspace_wiki_summaries_reach_semantic_role_and_update_is_supported():
     role = CapturingRole([_candidate(proposed_target_entry_id="entry-1")])
     service = KnowledgePromotionService(role)
-    service.entries["entry-1"] = AgenticWikiEntry(
+    service.store.put(AgenticWikiEntry(
         entry_id="entry-1",
         workspace_id="workspace-1",
         title="Old title",
@@ -107,7 +108,7 @@ def test_existing_workspace_wiki_summaries_reach_semantic_role_and_update_is_sup
         source_claim_ids=("old-claim",),
         evidence_refs=("old-evidence",),
         originating_agent_run_id="old-run",
-    )
+    ))
 
     result = service.run_end(_input())
 
@@ -132,6 +133,26 @@ def test_unknown_empty_or_inconsistent_provenance_is_rejected_without_wiki_mutat
 
     assert all(candidate.status == "rejected" for candidate in result)
     assert service.entries == {}
+
+
+def test_run_runtime_collects_links_from_var_keyword_facade():
+    class VarKeywordFacade:
+        def __init__(self):
+            self.calls = []
+
+        def get_claim_evidence(self, **kwargs):
+            self.calls.append(kwargs)
+            return [{"claim_id": kwargs["claim_id"], "evidence_id": "e-1"}]
+
+    facade = VarKeywordFacade()
+    runtime = object.__new__(RunResearchRuntime)
+    runtime.ledger_service = facade
+    links = runtime._collect_claim_evidence_links(
+        "session-1", [{"claim_id": "claim-1"}, {"claim_id": "claim-2"}]
+    )
+
+    assert [call["research_session_id"] for call in facade.calls] == ["session-1", "session-1"]
+    assert [link["claim_id"] for link in links] == ["claim-1", "claim-2"]
 
 
 def test_inaccessible_or_broken_evidence_is_not_eligible_for_promotion():

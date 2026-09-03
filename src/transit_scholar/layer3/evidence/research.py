@@ -25,6 +25,8 @@ class PaperProvenance(BaseModel):
     paper_id: str = Field(min_length=1)
     title: str | None = Field(default=None, min_length=1)
     source_uri: str | None = Field(default=None, min_length=1)
+    parse_run_id: str | None = Field(default=None, min_length=1)
+    canonical_source_version: str | None = Field(default=None, min_length=1)
 
 
 class ResearchEvidence(BaseModel):

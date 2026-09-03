@@ -1,6 +1,7 @@
 """Deterministic provenance maintenance for Agentic Wiki entries."""
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from .store import AgenticWikiStore
@@ -31,6 +32,7 @@ class AgenticWikiMaintenance:
         evidence_resolver: Any = None,
         papers_resolver: Any = None,
         links_resolver: Any = None,
+        source_version_reader: Any = None,
     ) -> "AgenticWikiMaintenance":
         """Compose maintenance against the durable Workspace repository.
 
@@ -59,6 +61,7 @@ class AgenticWikiMaintenance:
             evidence_resolver=evidence_resolver,
             papers_resolver=papers_resolver,
             links_resolver=links_resolver,
+            source_version_reader=source_version_reader,
         )
 
     def __init__(self, store: AgenticWikiStore, *, claims: Any = None,
@@ -69,7 +72,8 @@ class AgenticWikiMaintenance:
                  workspace_reader: Any = None, claim_reader: Any = None,
                  evidence_reader: Any = None, paper_reader: Any = None,
                  claims_resolver: Any = None, evidence_resolver: Any = None,
-                 papers_resolver: Any = None, links_resolver: Any = None) -> None:
+                 papers_resolver: Any = None, links_resolver: Any = None,
+                 source_version_reader: Any = None) -> None:
         self.store = store
         self.claims = claims
         self.evidence = evidence
@@ -86,6 +90,7 @@ class AgenticWikiMaintenance:
             evidence_reader if evidence_reader is not None else evidence_resolver
         )
         self.paper_reader = paper_reader if paper_reader is not None else papers_resolver
+        self.source_version_reader = source_version_reader
         self.calls = 0
 
     def __call__(self, workspace_id: str, **overrides: Any):
@@ -96,6 +101,9 @@ class AgenticWikiMaintenance:
         links = self._resolve(
             overrides.get("claim_evidence_links", self.claim_evidence_links), workspace_id
         )
+        source_versions = self._resolve(self.source_version_reader, workspace_id)
+        if source_versions is None:
+            source_versions = self._authoritative_source_versions(workspace_id)
         if claims is None:
             claims = self._authoritative_records("claims", workspace_id)
         if evidence is None:
@@ -105,13 +113,10 @@ class AgenticWikiMaintenance:
         if links is None:
             links = self._authoritative_links(workspace_id, claims)
         try:
-            return self.store.maintain(
-                workspace_id,
-                claims=claims,
-                evidence=evidence,
-                papers=papers,
-                claim_evidence_links=links,
-            )
+            maintain_kwargs = dict(claims=claims, evidence=evidence, papers=papers, claim_evidence_links=links)
+            if source_versions is not None:
+                maintain_kwargs["source_versions"] = source_versions
+            return self.store.maintain(workspace_id, **maintain_kwargs)
         except TypeError as exc:
             if "claim_evidence_links" not in str(exc):
                 raise
@@ -124,14 +129,32 @@ class AgenticWikiMaintenance:
         if source is None:
             return None
         if callable(source):
-            try:
-                return source(workspace_id)
-            except TypeError:
-                try:
-                    return source(workspace_id=workspace_id)
-                except TypeError:
-                    return source()
+            return AgenticWikiMaintenance._invoke_workspace(source, workspace_id)
         return source
+
+    @staticmethod
+    def _invoke_workspace(method: Any, workspace_id: str) -> Any:
+        """Adapt supported reader signatures without swallowing implementation errors."""
+        try:
+            signature = inspect.signature(method)
+        except (TypeError, ValueError):
+            return method(workspace_id)
+        parameters = tuple(signature.parameters.values())
+        if "workspace_id" in signature.parameters:
+            parameter = signature.parameters["workspace_id"]
+            if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD):
+                return method(workspace_id)
+            return method(workspace_id=workspace_id)
+        if any(parameter.kind == parameter.VAR_KEYWORD for parameter in parameters):
+            return method(workspace_id=workspace_id)
+        positional = [
+            parameter
+            for parameter in parameters
+            if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+        ]
+        if positional:
+            return method(workspace_id)
+        return method()
 
     def _authoritative_papers(self, workspace_id: str) -> Any:
         reader = self.paper_reader
@@ -149,13 +172,17 @@ class AgenticWikiMaintenance:
             method = getattr(service, name, None)
             if method is None:
                 continue
-            try:
-                return method(workspace_id)
-            except TypeError:
-                try:
-                    return method(workspace_id=workspace_id)
-                except TypeError:
-                    continue
+            return self._invoke_workspace(method, workspace_id)
+        return None
+
+    def _authoritative_source_versions(self, workspace_id: str) -> Any:
+        service = self.workspace_service
+        if service is None:
+            return None
+        for name in ("current_source_versions", "canonical_source_versions", "paper_source_versions"):
+            method = getattr(service, name, None)
+            if method is not None:
+                return self._invoke_workspace(method, workspace_id)
         return None
 
     def _authoritative_records(self, kind: str, workspace_id: str) -> Any:
@@ -173,20 +200,25 @@ class AgenticWikiMaintenance:
             method = getattr(service, name, None)
             if method is None:
                 continue
-            try:
-                return method(workspace_id)
-            except TypeError:
-                try:
-                    return method(workspace_id=workspace_id)
-                except TypeError:
-                    continue
+            signature = inspect.signature(method)
+            if "research_session_id" in signature.parameters and "workspace_id" not in signature.parameters:
+                records: list[Any] = []
+                for session_id in self._session_ids(workspace_id):
+                    parameters = signature.parameters
+                    if "research_session_id" in parameters:
+                        records.extend(method(research_session_id=session_id))
+                return records
+            return self._invoke_workspace(method, workspace_id)
 
         method = getattr(service, f"list_{kind}", None)
         if method is not None:
-            try:
-                return method(workspace_id=workspace_id)
-            except TypeError:
-                pass
+            signature = inspect.signature(method)
+            if "research_session_id" in signature.parameters and "workspace_id" not in signature.parameters:
+                records: list[Any] = []
+                for session_id in self._session_ids(workspace_id):
+                    records.extend(method(research_session_id=session_id))
+                return records
+            return self._invoke_workspace(method, workspace_id)
 
         session_ids = self._session_ids(workspace_id)
         if method is None:
@@ -209,13 +241,7 @@ class AgenticWikiMaintenance:
         for name in ("list_workspace_claim_evidence", "claim_evidence_for_workspace"):
             method = getattr(service, name, None)
             if method is not None:
-                try:
-                    return method(workspace_id)
-                except TypeError:
-                    try:
-                        return method(workspace_id=workspace_id)
-                    except TypeError:
-                        pass
+                return self._invoke_workspace(method, workspace_id)
         getter = getattr(service, "get_claim_evidence", None)
         if getter is None:
             return None
@@ -226,18 +252,11 @@ class AgenticWikiMaintenance:
             session_id = self._field(claim, "research_session_id")
             if claim_id is None:
                 continue
-            try:
-                if session_id is None:
-                    links.extend(getter(claim_id=claim_id))
-                else:
-                    links.extend(
-                        getter(research_session_id=session_id, claim_id=claim_id)
-                    )
-            except TypeError:
-                try:
-                    links.extend(getter(session_id, claim_id))
-                except TypeError:
-                    continue
+            signature = inspect.signature(getter)
+            kwargs = {"claim_id": claim_id}
+            if session_id is not None and "research_session_id" in signature.parameters:
+                kwargs["research_session_id"] = session_id
+            links.extend(getter(**kwargs))
         return links
 
     def _session_ids(self, workspace_id: str) -> tuple[str, ...]:

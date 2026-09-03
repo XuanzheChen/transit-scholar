@@ -150,6 +150,16 @@ class ResearchQueryLedgerService:
         self._get_owned_query(research_session.id, source_query_id)
         if not isinstance(evidence, ResearchEvidence):
             raise InvalidEvidenceInputError("evidence must be a ResearchEvidence")
+        if evidence.paper_provenance is not None and (
+            evidence.paper_provenance.parse_run_id or evidence.paper_provenance.canonical_source_version
+        ):
+            updates = {}
+            if evidence.locator.parse_run_id is None:
+                updates["parse_run_id"] = evidence.paper_provenance.parse_run_id
+            if evidence.locator.canonical_source_version is None:
+                updates["canonical_source_version"] = evidence.paper_provenance.canonical_source_version
+            if updates:
+                evidence = evidence.model_copy(update={"locator": evidence.locator.model_copy(update=updates)})
         self._validate_evidence_provenance(
             research_session=research_session,
             source_query_id=source_query_id,

@@ -301,7 +301,32 @@ class KnowledgeToolService:
                 result = self.search_workspace_rag(query, action)
             envelope.schema_results.extend(result.schema_results)
             envelope.wiki_results.extend(result.wiki_results)
-            envelope.evidence_results.extend(result.evidence_results)
+            for evidence in result.evidence_results:
+                paper_id = evidence.locator.paper_id
+                if paper_id and evidence.paper_provenance is not None:
+                    identity_reader = getattr(self.gateway, "current_source_identity", None)
+                    source_version = identity_reader(paper_id) if identity_reader else None
+                    if source_version and not (
+                        evidence.paper_provenance.parse_run_id
+                        or evidence.paper_provenance.canonical_source_version
+                    ):
+                        evidence = evidence.model_copy(
+                            update={
+                                "locator": evidence.locator.model_copy(
+                                    update={
+                                        "parse_run_id": source_version,
+                                        "canonical_source_version": source_version,
+                                    }
+                                ),
+                                "paper_provenance": evidence.paper_provenance.model_copy(
+                                    update={
+                                        "parse_run_id": source_version,
+                                        "canonical_source_version": source_version,
+                                    }
+                                ),
+                            }
+                        )
+                envelope.evidence_results.append(evidence)
             envelope.diagnostics.extend(result.diagnostics)
             if result.workspace_revision is not None:
                 envelope.workspace_revision = result.workspace_revision
@@ -333,6 +358,8 @@ class KnowledgeToolService:
             if result.status != "ok":
                 diagnostics.extend(self._result_diagnostics(action.action_id, result, paper_id))
                 continue
+            identity_reader = getattr(self.gateway, "current_source_identity", None)
+            source_version = identity_reader(paper_id) if identity_reader else None
             for hit in result.hits:
                 source_ref = hit.source_refs[0] if hit.source_refs else None
                 block_id = source_ref.block_id if source_ref else hit.chunk_id
@@ -346,6 +373,8 @@ class KnowledgeToolService:
                             source_kind="paper",
                             paper_id=paper_id,
                             block_id=block_id,
+                            parse_run_id=source_version,
+                            canonical_source_version=source_version,
                             pages=hit.pages,
                             span=(
                                 {"start": source_ref.char_start, "end": source_ref.char_end}
@@ -360,7 +389,11 @@ class KnowledgeToolService:
                             session_id=query.session_id,
                             query_text=query.query_text,
                         ),
-                        paper_provenance=PaperProvenance(paper_id=paper_id),
+                        paper_provenance=PaperProvenance(
+                            paper_id=paper_id,
+                            parse_run_id=source_version,
+                            canonical_source_version=source_version,
+                        ),
                         section=" / ".join(hit.section_path) or None,
                         retrieval_provenance={
                             "action_id": action.action_id,

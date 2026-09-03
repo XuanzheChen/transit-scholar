@@ -22,6 +22,12 @@ class WorkingMemoryBoundaryError(ValueError):
     """Raised when current-run sources cross a run or Workspace boundary."""
 
 
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
 @dataclass(frozen=True, slots=True)
 class WorkingMemory:
     """A read-through view whose values remain owned by L3S2-L3S6 components.
@@ -52,20 +58,49 @@ class WorkingMemory:
             raise WorkingMemoryBoundaryError("AgentRun belongs to another Workspace")
         if self.agent_run.agent_run_id != self.agent_run_id:
             raise WorkingMemoryBoundaryError("AgentRun does not match the facade run")
+        session_ids = {
+            session.research_session_id for session in self.research_sessions
+        }
         for session in self.research_sessions:
             if session.agent_run_id != self.agent_run_id:
                 raise WorkingMemoryBoundaryError("ResearchSession belongs to another AgentRun")
+        for source_name, sources in (
+            ("query", self.queries),
+            ("evidence", self.evidence),
+            ("claim", self.claims),
+        ):
+            for source in sources:
+                source_session_id = _field(source, "research_session_id")
+                if source_session_id is not None and session_ids and source_session_id not in session_ids:
+                    raise WorkingMemoryBoundaryError(
+                        f"{source_name} belongs to another ResearchSession"
+                    )
+                source_workspace_id = _field(source, "workspace_id")
+                if source_workspace_id is not None and source_workspace_id != self.workspace_id:
+                    raise WorkingMemoryBoundaryError(
+                        f"{source_name} belongs to another Workspace"
+                    )
+                locator = _field(source, "locator")
+                locator_workspace_id = _field(locator, "workspace_id")
+                if locator_workspace_id is not None and locator_workspace_id != self.workspace_id:
+                    raise WorkingMemoryBoundaryError(
+                        f"{source_name} provenance belongs to another Workspace"
+                    )
         if self.run_orchestration_state is not None:
             if self.run_orchestration_state.agent_run_id != self.agent_run_id:
                 raise WorkingMemoryBoundaryError("orchestration state belongs to another AgentRun")
         if self.run_context_snapshot is not None:
             if self.run_context_snapshot.agent_run_id != self.agent_run_id:
                 raise WorkingMemoryBoundaryError("run context belongs to another AgentRun")
-        for snapshot in self.runtime_context_snapshots.values():
+        for session_id, snapshot in self.runtime_context_snapshots.items():
             if snapshot.session.agent_run.workspace_id != self.workspace_id:
                 raise WorkingMemoryBoundaryError("runtime context belongs to another Workspace")
             if snapshot.session.agent_run.agent_run_id != self.agent_run_id:
                 raise WorkingMemoryBoundaryError("runtime context belongs to another AgentRun")
+            if snapshot.session.research_session.research_session_id != session_id:
+                raise WorkingMemoryBoundaryError(
+                    "runtime context key does not match its ResearchSession"
+                )
 
     @property
     def session_ids(self) -> tuple[str, ...]:

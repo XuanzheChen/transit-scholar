@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from transit_scholar.layer3.planning import ResearchPlan, ResearchPlanItem, RunDecision
+from transit_scholar.layer3.memory import EpisodicMemoryRetriever
 from transit_scholar.layer3.run_context import (
     RunContextSnapshotBuilder, RunFinalResponseArtifact, RunOrchestrationState,
     RunRuntimeConfig, SessionHandoffProjector, SessionOutcome,
@@ -50,7 +51,8 @@ class RunResearchRuntime:
                  handoff_projector: Any | None = None, trace: Any | None = None,
                  is_cancelled: Callable[[], bool] | None = None, state_store: Any | None = None,
                  requires_execution_service: bool | None = None,
-                 l3s7_lifecycle: Any | None = None):
+                 l3s7_lifecycle: Any | None = None,
+                 episodic_memory_retriever: EpisodicMemoryRetriever | None = None):
         self.session_runtime, self.coordinator, self.synthesis = session_runtime, coordinator, synthesis
         self.execution_service, self.ledger_service = execution_service, ledger_service
         self._requires_execution_service_override = requires_execution_service
@@ -60,9 +62,29 @@ class RunResearchRuntime:
         self.handoff_projector = handoff_projector or SessionHandoffProjector()
         self.trace, self.is_cancelled, self.state_store = trace, is_cancelled or (lambda: False), state_store
         self.l3s7_lifecycle = l3s7_lifecycle
+        if l3s7_lifecycle is not None and hasattr(
+            l3s7_lifecycle, "configure_authoritative_readers"
+        ):
+            l3s7_lifecycle.configure_authoritative_readers(
+                workspace_service=getattr(self.execution_service, "workspaces", None),
+                ledger_service=self.ledger_service,
+                execution_service=self.execution_service,
+            )
+        self.episodic_memory_retriever = episodic_memory_retriever or (
+            EpisodicMemoryRetriever(l3s7_lifecycle.episodic_store)
+            if l3s7_lifecycle is not None
+            else None
+        )
         if (
             l3s7_lifecycle is not None
-            and getattr(self.session_runtime, "agentic_wiki_maintenance", None) is None
+            and (
+                getattr(self.session_runtime, "agentic_wiki_maintenance", None) is None
+                or not getattr(
+                    self.session_runtime,
+                    "_agentic_wiki_maintenance_explicit",
+                    False,
+                )
+            )
         ):
             try:
                 self.session_runtime.agentic_wiki_maintenance = (
@@ -70,9 +92,19 @@ class RunResearchRuntime:
                 )
             except (AttributeError, TypeError):
                 pass
+        if (
+            self.episodic_memory_retriever is not None
+            and getattr(self.session_runtime, "episodic_memory_retriever", None) is None
+        ):
+            try:
+                self.session_runtime.episodic_memory_retriever = (
+                    self.episodic_memory_retriever
+                )
+            except (AttributeError, TypeError):
+                pass
 
     def execute(self, *, agent_run_id: str, user_goal: str | None = None, agent_run: Any | None = None) -> dict[str, Any]:
-        run = agent_run or {"agent_run_id": agent_run_id, "user_goal": user_goal or ""}
+        run = agent_run or self._load_agent_run(agent_run_id, user_goal)
         state, outcomes, plan = self._load(agent_run_id)
         if state.current_research_session_id:
             state, outcomes, plan = self._recover_current(run, state, outcomes, plan)
@@ -83,7 +115,7 @@ class RunResearchRuntime:
             state.run_steps += 1
             reason = self._limit(state, outcomes)
             if reason: return self._result(state, outcomes, plan, reason)
-            snapshot = self.snapshot_builder.build(agent_run=run, session_outcomes=outcomes, research_plan=plan, orchestration_state=state)
+            snapshot = self._build_snapshot(run, outcomes, plan, state)
             decision = self._validate(self.coordinator(snapshot))
             self._event(agent_run_id, "run.coordination", {"mode": decision.mode})
             if decision.mode == "complete":
@@ -203,10 +235,7 @@ class RunResearchRuntime:
             if question is None and isinstance(persisted, dict):
                 question = persisted.get("research_question")
         question = question or "Resumed research session"
-        snapshot = self.snapshot_builder.build(
-            agent_run=run, session_outcomes=outcomes, research_plan=plan,
-            orchestration_state=state,
-        )
+        snapshot = self._build_snapshot(run, outcomes, plan, state)
         handoff = self.handoff_projector.project(
             snapshot, current_research_question=question, config=self.config
         )
@@ -239,6 +268,50 @@ class RunResearchRuntime:
 
     @staticmethod
     def _validate(value): return value if isinstance(value, RunDecision) else RunDecision.model_validate(value)
+
+    def _build_snapshot(self, run, outcomes, plan, state):
+        build_kwargs = {
+            "agent_run": run,
+            "session_outcomes": outcomes,
+            "research_plan": plan,
+            "orchestration_state": state,
+        }
+        if self.episodic_memory_retriever is not None:
+            build_kwargs["episodic_memory"] = self._retrieve_episodic_memory(run)
+        return self.snapshot_builder.build(
+            **build_kwargs,
+        )
+
+    def _load_agent_run(self, agent_run_id: str, user_goal: str | None) -> Any:
+        """Use the authoritative execution read model when available."""
+        if self.execution_service is not None and hasattr(
+            self.execution_service, "get_agent_run"
+        ):
+            loaded = self.execution_service.get_agent_run(agent_run_id)
+            if loaded is not None:
+                return loaded
+        return {"agent_run_id": agent_run_id, "user_goal": user_goal or ""}
+
+    def _retrieve_episodic_memory(self, run) -> tuple[object, ...]:
+        """Select bounded Workspace experience before L3S6 coordination."""
+        if (
+            self.episodic_memory_retriever is None
+            or self.config.max_episodic_memory_candidates == 0
+        ):
+            return ()
+        workspace_id = self._value(run, "workspace_id")
+        user_goal = self._value(run, "user_goal", self._value(run, "goal"))
+        if not workspace_id or not user_goal:
+            return ()
+        return self.episodic_memory_retriever.retrieve(
+            workspace_id=str(workspace_id),
+            query=str(user_goal),
+            top_k=self.config.max_episodic_memory_candidates,
+        )
+
+    @staticmethod
+    def _value(source, name, default=None):
+        return source.get(name, default) if isinstance(source, dict) else getattr(source, name, default)
     def _create_session(self, **kwargs: Any) -> Any:
         if self.execution_service is not None:
             service = self.execution_service
@@ -468,6 +541,7 @@ class RunResearchRuntime:
         if self.l3s7_lifecycle is None:
             return
         queries, evidence, claims = [], [], []
+        claim_evidence_links = None
         if self.ledger_service is not None:
             for outcome in outcomes:
                 session_id = outcome.research_session_id
@@ -475,8 +549,25 @@ class RunResearchRuntime:
                     queries.extend(self.ledger_service.list_queries(research_session_id=session_id))
                 if hasattr(self.ledger_service, "list_evidence"):
                     evidence.extend(self.ledger_service.list_evidence(research_session_id=session_id))
+                session_claims = []
                 if hasattr(self.ledger_service, "list_claims"):
-                    claims.extend(self.ledger_service.list_claims(research_session_id=session_id))
+                    session_claims = self.ledger_service.list_claims(research_session_id=session_id)
+                    claims.extend(session_claims)
+                if hasattr(self.ledger_service, "get_claim_evidence"):
+                    if claim_evidence_links is None:
+                        claim_evidence_links = []
+                    for claim in session_claims:
+                        claim_id = self._value(claim, "claim_id")
+                        try:
+                            links = self.ledger_service.get_claim_evidence(
+                                research_session_id=session_id,
+                                claim_id=claim_id,
+                            )
+                        except TypeError:
+                            links = self.ledger_service.get_claim_evidence(
+                                session_id, claim_id
+                            )
+                        claim_evidence_links.extend(links or ())
         final_outcome = getattr(artifact, "answer_text", None) or reason
         self.l3s7_lifecycle.complete_agent_run(
             agent_run=agent_run,
@@ -487,5 +578,6 @@ class RunResearchRuntime:
             queries=queries,
             evidence=evidence,
             claims=claims,
+            claim_evidence_links=claim_evidence_links,
             final_outcome=final_outcome,
         )

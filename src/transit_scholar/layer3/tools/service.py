@@ -178,6 +178,9 @@ class KnowledgeToolService:
                         "snippet": hit.snippet,
                         "retrieval_mode": hit.retrieval_mode,
                         "score": hit.score,
+                        "source_kind": getattr(hit, "source_kind", "base_wiki"),
+                        "lifecycle_status": getattr(hit, "lifecycle_status", None),
+                        "local_rank": getattr(hit, "local_rank", None),
                     },
                 )
             )

@@ -49,3 +49,25 @@ def test_collector_derives_useful_and_failed_query_experience() -> None:
         "abandoned",
         "failed",
     )
+
+
+def test_terminal_failure_precedes_admitted_evidence() -> None:
+    normalized = EpisodicMemoryCollector().collect(
+        {"workspace_id": "workspace-1", "agent_run_id": "run-1", "user_goal": "goal"},
+        queries=[
+            {"query_id": "failed", "query_text": "failed after hit", "status": "failed"},
+            {"query_id": "abandoned", "query_text": "abandoned after hit", "status": "abandoned"},
+            {"query_id": "completed", "query_text": "completed hit", "status": "completed"},
+        ],
+        evidence=[
+            {"evidence_id": "e-1", "source_query_id": "failed", "status": "admitted"},
+            {"evidence_id": "e-2", "source_query_id": "abandoned", "status": "admitted"},
+            {"evidence_id": "e-3", "source_query_id": "completed", "status": "admitted"},
+        ],
+    )
+
+    assert normalized.useful_queries == ("completed hit",)
+    assert normalized.failed_or_unhelpful_queries == (
+        "failed after hit",
+        "abandoned after hit",
+    )

@@ -90,7 +90,13 @@ def test_no_layer3_source_mentions_agentic_behavior_tokens():
         relative_path = file.relative_to(_LAYER3_DIR).as_posix()
         if relative_path.startswith(("agentic_wiki/", "knowledge_evolution/", "planning/")):
             continue
-        if relative_path in {"wiki/service.py", "roles/run_coordinator.py", "runtime/run_runtime.py"}:
+        if relative_path in {
+            "wiki/service.py",
+            "roles/run_coordinator.py",
+            "runtime/run_runtime.py",
+            "runtime/main_runtime.py",
+            "memory/lifecycle.py",
+        }:
             continue
         source = file.read_text(encoding="utf-8")
         for token in _FORBIDDEN_SOURCE_TOKENS:

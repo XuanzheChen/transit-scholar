@@ -250,7 +250,9 @@ class WorkspaceKnowledgeGateway:
     ) -> "WikiSearchResult":
         """Search the Workspace's own Base Wiki; explicit outcomes otherwise."""
         self._require_current()
-        return self.wiki.search(self.workspace_id, query, limit=limit, mode=mode)
+        return self.wiki.search_base_only(
+            self.workspace_id, query, limit=limit, mode=mode
+        )
 
     def resolve_wiki_hit_paper_ids(self, hit: Any) -> list[str]:
         """Resolve a current Wiki search hit to member Paper identities."""

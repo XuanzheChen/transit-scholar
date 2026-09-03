@@ -2,6 +2,8 @@
 from __future__ import annotations
 import re
 import json
+import os
+import tempfile
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Iterable
@@ -22,13 +24,20 @@ class EpisodicMemoryStore:
     def for_workspace(cls, workspace_id: str, *, base_dir: str | Path | None = None) -> "EpisodicMemoryStore":
         from ..storage.paths import workspace_layout
         layout = workspace_layout(workspace_id, base_dir=base_dir)
-        return cls(storage_path=layout.derived_dir / "episodic_memory.json")
+        return cls(storage_path=layout.derived_dir / "episodic_memory.json", bound_workspace_id=workspace_id)
 
-    def __init__(self, records: Iterable[EpisodicMemoryRecord] = (), *, storage_path: str | Path | None = None) -> None:
+    def __init__(self, records: Iterable[EpisodicMemoryRecord] = (), *, storage_path: str | Path | None = None,
+                 bound_workspace_id: str | None = None) -> None:
         self._records: dict[tuple[str, str], EpisodicMemoryRecord] = {}
         self._storage_path = Path(storage_path) if storage_path is not None else None
+        self.bound_workspace_id = bound_workspace_id
+        if self.bound_workspace_id is not None and not str(self.bound_workspace_id).strip():
+            raise ValueError("bound_workspace_id must be a non-empty string")
         if self._storage_path and self._storage_path.exists():
-            for item in json.loads(self._storage_path.read_text(encoding="utf-8")):
+            payload = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, list):
+                raise ValueError("episodic memory persistence must contain a JSON list")
+            for item in payload:
                 self.put(EpisodicMemoryRecord.model_validate(item), _persist=False)
         for record in records:
             self.put(record)
@@ -38,9 +47,41 @@ class EpisodicMemoryStore:
             return
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
         payload = [record.model_dump(mode="json") for record in self._records.values()]
-        self._storage_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{self._storage_path.name}.", suffix=".tmp",
+            dir=str(self._storage_path.parent),
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_name, self._storage_path)
+            try:
+                directory_fd = os.open(self._storage_path.parent, os.O_RDONLY)
+            except OSError:
+                directory_fd = None
+            if directory_fd is not None:
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        except BaseException:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+            raise
+
+    def _check_workspace(self, workspace_id: str) -> None:
+        if not workspace_id:
+            raise ValueError("workspace_id is required")
+        if self.bound_workspace_id is not None and workspace_id != self.bound_workspace_id:
+            raise PermissionError("episodic memory repository is bound to another Workspace")
 
     def put(self, record: EpisodicMemoryRecord, *, _persist: bool = True) -> EpisodicMemoryRecord:
+        self._check_workspace(record.workspace_id)
         existing = self._records.get(record.canonical_episode_key)
         if existing is not None and existing != record:
             raise ValueError("an AgentRun already has a canonical episodic memory record")
@@ -50,6 +91,7 @@ class EpisodicMemoryStore:
         return record
 
     def get(self, memory_id: str, *, workspace_id: str) -> EpisodicMemoryRecord:
+        self._check_workspace(workspace_id)
         for record in self._records.values():
             if record.memory_id == memory_id:
                 if record.workspace_id != workspace_id:
@@ -63,11 +105,11 @@ class EpisodicMemoryStore:
         workspace_id: str,
         agent_run_id: str,
     ) -> EpisodicMemoryRecord | None:
+        self._check_workspace(workspace_id)
         return self._records.get((workspace_id, agent_run_id))
 
     def list(self, *, workspace_id: str) -> tuple[EpisodicMemoryRecord, ...]:
-        if not workspace_id:
-            raise ValueError("workspace_id is required")
+        self._check_workspace(workspace_id)
         return tuple(
             record
             for (workspace, _), record in self._records.items()
@@ -75,8 +117,7 @@ class EpisodicMemoryStore:
         )
 
     def delete_workspace(self, workspace_id: str) -> None:
-        if not workspace_id:
-            raise ValueError("workspace_id is required")
+        self._check_workspace(workspace_id)
         self._records = {
             key: record
             for key, record in self._records.items()

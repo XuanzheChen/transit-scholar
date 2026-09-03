@@ -84,12 +84,17 @@ class WorkspaceWikiHit(BaseModel):
     retrieval_mode: Literal["lexical", "semantic"] = "lexical"
     source_kind: Literal["base_wiki", "agentic_wiki"]
     lifecycle_status: Literal["active", "stale"] | None = None
+    source_score: float | None = None
+    local_rank: int | None = None
+    fusion_score: float | None = None
 
 
 class WorkspaceWikiSearchResult(BaseModel):
     status: Literal["ok", "degraded", "error"] = "ok"
     hits: list[WorkspaceWikiHit] = Field(default_factory=list)
     error_code: str | None = None
+    source_status: dict[str, str] = Field(default_factory=dict)
+    source_errors: dict[str, str | None] = Field(default_factory=dict)
 
 
 __all__ = [

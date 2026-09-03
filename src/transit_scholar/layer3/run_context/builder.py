@@ -5,6 +5,8 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from transit_scholar.layer3.memory import EpisodicMemoryCandidate
+
 from .models import RunContextSnapshot, RunOrchestrationState, RunRuntimeConfig, SessionHandoffContext, SessionOutcome
 
 
@@ -13,7 +15,8 @@ class RunContextSnapshotBuilder:
 
     def build(self, *, agent_run: Any, session_outcomes: Iterable[SessionOutcome] = (), research_plan: Any | None = None,
               active_session_ids: Iterable[str] = (), failed_session_ids: Iterable[str] = (), claim_refs: Iterable[str] = (),
-              unresolved_items: Iterable[str] = (), conflicting_items: Iterable[str] = (), orchestration_state: RunOrchestrationState | None = None) -> RunContextSnapshot:
+              unresolved_items: Iterable[str] = (), conflicting_items: Iterable[str] = (), orchestration_state: RunOrchestrationState | None = None,
+              episodic_memory: Iterable[EpisodicMemoryCandidate] = ()) -> RunContextSnapshot:
         run = self._dump(agent_run)
         goal = run.get("user_goal") or run.get("goal")
         run_id = run.get("agent_run_id") or run.get("id")
@@ -21,10 +24,22 @@ class RunContextSnapshotBuilder:
             raise ValueError("agent_run must provide agent_run_id and user_goal")
         outcomes = list(session_outcomes)
         failed = list(failed_session_ids) or [o.research_session_id for o in outcomes if o.status != "completed"]
+        memory = list(episodic_memory)
+        workspace_id = run.get("workspace_id")
+        if memory:
+            if workspace_id is None:
+                raise ValueError(
+                    "AgentRun workspace is required when episodic memory is supplied"
+                )
+            if any(
+                candidate.workspace_id != str(workspace_id) for candidate in memory
+            ):
+                raise ValueError("episodic memory workspace does not match AgentRun")
         return RunContextSnapshot(agent_run_id=str(run_id), user_goal=str(goal), research_plan=research_plan,
             session_outcomes=outcomes, active_session_ids=list(active_session_ids), failed_session_ids=failed,
             claim_refs=list(claim_refs) or [r for o in outcomes for r in o.claim_refs], unresolved_items=list(unresolved_items),
-            conflicting_items=list(conflicting_items), orchestration_state=orchestration_state)
+            conflicting_items=list(conflicting_items), orchestration_state=orchestration_state,
+            episodic_memory=memory)
 
     @staticmethod
     def _dump(value: Any) -> dict[str, Any]:

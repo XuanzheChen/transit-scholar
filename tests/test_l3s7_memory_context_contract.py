@@ -19,9 +19,9 @@ def _candidate():
     )
 
 
-def test_memory_is_allowlisted_only_for_coordination_roles():
+def test_memory_is_allowlisted_only_for_query_planning_role():
     snapshot = RuntimeContextSnapshot.model_construct(episodic_memory=(_candidate(),))
     projector = RoleContextProjector()
-    assert "episodic_memory" in projector.project(snapshot, ResearchCoordinatorRole()).sections
     assert "episodic_memory" in projector.project(snapshot, QueryPlanningRole()).sections
+    assert "episodic_memory" not in projector.project(snapshot, ResearchCoordinatorRole()).sections
     assert "episodic_memory" not in projector.project(snapshot, EvidenceReasoningRole()).sections

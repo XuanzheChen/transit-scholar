@@ -37,11 +37,10 @@ class RoleContextProjector:
         sections: dict[str, Any] = {}
         truncated = False
         allowed_sections = set(policy.included_sections)
-        # Episodic memory is auxiliary context and is restricted to the two
-        # coordination/planning roles; policies cannot grant it to reasoning
-        # or synthesis roles by accident.
+        # Session-level episodic memory is auxiliary context and is restricted
+        # to QueryPlanningRole.  RunCoordinatorRole receives its separately
+        # governed run-level context through L3S6, not this L3S5 projector.
         memory_roles = {
-            RoleId.RESEARCH_COORDINATOR,
             RoleId.QUERY_PLANNING,
         }
         if role.role_id in memory_roles:

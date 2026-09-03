@@ -19,6 +19,7 @@ from transit_scholar.layer3.agent import (
     RoleResult,
 )
 from transit_scholar.layer3.context import RetrievedEvidenceContext, RoleContextProjector
+from transit_scholar.layer3.memory import EpisodicMemoryRetriever
 from transit_scholar.layer3.tools import RetrievalResultEnvelope
 
 from .config import MainRuntimeConfig
@@ -115,6 +116,11 @@ class MainResearchRuntime:
         is_cancelled: Callable[[], bool] | None = None,
         state_store: MainRuntimeStateStore | None = None,
         agentic_wiki_maintenance: Callable[[str], object] | None = None,
+        agentic_wiki_base_dir: str | None = None,
+        workspace_service: object | None = None,
+        ledger_service: object | None = None,
+        episodic_memory_retriever: EpisodicMemoryRetriever | None = None,
+        episodic_memory_top_k: int = 5,
     ) -> None:
         self.registry = registry
         self.role_runtime = role_runtime
@@ -134,7 +140,68 @@ class MainResearchRuntime:
             self.role_runtime.action_executor = action_executor
         self.is_cancelled = is_cancelled or (lambda: False)
         self.state_store = state_store
+        self._agentic_wiki_maintenance_explicit = agentic_wiki_maintenance is not None
         self.agentic_wiki_maintenance = agentic_wiki_maintenance
+        if self.agentic_wiki_maintenance is None:
+            self.agentic_wiki_maintenance = self._default_agentic_wiki_maintenance(
+                base_dir=agentic_wiki_base_dir,
+                workspace_service=workspace_service,
+                ledger_service=ledger_service,
+            )
+        if episodic_memory_top_k < 0:
+            raise ValueError("episodic_memory_top_k must not be negative")
+        self.episodic_memory_retriever = episodic_memory_retriever
+        self.episodic_memory_top_k = episodic_memory_top_k
+
+    def _default_agentic_wiki_maintenance(
+        self,
+        *,
+        base_dir: str | None,
+        workspace_service: object | None,
+        ledger_service: object | None,
+    ) -> Callable[[str], object] | None:
+        """Compose the production Session-start provenance boundary lazily.
+
+        Existing callers that provide an explicit hook keep that hook.  The
+        normal authoritative ``AgentRunService`` path supplies a SQLAlchemy
+        session, from which Workspace and L3S4 readers can be composed without
+        caller-managed resolver collections.
+        """
+        execution = self.execution_service
+        db_session = getattr(execution, "session", None)
+        if workspace_service is None:
+            workspace_service = getattr(execution, "workspaces", None)
+        if db_session is None and workspace_service is not None:
+            db_session = getattr(workspace_service, "session", None)
+        if ledger_service is None and db_session is not None:
+            try:
+                from transit_scholar.layer3.ledger import ResearchReasoningLedgerService
+
+                ledger_service = ResearchReasoningLedgerService(db_session)
+            except (ImportError, TypeError):
+                ledger_service = None
+        if workspace_service is None and db_session is not None:
+            try:
+                from transit_scholar.layer3.workspace import WorkspaceService
+
+                workspace_service = WorkspaceService(db_session)
+            except (ImportError, TypeError):
+                workspace_service = None
+        if workspace_service is None and ledger_service is None:
+            return None
+
+        def maintain(workspace_id: str) -> object:
+            from transit_scholar.layer3.agentic_wiki import AgenticWikiMaintenance
+
+            return AgenticWikiMaintenance.for_workspace(
+                workspace_id,
+                base_dir=base_dir,
+                workspace_service=workspace_service,
+                ledger_service=ledger_service,
+                execution_service=execution,
+            )(workspace_id)
+
+        return maintain
 
     def execute(self, *, agent_run_id: str, research_session_id: str, session_handoff: object | None = None) -> MainRuntimeResult:
         state = MainRuntimeState(
@@ -218,6 +285,13 @@ class MainResearchRuntime:
                 }
                 if session_handoff is not None:
                     build_kwargs["session_handoff"] = session_handoff
+                if (
+                    next_role == RoleId.QUERY_PLANNING
+                    and self.episodic_memory_retriever is not None
+                ):
+                    build_kwargs["episodic_memory"] = self._retrieve_episodic_memory(
+                        run, session
+                    )
                 snapshot = self.context_builder.build(**build_kwargs)
                 projected = self.projector.project(snapshot, role)
                 role_input = self.role_input_factory(next_role, projected)
@@ -406,6 +480,30 @@ class MainResearchRuntime:
         if usage.failures >= self.config.max_failures:
             return "failed", "max_failures"
         return "running", "role_failure_recovered"
+
+    def _retrieve_episodic_memory(self, run: object, session: object) -> tuple[object, ...]:
+        """Select bounded Workspace experience for QueryPlanningRole only."""
+        if self.episodic_memory_retriever is None or self.episodic_memory_top_k == 0:
+            return ()
+        workspace_id = self._field(run, "workspace_id")
+        if not workspace_id:
+            return ()
+        query = self._field(session, "research_question") or self._field(
+            run, "user_goal"
+        )
+        if not query:
+            return ()
+        return self.episodic_memory_retriever.retrieve(
+            workspace_id=str(workspace_id),
+            query=str(query),
+            top_k=self.episodic_memory_top_k,
+        )
+
+    @staticmethod
+    def _field(value: object, name: str) -> object | None:
+        if isinstance(value, Mapping):
+            return value.get(name)
+        return getattr(value, name, None)
 
     @staticmethod
     def _default_role_input(role_id: RoleId, context: object) -> dict[str, object]:

@@ -14,6 +14,30 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
     return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
 
 
+def _values(value: Any, *, identity_fields: tuple[str, ...] = ()) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        if any(field in value for field in identity_fields):
+            return [value]
+        return list(value.values())
+    if isinstance(value, (str, bytes)):
+        return [value]
+    try:
+        return list(value)
+    except TypeError:
+        return [value]
+
+
+def _status(value: Any, default: str) -> str:
+    if isinstance(value, dict):
+        raw = value.get("status", default)
+    else:
+        raw = getattr(value, "status", default)
+    raw = _get(raw, "value", raw)
+    return str(raw if raw is not None else default).casefold()
+
+
 class NormalizedEpisodeInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     workspace_id: str = Field(min_length=1)
@@ -40,33 +64,85 @@ class EpisodicMemoryCollector:
     def collect(self, agent_run: Any, *, workspace_id: str | None = None, queries: Any = None,
                 evidence: Any = None, claims: Any = None, final_outcome: str | None = None,
                 user_goal_raw: str | None = None) -> NormalizedEpisodeInput:
-        ws = workspace_id or _get(agent_run, "workspace_id")
+        run_workspace = _get(agent_run, "workspace_id")
+        if (
+            workspace_id is not None
+            and run_workspace is not None
+            and workspace_id != run_workspace
+        ):
+            raise PermissionError("AgentRun belongs to another Workspace")
+        ws = workspace_id or run_workspace
         run_id = _get(agent_run, "agent_run_id", _get(agent_run, "id"))
-        goal = user_goal_raw if user_goal_raw is not None else _get(agent_run, "user_goal_raw", _get(agent_run, "user_goal"))
+        run_goal = _get(agent_run, "user_goal_raw", _get(agent_run, "user_goal"))
+        if user_goal_raw is not None and run_goal is not None and user_goal_raw != run_goal:
+            raise ValueError("user_goal_raw does not match the authoritative AgentRun goal")
+        goal = user_goal_raw if user_goal_raw is not None else run_goal
         sessions = _get(agent_run, "sessions", _get(agent_run, "research_sessions", ())) or ()
+        for session in sessions:
+            session_workspace = _get(session, "workspace_id")
+            if session_workspace is not None and session_workspace != ws:
+                raise PermissionError("ResearchSession belongs to another Workspace")
+            session_run = _get(session, "agent_run_id")
+            if session_run is not None and session_run != run_id:
+                raise ValueError("ResearchSession belongs to another AgentRun")
         session_ids = tuple(
             _get(s, "research_session_id", _get(s, "session_id", _get(s, "id")))
             for s in sessions
         )
-        qs = list(queries if queries is not None else (_get(agent_run, "queries", ()) or ()))
-        evs = list(evidence if evidence is not None else (_get(agent_run, "evidence", ()) or ()))
+        qs = _values(queries if queries is not None else (_get(agent_run, "queries", ()) or ()), identity_fields=("query_id", "id"))
+        qs = [
+            query for query in qs
+            if _get(query, "research_session_id") in (None, *session_ids)
+            and _get(query, "workspace_id", ws) in (None, ws)
+            and _get(query, "agent_run_id", run_id) in (None, run_id)
+        ]
+        evs = _values(evidence if evidence is not None else (_get(agent_run, "evidence", ()) or ()), identity_fields=("evidence_id", "id"))
+        eligible_evidence = []
+        for item in evs:
+            item_workspace = _get(item, "workspace_id")
+            locator = _get(item, "locator")
+            if item_workspace is None and locator is not None:
+                item_workspace = _get(locator, "workspace_id")
+            item_run = _get(item, "agent_run_id")
+            item_session = _get(item, "research_session_id")
+            if item_workspace not in (None, ws):
+                continue
+            if item_run not in (None, run_id):
+                continue
+            if session_ids and item_session not in (None, *session_ids):
+                continue
+            eligible_evidence.append(item)
+        evs = eligible_evidence
         admitted = {
             str(_get(e, "source_query_id", _get(e, "query_id")))
             for e in evs
             if _get(e, "admitted", True)
-            and str(_get(e, "status", "admitted")).lower()
+            and _status(e, "admitted")
             in ("admitted", "accepted", "active")
+            and _get(e, "source_query_id", _get(e, "query_id")) is not None
         }
         useful, failed, seen_query_ids = [], [], set()
         for q in qs:
-            qid, text = str(_get(q, "query_id", _get(q, "id"))), str(_get(q, "query_text", _get(q, "text", q)))
+            raw_qid = _get(q, "query_id", _get(q, "id"))
+            if raw_qid is None:
+                continue
+            qid, text = str(raw_qid), str(_get(q, "query_text", _get(q, "text", q)))
             if qid in seen_query_ids:
                 continue
             seen_query_ids.add(qid)
-            status = str(_get(q, "status", "completed")).lower()
-            terminal_failure = status in {"failed", "abandoned", "cancelled", "rejected"}
-            (useful if qid in admitted and not terminal_failure else failed).append(text)
-        cls = list(claims if claims is not None else (_get(agent_run, "claims", ()) or ()))
+            status = _status(q, "completed")
+            terminal_success = status in {"completed", "succeeded", "success"}
+            (useful if qid in admitted and terminal_success else failed).append(text)
+        cls = _values(claims if claims is not None else (_get(agent_run, "claims", ()) or ()), identity_fields=("claim_id", "id"))
+        cls = [
+            claim for claim in cls
+            if _get(claim, "workspace_id", ws) == ws
+            and _get(claim, "agent_run_id", run_id) in (None, run_id)
+            and (
+                not session_ids
+                or _get(claim, "research_session_id") in (None, *session_ids)
+            )
+        ]
         claim_ids = tuple(
             str(claim_id)
             for c in cls
@@ -101,15 +177,26 @@ class EpisodicMemoryDistiller:
                 raise RuntimeError("semantic distillation requires an explicit semantic provider")
             return EpisodicSemanticOutput(goal_summary=normalized.user_goal_raw, research_summary=normalized.final_outcome)
         bounded_input = normalized.model_dump(mode="json")
-        raw = self.client.generate_structured(
-            [{"role": "user", "content": json.dumps(bounded_input, sort_keys=True)}],
-            EpisodicSemanticOutput,
-            {
-                "workspace_id": normalized.workspace_id,
-                "agent_run_id": normalized.agent_run_id,
-                "normalized_episode_input": bounded_input,
-            },
-        )
+        messages = [
+            {"role": "user", "content": json.dumps(bounded_input, sort_keys=True)}
+        ]
+        metadata = {
+            "workspace_id": normalized.workspace_id,
+            "agent_run_id": normalized.agent_run_id,
+            "normalized_episode_input": bounded_input,
+        }
+        generator = getattr(self.client, "generate_structured", None)
+        if callable(generator):
+            raw = generator(messages, EpisodicSemanticOutput, metadata)
+        elif callable(self.client):
+            try:
+                raw = self.client(bounded_input, EpisodicSemanticOutput, metadata)
+            except TypeError:
+                raw = self.client(bounded_input)
+        else:
+            raise TypeError(
+                "semantic provider must expose generate_structured or be callable"
+            )
         return EpisodicSemanticOutput.model_validate(raw)
 
 
@@ -122,7 +209,8 @@ def validate_semantic_output(output: EpisodicSemanticOutput, normalized: Normali
     if claims is not None:
         claims_by_id = {
             str(_get(claim, "claim_id", _get(claim, "id"))): claim
-            for claim in claims
+            for claim in _values(claims, identity_fields=("claim_id", "id"))
+            if _get(claim, "claim_id", _get(claim, "id")) is not None
         }
         if not selected.issubset(claims_by_id):
             raise ValueError("referenced claim does not exist")
@@ -130,9 +218,12 @@ def validate_semantic_output(output: EpisodicSemanticOutput, normalized: Normali
             claim = claims_by_id[claim_id]
             if _get(claim, "workspace_id", normalized.workspace_id) != normalized.workspace_id:
                 raise ValueError("claim ownership mismatch")
-            if _get(claim, "agent_run_id", normalized.agent_run_id) != normalized.agent_run_id:
+            claim_run_id = _get(claim, "agent_run_id")
+            if claim_run_id is not None and claim_run_id != normalized.agent_run_id:
                 raise ValueError("claim ownership mismatch")
             session_id = _get(claim, "research_session_id")
+            if claim_run_id is None and session_id is None:
+                raise ValueError("claim ownership mismatch")
             if session_id is not None and session_id not in normalized.session_ids:
                 raise ValueError("claim ownership mismatch")
     return output

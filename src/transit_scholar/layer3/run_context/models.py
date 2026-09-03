@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from transit_scholar.layer3.memory import EpisodicMemoryCandidate
+
 SessionOutcomeStatus = Literal["completed", "failed", "cancelled", "terminated"]
 RunStatus = Literal["created", "running", "completed", "failed", "cancelled", "terminated"]
 
@@ -57,6 +59,7 @@ class RunRuntimeConfig(BaseModel):
     max_coordination_unresolved_items: int = Field(default=50, ge=0)
     max_coordination_conflicting_items: int = Field(default=50, ge=0)
     max_coordination_plan_items: int = Field(default=50, ge=0)
+    max_episodic_memory_candidates: int = Field(default=5, ge=0)
 
 
 class RunContextSnapshot(BaseModel):
@@ -72,6 +75,7 @@ class RunContextSnapshot(BaseModel):
     unresolved_items: list[str] = Field(default_factory=list)
     conflicting_items: list[str] = Field(default_factory=list)
     orchestration_state: RunOrchestrationState | None = None
+    episodic_memory: list[EpisodicMemoryCandidate] = Field(default_factory=list)
 
 
 class RunCoordinatorSessionSummary(BaseModel):
@@ -105,6 +109,7 @@ class RunCoordinatorContext(BaseModel):
     active_session_ids: list[str] = Field(default_factory=list)
     failed_session_ids: list[str] = Field(default_factory=list)
     orchestration_state: dict[str, Any] | None = None
+    episodic_memory: list[EpisodicMemoryCandidate] = Field(default_factory=list)
 
     @property
     def prior_session_summaries(self) -> list[RunCoordinatorSessionSummary]:

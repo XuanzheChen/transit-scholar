@@ -55,7 +55,12 @@ class RuntimeContextSnapshotBuilder:
             )
         ]
         memory = tuple(episodic_memory)
-        mismatched = [item for item in memory if item.workspace_id != run.workspace_id]
+        run_workspace_id = (
+            run.get("workspace_id")
+            if isinstance(run, dict)
+            else getattr(run, "workspace_id", None)
+        )
+        mismatched = [item for item in memory if item.workspace_id != run_workspace_id]
         if mismatched:
             raise ValueError("episodic memory workspace does not match AgentRun")
         current_retrieval = tuple(

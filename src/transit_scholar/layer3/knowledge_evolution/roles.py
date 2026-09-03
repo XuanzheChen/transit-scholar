@@ -1,5 +1,15 @@
+import json
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 from .models import KnowledgeCandidate
+
+
+class KnowledgePromotionOutput(BaseModel):
+    """Strict provider boundary for semantic promotion output."""
+
+    model_config = ConfigDict(extra="forbid")
+    candidates: list[KnowledgeCandidate] = Field(default_factory=list)
 
 class KnowledgePromotionRole:
     """Predefined semantic promotion component with a bounded input surface."""
@@ -14,8 +24,36 @@ class KnowledgePromotionRole:
 
     def propose(self, normalized: dict[str, Any]) -> list[KnowledgeCandidate]:
         if self.client is not None:
-            raw = self.client.generate_structured(normalized)
-            return [KnowledgeCandidate.model_validate(x) for x in (raw or [])]
+            bounded = json.dumps(normalized, sort_keys=True, default=str)
+            messages = [{"role": "user", "content": bounded}]
+            metadata = {
+                "workspace_id": normalized["workspace_id"],
+                "agent_run_id": normalized["agent_run_id"],
+                "normalized_promotion_input": normalized,
+            }
+            generator = getattr(self.client, "generate_structured", None)
+            if callable(generator):
+                try:
+                    raw = generator(messages, KnowledgePromotionOutput, metadata)
+                except TypeError:
+                    try:
+                        raw = generator(messages, KnowledgePromotionOutput)
+                    except TypeError:
+                        raw = generator(normalized)
+            elif callable(self.client):
+                try:
+                    raw = self.client(normalized, KnowledgePromotionOutput, metadata)
+                except TypeError:
+                    raw = self.client(normalized)
+            else:
+                raise TypeError(
+                    "semantic provider must expose generate_structured or be callable"
+                )
+            if isinstance(raw, KnowledgePromotionOutput):
+                return list(raw.candidates)
+            if isinstance(raw, dict) and "candidates" in raw:
+                raw = raw["candidates"]
+            return [KnowledgeCandidate.model_validate(item) for item in (raw or [])]
         if self.require_semantic_provider and not self.degraded_fallback:
             raise RuntimeError("semantic promotion requires an explicit semantic provider")
         claims = normalized.get("claims", [])

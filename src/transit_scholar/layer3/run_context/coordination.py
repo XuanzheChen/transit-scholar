@@ -88,6 +88,9 @@ class RunCoordinatorContextProjector:
                 observed.failed_session_ids, cfg.max_prior_sessions
             ),
             orchestration_state=self._orchestration_view(observed),
+            episodic_memory=list(
+                observed.episodic_memory[: cfg.max_episodic_memory_candidates]
+            ),
         )
         return self._fit_budget(context, cfg.max_serialized_chars)
 
@@ -106,7 +109,9 @@ class RunCoordinatorContextProjector:
         context.orchestration_state = None
         context.research_plan = None
         while self._serialized_size(context) > max_chars:
-            if context.key_claims:
+            if context.episodic_memory:
+                context.episodic_memory.pop()
+            elif context.key_claims:
                 context.key_claims.pop()
             elif context.claim_refs:
                 context.claim_refs.pop()

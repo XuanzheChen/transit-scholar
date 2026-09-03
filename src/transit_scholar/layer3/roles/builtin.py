@@ -93,7 +93,14 @@ class QueryPlanningRole(RoleDefinition):
             role_id=RoleId.QUERY_PLANNING,
             description="Propose and refine queries from the current research state.",
             prompt_template=QUERY_PLANNING_PROMPT,
-            context_policy=ContextPolicy(included_sections={"session", "queries", "session_handoff"}),
+            context_policy=ContextPolicy(
+                included_sections={
+                    "session",
+                    "queries",
+                    "session_handoff",
+                    "episodic_memory",
+                }
+            ),
             input_contract=QueryPlanningInput,
             output_contract=QueryPlanningOutput,
             allowed_actions={"CREATE_QUERY", "UPDATE_QUERY"},

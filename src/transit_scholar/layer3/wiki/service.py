@@ -84,6 +84,7 @@ from transit_scholar.layer3.workspace.schema_binding import SCHEMA_MODE_BOUND
 from .context import derive_workspace_context
 from .errors import (
     WikiCorruptError,
+    WikiEmptyMembershipError,
     WikiMissingError,
     WikiStaleError,
     WikiUnsupportedError,
@@ -143,9 +144,13 @@ class WorkspaceWikiService:
         composition_factory: "CompositionFactory | None" = None,
         paper_metadata_loader: "PaperMetadataLoader | None" = None,
         agentic_wiki_store: object | None = None,
+        base_dir: Path | str | None = None,
     ) -> None:
         self.session = session
         self.data_root = data_root
+        self.base_dir = base_dir
+        if data_root is not None and base_dir is not None:
+            raise ValueError("supply exactly one of data_root or base_dir")
         self.workspaces = workspaces or WorkspaceService(session)
         if schemas is None:
             from transit_scholar.layer3.schema.service import (  # noqa: PLC0415
@@ -160,10 +165,6 @@ class WorkspaceWikiService:
         # loading raw Workspace-local L2S2 content twice.
         self.schemas = schemas
         self._composition_factory = composition_factory
-        if agentic_wiki_store is None:
-            from transit_scholar.layer3.agentic_wiki import AgenticWikiStore  # noqa: PLC0415
-
-            agentic_wiki_store = AgenticWikiStore()
         self.agentic_wiki_store = agentic_wiki_store
         if paper_metadata_loader is None:
             from transit_scholar.metadata.service import read_paper_metadata
@@ -243,7 +244,7 @@ class WorkspaceWikiService:
         record = self._require_active_bound(workspace_id)
         memberships = self.workspaces.list_memberships(workspace_id)
         context = derive_workspace_context(record, memberships)
-        layout = workspace_layout(workspace_id, data_root=self.data_root)
+        layout = self._workspace_layout(workspace_id)
         # REQ-001/REQ-002/REQ-003 (T-001/T-002): ONE frozen complete build
         # snapshot taken before L2S3 consumes anything.
         # WorkspaceSchemaService.capture_build_snapshot() resolves the current
@@ -357,7 +358,7 @@ class WorkspaceWikiService:
           with a valid current vector index is ``ready`` (AC-006).
         """
         record = self.workspaces.get(workspace_id)
-        layout = workspace_layout(workspace_id, data_root=self.data_root)
+        layout = self._workspace_layout(workspace_id)
         if record.schema_mode != SCHEMA_MODE_BOUND or record.schema_binding is None:
             return WorkspaceWikiStatus(
                 workspace_id=record.workspace_id, status="unsupported"
@@ -554,70 +555,157 @@ class WorkspaceWikiService:
         mode: Literal["lexical", "semantic"] = "lexical",
         include_stale: bool = False,
     ) -> WorkspaceWikiSearchResult:
-        """Search the Workspace-owned Base and promoted Agentic Wiki domains.
+        """Search the Workspace-owned Base and promoted Agentic Wiki domains."""
+        record = self.workspaces.get(workspace_id)
+        if getattr(record, "status", "active") != "active":
+            raise WorkspaceNotActiveError(
+                f"Workspace {workspace_id!r} is not active and cannot be searched"
+            )
+        source_status: dict[str, str] = {}
+        source_errors: dict[str, str | None] = {}
+        base_hits: list[WorkspaceWikiHit] = []
+        try:
+            base_hits, base_state, base_error = self._search_base_wiki(
+                record, workspace_id, query, limit=limit, mode=mode
+            )
+        except Exception as exc:  # noqa: BLE001 - source failure is isolated
+            base_state, base_error = self._source_error_state(exc)
+        source_status["base_wiki"] = base_state
+        source_errors["base_wiki"] = base_error
 
-        Always resolves the store/service for THIS Workspace's Wiki root;
-        missing snapshots raise ``WikiMissingError`` (AC-008: another
-        Workspace's Wiki is never substituted) and stale snapshots raise
-        ``WikiStaleError`` — an explicit degraded outcome (REQ-007
-        recommendation), never silent access to non-current facts.
+        try:
+            agentic_hits, agentic_state, agentic_error = self._search_agentic_wiki(
+                workspace_id,
+                query,
+                include_stale=include_stale,
+                mode=mode,
+            )
+        except PermissionError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - source failure is isolated
+            agentic_hits = []
+            agentic_state, agentic_error = self._source_error_state(exc)
+        source_status["agentic_wiki"] = agentic_state
+        source_errors["agentic_wiki"] = agentic_error
+
+        combined = self._fuse_wiki_hits(
+            {"base_wiki": base_hits, "agentic_wiki": agentic_hits},
+            limit=max(limit, 0),
+        )
+        if not base_hits and agentic_state not in {"ok", "degraded"}:
+            self._raise_base_search_error(base_state)
+        source_failures = {"error", "unavailable"}
+        has_usable_source = bool(base_hits or agentic_hits)
+        if all(state in source_failures for state in source_status.values()):
+            result_status = "error" if not has_usable_source else "degraded"
+            result_error = "wiki_sources_unavailable" if not has_usable_source else None
+        elif any(state != "ok" for state in source_status.values()):
+            result_status = "degraded"
+            errors = [code for code in source_errors.values() if code]
+            semantic_error = "semantic_agentic_lexical"
+            result_error = (
+                semantic_error
+                if mode == "semantic" and semantic_error in errors
+                else (errors[0] if errors else None)
+            )
+        else:
+            result_status = "ok"
+            result_error = None
+        return WorkspaceWikiSearchResult(
+            status=result_status,
+            hits=combined,
+            error_code=result_error,
+            source_status=source_status,
+            source_errors=source_errors,
+        )
+
+    @staticmethod
+    def _raise_base_search_error(state: str) -> None:
+        errors = {
+            "unsupported": WikiUnsupportedError,
+            "missing": WikiMissingError,
+            "stale": WikiStaleError,
+            "error": WikiCorruptError,
+        }
+        error_type = errors.get(state)
+        if error_type is not None:
+            raise error_type(f"Workspace Base Wiki is {state}")
+
+    def search_base_only(
+        self,
+        workspace_id: str,
+        query: str,
+        *,
+        limit: int = 20,
+        mode: Literal["lexical", "semantic"] = "lexical",
+    ) -> "WikiSearchResult":
+        """Read only the Workspace-owned Base Wiki compatibility surface.
+
+        Layer3 tools and the bound knowledge gateway historically expose the
+        L2S3 ``WikiSearchResult`` contract.  Keep that API separate from the
+        L3S7 unified ``search`` result so source identity and partial status do
+        not alter existing Base-Wiki ownership behavior.
         """
         record = self.workspaces.get(workspace_id)
-        layout = workspace_layout(workspace_id, data_root=self.data_root)
         if record.schema_mode != SCHEMA_MODE_BOUND or record.schema_binding is None:
-            raise WikiUnsupportedError(
-                f"workspace {workspace_id!r} has no Schema; Base Wiki reads are "
-                "unsupported in Layer3 Stage1 (AC-009)"
-            )
+            raise WikiUnsupportedError(f"Workspace Base Wiki is unsupported")
+        memberships = self.workspaces.list_memberships(workspace_id)
+        if not memberships:
+            raise WikiEmptyMembershipError(f"Workspace Base Wiki has no members")
+        derived = self.status(workspace_id)
+        errors = {
+            "missing": WikiMissingError,
+            "stale": WikiStaleError,
+            "error": WikiCorruptError,
+        }
+        error_type = errors.get(derived.status)
+        if error_type is not None:
+            raise error_type(f"Workspace Base Wiki is {derived.status}")
+        return self.get_wiki_service(workspace_id).search_wiki(
+            query, limit=max(limit, 0), mode=mode
+        )
+
+    def _search_base_wiki(
+        self,
+        record: WorkspaceRecord,
+        workspace_id: str,
+        query: str,
+        *,
+        limit: int,
+        mode: Literal["lexical", "semantic"],
+    ) -> tuple[list[WorkspaceWikiHit], str, str | None]:
+        if record.schema_mode != SCHEMA_MODE_BOUND or record.schema_binding is None:
+            return [], "unsupported", "wiki_unsupported"
         memberships = self.workspaces.list_memberships(workspace_id)
         context = derive_workspace_context(record, memberships)
         derived = self.status(workspace_id)
-        if derived.status == "missing":
-            raise WikiMissingError(
-                f"workspace {workspace_id!r} has no Base Wiki in its own "
-                "storage boundary (AC-008)"
-            )
-        if derived.status == "stale":
-            raise WikiStaleError(
-                f"workspace {workspace_id!r} Base Wiki is stale: current "
-                "inputs no longer match the recorded build fingerprint "
-                "(REQ-007/AC-010)"
-            )
-        if derived.status == "error":
-            raise WikiCorruptError(
-                f"workspace {workspace_id!r} Base Wiki artifacts fail "
-                f"integrity checks ({derived.error_code or 'unknown'})"
-            )
+        if derived.status != "ready":
+            return [], derived.status, derived.error_code or f"wiki_{derived.status}"
         from transit_scholar.layer2.wiki.service import WikiService  # noqa: PLC0415
 
-        store = layout.wiki_store(context)
-        wiki = WikiService(context, store)
-        base_result = wiki.search_wiki(query, limit=limit, mode=mode)
-        base_hits = [
+        layout = self._workspace_layout(workspace_id)
+        base_result = WikiService(context, layout.wiki_store(context)).search_wiki(
+            query, limit=max(limit, 0), mode=mode
+        )
+        base_status = getattr(base_result, "status", "ok")
+        base_error = getattr(base_result, "error_code", None)
+        if base_status == "error":
+            return [], "error", base_error or "base_wiki_error"
+        hits = [
             WorkspaceWikiHit(
                 type=hit.type,
                 object_id=hit.object_id,
                 title=hit.title,
                 score=hit.score,
+                source_score=hit.score,
                 snippet=hit.snippet,
                 retrieval_mode=hit.retrieval_mode,
                 source_kind="base_wiki",
             )
-            for hit in base_result.hits
+            for hit in getattr(base_result, "hits", ())
         ]
-        agentic_hits = self._search_agentic_wiki(
-            workspace_id,
-            query,
-            include_stale=include_stale,
-        )
-        combined = sorted(
-            [*base_hits, *agentic_hits],
-            key=lambda hit: (-hit.score, hit.source_kind, hit.object_id),
-        )[:max(limit, 0)]
-        return WorkspaceWikiSearchResult(
-            status="degraded" if any(hit.lifecycle_status == "stale" for hit in combined) else "ok",
-            hits=combined,
-        )
+        state = "degraded" if base_status == "degraded" else "ok"
+        return hits, state, base_error
 
     def _search_agentic_wiki(
         self,
@@ -625,11 +713,19 @@ class WorkspaceWikiService:
         query: str,
         *,
         include_stale: bool,
-    ) -> list[WorkspaceWikiHit]:
-        entries = self.agentic_wiki_store.list(
-            workspace_id,
-            include_stale=include_stale,
+        mode: Literal["lexical", "semantic"] = "lexical",
+    ) -> tuple[list[WorkspaceWikiHit], str, str | None]:
+        store = self._agentic_store_for_workspace(workspace_id)
+        all_entries = store.list(workspace_id, include_stale=True)
+        entries = (
+            all_entries
+            if include_stale
+            else [entry for entry in all_entries if entry.status == "active"]
         )
+        if not entries:
+            if any(entry.status == "stale" for entry in all_entries):
+                return [], "stale", "stale_entries"
+            return [], "empty", "no_usable_entries"
         query_terms = set(re.findall(r"\w+", query.casefold()))
         hits: list[WorkspaceWikiHit] = []
         for entry in entries:
@@ -637,18 +733,85 @@ class WorkspaceWikiService:
                 re.findall(r"\w+", f"{entry.title} {entry.content}".casefold())
             )
             score = len(query_terms & entry_terms) / max(len(query_terms), 1)
+            if score <= 0:
+                continue
             hits.append(
                 WorkspaceWikiHit(
                     type="entry",
                     object_id=entry.entry_id,
                     title=entry.title,
                     score=score,
+                    source_score=score,
                     snippet=entry.content,
                     source_kind="agentic_wiki",
                     lifecycle_status=entry.status if entry.status == "stale" else "active",
                 )
             )
-        return hits
+        if mode == "semantic":
+            return hits, "degraded", "semantic_agentic_lexical"
+        if include_stale and any(entry.status == "stale" for entry in entries):
+            return hits, "degraded", "stale_entries"
+        return hits, "ok", None
+
+    def _agentic_store_for_workspace(self, workspace_id: str):
+        store = getattr(self, "agentic_wiki_store", None)
+        if store is not None:
+            bound_workspace = getattr(store, "bound_workspace_id", None)
+            if bound_workspace not in (None, workspace_id):
+                raise PermissionError("Agentic Wiki repository is bound to another Workspace")
+            return store
+        from transit_scholar.layer3.agentic_wiki import AgenticWikiStore  # noqa: PLC0415
+
+        layout = self._workspace_layout(workspace_id)
+        return AgenticWikiStore.for_workspace(workspace_id, base_dir=layout.base_dir)
+
+    @staticmethod
+    def _source_error_state(exc: Exception) -> tuple[str, str]:
+        if isinstance(exc, (OSError, ValueError, UnicodeError)):
+            return "error", "wiki_corrupt"
+        code = getattr(exc, "code", None) or "source_unavailable"
+        state_by_code = {
+            "wiki_unsupported": "unsupported",
+            "wiki_missing": "missing",
+            "wiki_stale": "stale",
+            "wiki_corrupt": "error",
+            "empty_membership": "missing",
+        }
+        return state_by_code.get(code, "unavailable"), str(code)
+
+    @staticmethod
+    def _fuse_wiki_hits(
+        by_source: dict[str, list[WorkspaceWikiHit]], *, limit: int
+    ) -> list[WorkspaceWikiHit]:
+        fused: list[WorkspaceWikiHit] = []
+        for source_kind, hits in by_source.items():
+            ordered = sorted(
+                hits,
+                key=lambda hit: (
+                    -(hit.source_score if hit.source_score is not None else hit.score),
+                    hit.object_id,
+                ),
+            )
+            for local_rank, hit in enumerate(ordered, start=1):
+                fusion_score = 1.0 / (60.0 + local_rank)
+                source_score = (
+                    hit.source_score if hit.source_score is not None else hit.score
+                )
+                fused.append(
+                    hit.model_copy(
+                        update={
+                            "source_kind": source_kind,
+                            "source_score": source_score,
+                            "local_rank": local_rank,
+                            "fusion_score": fusion_score,
+                            "score": fusion_score,
+                        }
+                    )
+                )
+        return sorted(
+            fused,
+            key=lambda hit: (-hit.fusion_score, hit.source_kind, hit.object_id),
+        )[:limit]
 
     def get_wiki_service(self, workspace_id: str) -> "WikiService":
         """The L2S3 ``WikiService`` bound to the Workspace's own Wiki store.
@@ -657,7 +820,7 @@ class WorkspaceWikiService:
         derived status for freshness before exposing results (see ``search``).
         """
         record = self.workspaces.get(workspace_id)
-        layout = workspace_layout(workspace_id, data_root=self.data_root)
+        layout = self._workspace_layout(workspace_id)
         if record.schema_mode != SCHEMA_MODE_BOUND or record.schema_binding is None:
             raise WikiUnsupportedError(
                 f"workspace {workspace_id!r} has no Schema; Base Wiki reads are "
@@ -672,6 +835,13 @@ class WorkspaceWikiService:
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------
+
+    def _workspace_layout(self, workspace_id: str) -> WorkspaceStorageLayout:
+        """Resolve the one configured Workspace-derived storage identity."""
+        base_dir = getattr(self, "base_dir", None)
+        if base_dir is not None:
+            return workspace_layout(workspace_id, base_dir=base_dir)
+        return workspace_layout(workspace_id, data_root=getattr(self, "data_root", None))
 
     def _build_service(
         self,

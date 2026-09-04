@@ -4,12 +4,20 @@ import json
 import os
 import re
 import tempfile
+import errno
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 from ..knowledge_evolution.models import AgenticWikiEntry
+
+_UNSUPPORTED_DIRECTORY_DURABILITY_ERRNOS = frozenset({
+    errno.EINVAL,
+    errno.ENOTSUP,
+    errno.EOPNOTSUPP,
+    errno.ENOSYS,
+})
 
 
 class AgenticWikiStore:
@@ -148,14 +156,20 @@ class AgenticWikiStore:
             temporary_name = None
             try:
                 directory_fd = os.open(target.parent, os.O_RDONLY)
-            except OSError:
+            except OSError as error:
+                unsupported = error.errno in _UNSUPPORTED_DIRECTORY_DURABILITY_ERRNOS
+                if os.name == "nt" and error.errno == errno.EACCES:
+                    unsupported = True
+                if not unsupported:
+                    raise
                 directory_fd = None
             if directory_fd is not None:
                 try:
                     try:
                         os.fsync(directory_fd)
-                    except OSError:
-                        pass
+                    except OSError as error:
+                        if error.errno not in _UNSUPPORTED_DIRECTORY_DURABILITY_ERRNOS:
+                            raise
                 finally:
                     os.close(directory_fd)
         finally:

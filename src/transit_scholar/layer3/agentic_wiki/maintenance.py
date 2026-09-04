@@ -112,17 +112,15 @@ class AgenticWikiMaintenance:
             papers = self._authoritative_papers(workspace_id)
         if links is None:
             links = self._authoritative_links(workspace_id, claims)
-        try:
-            maintain_kwargs = dict(claims=claims, evidence=evidence, papers=papers, claim_evidence_links=links)
-            if source_versions is not None:
-                maintain_kwargs["source_versions"] = source_versions
-            return self.store.maintain(workspace_id, **maintain_kwargs)
-        except TypeError as exc:
-            if "claim_evidence_links" not in str(exc):
-                raise
-            return self.store.maintain(
-                workspace_id, claims=claims, evidence=evidence, papers=papers
-            )
+        maintain_kwargs = dict(
+            claims=claims,
+            evidence=evidence,
+            papers=papers,
+            claim_evidence_links=links,
+        )
+        if source_versions is not None:
+            maintain_kwargs["source_versions"] = source_versions
+        return self.store.maintain(workspace_id, **maintain_kwargs)
 
     @staticmethod
     def _resolve(source: Any, workspace_id: str) -> Any:
@@ -262,17 +260,11 @@ class AgenticWikiMaintenance:
     def _session_ids(self, workspace_id: str) -> tuple[str, ...]:
         execution = self.execution_service
         if execution is not None:
-            for name in ("list_workspace_research_sessions", "list_research_sessions"):
+            for name in ("list_workspace_research_sessions",):
                 method = getattr(execution, name, None)
                 if method is None:
                     continue
-                try:
-                    values = method(workspace_id)
-                except Exception:
-                    try:
-                        values = method(workspace_id=workspace_id)
-                    except Exception:
-                        continue
+                values = self._invoke_workspace(method, workspace_id)
                 if values is None:
                     continue
                 ids = [self._field(value, "research_session_id", self._field(value, "id")) for value in values]
@@ -283,18 +275,15 @@ class AgenticWikiMaintenance:
         )
         if db_session is None:
             return ()
-        try:
-            from sqlalchemy import select
-            from transit_scholar.db.models import AgentRun, ResearchSession
+        from sqlalchemy import select
+        from transit_scholar.db.models import AgentRun, ResearchSession
 
-            rows = db_session.execute(
-                select(ResearchSession.id)
-                .join(AgentRun, ResearchSession.agent_run_id == AgentRun.id)
-                .where(AgentRun.workspace_id == workspace_id)
-                .order_by(ResearchSession.created_at, ResearchSession.id)
-            ).scalars().all()
-        except Exception:
-            return ()
+        rows = db_session.execute(
+            select(ResearchSession.id)
+            .join(AgentRun, ResearchSession.agent_run_id == AgentRun.id)
+            .where(AgentRun.workspace_id == workspace_id)
+            .order_by(ResearchSession.created_at, ResearchSession.id)
+        ).scalars().all()
         return tuple(str(value) for value in rows)
 
     @staticmethod

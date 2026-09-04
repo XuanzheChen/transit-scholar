@@ -33,6 +33,9 @@ class FakeGateway:
     def current_state(self):
         return SimpleNamespace(revision=self.revision)
 
+    def current_source_identity(self, paper_id: str) -> str:
+        return f"{paper_id}-parse-v1"
+
     def list_papers(self):
         return [
             SimpleNamespace(paper_id="paper-1", title="One", l2s1_ready=True),
@@ -86,6 +89,13 @@ def test_workspace_rag_fans_out_through_l2s1_and_semantically_reranks():
     assert result.skipped_paper_ids == ["paper-3"]
     assert result.candidate_count == 2
     assert result.evidence_results[0].paper_provenance.paper_id == "paper-2"
+    evidence = result.evidence_results[0]
+    assert evidence.locator.parse_run_id == "paper-2-parse-v1"
+    assert evidence.locator.canonical_source_version == "paper-2-parse-v1"
+    assert evidence.paper_provenance.parse_run_id == "paper-2-parse-v1"
+    assert evidence.paper_provenance.canonical_source_version == "paper-2-parse-v1"
+    assert evidence.locator.parse_run_id == evidence.paper_provenance.parse_run_id
+    assert evidence.locator.canonical_source_version == evidence.paper_provenance.canonical_source_version
     assert result.evidence_results[0].final_rank == 1
     assert result.evidence_results[0].rerank_provenance["provider"] == "semantic-test"
     assert len(ranker.calls) == 1

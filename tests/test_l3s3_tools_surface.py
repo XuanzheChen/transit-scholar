@@ -15,6 +15,7 @@ from transit_scholar.layer3.retrieval import (
     ResearchQuery,
     SchemaRetrievalAction,
     WikiRetrievalAction,
+    WorkspaceRagRetriever,
 )
 from transit_scholar.layer3.tools import KnowledgeToolService
 
@@ -41,6 +42,9 @@ class FakeGateway:
     def current_state(self):
         self.state_calls += 1
         return SimpleNamespace(revision=1)
+
+    def current_source_identity(self, paper_id: str) -> str:
+        return f"{paper_id}-parse-v1"
 
     def list_papers(self):
         return [
@@ -136,6 +140,29 @@ def test_expert_tools_call_gateway_directly_without_planning():
     assert gateway.schema_calls == 2
     assert gateway.wiki_calls == 1
     assert gateway.rag_calls == 1
+
+
+def test_direct_workspace_rag_uses_injected_retriever_and_stamps_identity():
+    gateway = FakeGateway()
+
+    class Ranker:
+        provider_name = "semantic-test"
+
+        def rerank(self, query, candidates, *, top_k):
+            return [candidate.candidate_id for candidate in candidates[:top_k]]
+
+    service = KnowledgeToolService(
+        gateway, workspace_rag_retriever=WorkspaceRagRetriever(gateway, Ranker())
+    )
+    evidence = service.search_workspace_rag(
+        _query(), RagRetrievalAction(action_id="workspace-rag", source_query="priority")
+    ).evidence_results[0]
+    assert evidence.locator.parse_run_id == "paper-1-parse-v1"
+    assert evidence.locator.canonical_source_version == "paper-1-parse-v1"
+    assert evidence.paper_provenance.parse_run_id == "paper-1-parse-v1"
+    assert evidence.paper_provenance.canonical_source_version == "paper-1-parse-v1"
+    assert evidence.locator.parse_run_id == evidence.paper_provenance.parse_run_id
+    assert evidence.locator.canonical_source_version == evidence.paper_provenance.canonical_source_version
 
 
 @pytest.mark.parametrize(

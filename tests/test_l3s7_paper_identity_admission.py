@@ -67,3 +67,27 @@ def test_conflicting_paper_source_identities_are_rejected(session):
                 provenance_identity="parse-b",
             ),
         )
+
+
+@pytest.mark.parametrize("target", ["locator", "provenance"])
+def test_conflicting_source_identity_aliases_are_rejected(session, target):
+    workspace_id, research_session_id, query_id = _context(session)
+    evidence = _evidence(workspace_id, query_id, locator_identity="parse-a", provenance_identity="parse-a")
+    if target == "locator":
+        evidence = evidence.model_copy(update={
+            "locator": evidence.locator.model_copy(
+                update={"canonical_source_version": "parse-b"}
+            )
+        })
+    else:
+        evidence = evidence.model_copy(update={
+            "paper_provenance": evidence.paper_provenance.model_copy(
+                update={"canonical_source_version": "parse-b"}
+            )
+        })
+    with pytest.raises(InvalidEvidenceInputError, match="source identities conflict"):
+        EvidenceService(session).admit_evidence(
+            research_session_id=research_session_id,
+            source_query_id=query_id,
+            evidence=evidence,
+        )

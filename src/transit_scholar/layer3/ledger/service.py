@@ -47,6 +47,21 @@ def _non_empty(value: Any, label: str) -> str:
     return value.strip()
 
 
+def _resolve_source_identity(
+    parse_run_id: str | None,
+    canonical_source_version: str | None,
+) -> str | None:
+    if parse_run_id is None:
+        return canonical_source_version
+    if canonical_source_version is None:
+        return parse_run_id
+    if parse_run_id != canonical_source_version:
+        raise InvalidEvidenceInputError(
+            "parse_run_id and canonical_source_version source identities conflict"
+        )
+    return parse_run_id
+
+
 def _status(value: str) -> str:
     value = _non_empty(value, "status")
     if value not in RESEARCH_QUERY_STATUSES:
@@ -150,26 +165,24 @@ class ResearchQueryLedgerService:
         self._get_owned_query(research_session.id, source_query_id)
         if not isinstance(evidence, ResearchEvidence):
             raise InvalidEvidenceInputError("evidence must be a ResearchEvidence")
-        if evidence.paper_provenance is not None and (
-            evidence.paper_provenance.parse_run_id or evidence.paper_provenance.canonical_source_version
-        ):
-            locator_identity = (
-                evidence.locator.canonical_source_version
-                or evidence.locator.parse_run_id
+        if evidence.locator.source_kind.casefold() == "paper":
+            locator_identity = _resolve_source_identity(
+                evidence.locator.parse_run_id, evidence.locator.canonical_source_version
             )
-            provenance_identity = (
-                evidence.paper_provenance.canonical_source_version
-                or evidence.paper_provenance.parse_run_id
-            )
+            provenance_identity = _resolve_source_identity(
+                evidence.paper_provenance.parse_run_id,
+                evidence.paper_provenance.canonical_source_version,
+            ) if evidence.paper_provenance is not None else None
             if locator_identity and provenance_identity and locator_identity != provenance_identity:
                 raise InvalidEvidenceInputError(
                     "Paper evidence locator and paper provenance source identities conflict"
                 )
             updates = {}
-            if evidence.locator.parse_run_id is None:
-                updates["parse_run_id"] = evidence.paper_provenance.parse_run_id
-            if evidence.locator.canonical_source_version is None:
-                updates["canonical_source_version"] = evidence.paper_provenance.canonical_source_version
+            if provenance_identity is not None:
+                if evidence.locator.parse_run_id is None:
+                    updates["parse_run_id"] = provenance_identity
+                if evidence.locator.canonical_source_version is None:
+                    updates["canonical_source_version"] = provenance_identity
             if updates:
                 evidence = evidence.model_copy(update={"locator": evidence.locator.model_copy(update=updates)})
         self._validate_evidence_provenance(
@@ -227,14 +240,13 @@ class ResearchQueryLedgerService:
     ) -> None:
         query_provenance = evidence.query_provenance
         if evidence.locator.source_kind.casefold() == "paper":
-            locator_identity = (
-                evidence.locator.canonical_source_version
-                or evidence.locator.parse_run_id
+            locator_identity = _resolve_source_identity(
+                evidence.locator.parse_run_id, evidence.locator.canonical_source_version
             )
             provenance_identity = (
-                (
-                    evidence.paper_provenance.canonical_source_version
-                    or evidence.paper_provenance.parse_run_id
+                _resolve_source_identity(
+                    evidence.paper_provenance.parse_run_id,
+                    evidence.paper_provenance.canonical_source_version,
                 )
                 if evidence.paper_provenance is not None
                 else None

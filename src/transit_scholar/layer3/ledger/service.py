@@ -153,6 +153,18 @@ class ResearchQueryLedgerService:
         if evidence.paper_provenance is not None and (
             evidence.paper_provenance.parse_run_id or evidence.paper_provenance.canonical_source_version
         ):
+            locator_identity = (
+                evidence.locator.canonical_source_version
+                or evidence.locator.parse_run_id
+            )
+            provenance_identity = (
+                evidence.paper_provenance.canonical_source_version
+                or evidence.paper_provenance.parse_run_id
+            )
+            if locator_identity and provenance_identity and locator_identity != provenance_identity:
+                raise InvalidEvidenceInputError(
+                    "Paper evidence locator and paper provenance source identities conflict"
+                )
             updates = {}
             if evidence.locator.parse_run_id is None:
                 updates["parse_run_id"] = evidence.paper_provenance.parse_run_id
@@ -214,6 +226,31 @@ class ResearchQueryLedgerService:
         evidence: ResearchEvidence,
     ) -> None:
         query_provenance = evidence.query_provenance
+        if evidence.locator.source_kind.casefold() == "paper":
+            locator_identity = (
+                evidence.locator.canonical_source_version
+                or evidence.locator.parse_run_id
+            )
+            provenance_identity = (
+                (
+                    evidence.paper_provenance.canonical_source_version
+                    or evidence.paper_provenance.parse_run_id
+                )
+                if evidence.paper_provenance is not None
+                else None
+            )
+            if locator_identity is None and provenance_identity is None:
+                raise InvalidEvidenceInputError(
+                    "Paper evidence requires a stable source identity"
+                )
+            if (
+                locator_identity is not None
+                and provenance_identity is not None
+                and locator_identity != provenance_identity
+            ):
+                raise InvalidEvidenceInputError(
+                    "Paper evidence locator and paper provenance source identities conflict"
+                )
         if (
             query_provenance is not None
             and query_provenance.query_id != source_query_id

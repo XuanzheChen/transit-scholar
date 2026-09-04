@@ -69,6 +69,7 @@ def test_production_composition_reads_authoritative_workspace_and_ledger(
                 workspace_id=workspace.workspace_id,
                 source_kind="paper",
                 paper_id=paper.id,
+                parse_run_id="parse-v1",
             ),
             text="Grounded source text",
             source_kind="paper",

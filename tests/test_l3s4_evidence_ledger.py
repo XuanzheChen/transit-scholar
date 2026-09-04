@@ -48,6 +48,7 @@ def _evidence(
             workspace_id=workspace_id,
             source_kind="paper",
             paper_id="paper-1",
+            parse_run_id="parse-v1",
             block_id="block-1",
             pages=[2],
         ),
@@ -57,7 +58,8 @@ def _evidence(
             query_id=query_id, session_id=session_id, query_text="query"
         ),
         paper_provenance=PaperProvenance(
-            paper_id="paper-1", title="Source paper", source_uri="file:///paper.pdf"
+            paper_id="paper-1", title="Source paper", source_uri="file:///paper.pdf",
+            parse_run_id="parse-v1",
         ),
         section="Methods",
         retrieval_provenance={"parse_run_id": "parse-v1", "source_revision": "r1"},

@@ -217,6 +217,8 @@ class WorkspaceRagRetriever:
             or getattr(paper, "parse_run_id", None)
             or getattr(paper, "source_version", None)
         )
+        if source_version is None:
+            return candidates
         for hit in hits[: self.per_paper_top_k]:
             source_ref = hit.source_refs[0] if hit.source_refs else None
             block_id = source_ref.block_id if source_ref else hit.chunk_id

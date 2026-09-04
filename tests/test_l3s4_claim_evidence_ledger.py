@@ -35,7 +35,8 @@ def _evidence(evidence_id: str, workspace_id: str) -> ResearchEvidence:
     return ResearchEvidence(
         evidence_id=evidence_id,
         locator=EvidenceLocator(
-            workspace_id=workspace_id, source_kind="paper", paper_id="paper"
+            workspace_id=workspace_id, source_kind="paper", paper_id="paper",
+            parse_run_id="parse-v1",
         ),
         text=f"Evidence {evidence_id}",
         source_kind="paper",

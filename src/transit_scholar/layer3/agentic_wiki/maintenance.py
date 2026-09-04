@@ -202,9 +202,7 @@ class AgenticWikiMaintenance:
             if "research_session_id" in signature.parameters and "workspace_id" not in signature.parameters:
                 records: list[Any] = []
                 for session_id in self._session_ids(workspace_id):
-                    parameters = signature.parameters
-                    if "research_session_id" in parameters:
-                        records.extend(method(research_session_id=session_id))
+                    records.extend(method(research_session_id=session_id))
                 return records
             return self._invoke_workspace(method, workspace_id)
 
@@ -218,19 +216,7 @@ class AgenticWikiMaintenance:
                 return records
             return self._invoke_workspace(method, workspace_id)
 
-        session_ids = self._session_ids(workspace_id)
-        if method is None:
-            return None
-        records: list[Any] = []
-        for session_id in session_ids:
-            try:
-                records.extend(method(research_session_id=session_id))
-            except TypeError:
-                try:
-                    records.extend(method(session_id))
-                except TypeError:
-                    return None
-        return records
+        return None
 
     def _authoritative_links(self, workspace_id: str, claims: Any) -> Any:
         service = self.ledger_service

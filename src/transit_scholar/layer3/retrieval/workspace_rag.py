@@ -211,6 +211,12 @@ class WorkspaceRagRetriever:
         hits: Sequence[Any],
     ) -> list[CrossPaperCandidate]:
         candidates: list[CrossPaperCandidate] = []
+        identity_reader = getattr(self.gateway, "current_source_identity", None)
+        source_version = identity_reader(paper.paper_id) if callable(identity_reader) else (
+            getattr(paper, "canonical_source_version", None)
+            or getattr(paper, "parse_run_id", None)
+            or getattr(paper, "source_version", None)
+        )
         for hit in hits[: self.per_paper_top_k]:
             source_ref = hit.source_refs[0] if hit.source_refs else None
             block_id = source_ref.block_id if source_ref else hit.chunk_id
@@ -222,6 +228,8 @@ class WorkspaceRagRetriever:
                     workspace_id=query.workspace_id,
                     source_kind="paper",
                     paper_id=paper.paper_id,
+                    parse_run_id=source_version,
+                    canonical_source_version=source_version,
                     block_id=block_id,
                     pages=hit.pages,
                     span=(
@@ -238,7 +246,9 @@ class WorkspaceRagRetriever:
                     query_text=query.query_text,
                 ),
                 paper_provenance=PaperProvenance(
-                    paper_id=paper.paper_id, title=getattr(paper, "title", None)
+                    paper_id=paper.paper_id, title=getattr(paper, "title", None),
+                    parse_run_id=source_version,
+                    canonical_source_version=source_version,
                 ),
                 section=" / ".join(hit.section_path) or None,
                 retrieval_provenance={

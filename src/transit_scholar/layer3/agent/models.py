@@ -89,21 +89,21 @@ class ResearchCoordinatorOutput(RoleOutput):
 
 
 class QueryPlanningOutput(RoleOutput):
-    proposed_queries: list[str] = Field(default_factory=list)
+    proposed_queries: list[str] = Field(default_factory=list, max_length=2)
 
 
 class EvidenceReasoningOutput(RoleOutput):
-    admitted_evidence_ids: list[str] = Field(default_factory=list)
-    rejected_evidence_ids: list[str] = Field(default_factory=list)
+    admitted_evidence_ids: list[str] = Field(default_factory=list, max_length=2)
+    rejected_evidence_ids: list[str] = Field(default_factory=list, max_length=2)
 
 
 class ClaimProposal(BaseModel):
     statement: str = Field(min_length=1)
-    evidence_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=2)
 
 
 class ClaimReasoningOutput(RoleOutput):
-    proposed_claims: list[ClaimProposal] = Field(default_factory=list)
+    proposed_claims: list[ClaimProposal] = Field(default_factory=list, max_length=1)
 
 
 class FinalSourceReference(BaseModel):

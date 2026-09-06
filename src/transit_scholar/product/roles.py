@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from transit_scholar.layer2.schema_extraction.llm import StructuredLLMClient, resolve_runtime_llm_client
 from transit_scholar.layer3.actions.models import (
@@ -42,15 +42,19 @@ class StructuredLLMRolePolicy:
             {"role": "system", "content": definition.prompt_template},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, sort_keys=True)},
         ]
-        return self.llm_client.generate_structured(
-            messages,
-            definition.output_contract,
+        class RawRoleOutput(BaseModel):
+            model_config = ConfigDict(extra="allow")
+
+        raw = self.llm_client.generate_structured(
+                messages,
+                RawRoleOutput,
             metadata={
                 "role_id": definition.role_id.value,
                 "prompt_key": definition.role_id.value,
                 "repair_attempt": getattr(repair_context, "attempt", 0),
             },
-        )
+            )
+        return raw.model_dump(mode="python")
 
 
 class BuiltinRoleActionPlanner:

@@ -12,6 +12,7 @@ from transit_scholar.layer3.actions.models import (
 )
 from transit_scholar.layer3.actions import ActionExecutor, ActionValidator
 from transit_scholar.layer3.agent import RoleId, built_in_role_registry
+from transit_scholar.layer3.agent import RoleRuntimeProfile
 from transit_scholar.layer3.context import RoleContext, RuntimeContextSnapshotBuilder
 from transit_scholar.layer3.evidence import EvidenceLocator, ResearchEvidence
 from transit_scholar.layer3.execution import AgentRunService
@@ -29,6 +30,7 @@ from transit_scholar.layer3.runtime import MainResearchRuntime, MainRuntimeConfi
 from transit_scholar.layer3.tools import RetrievalResultEnvelope
 from transit_scholar.layer3.workspace import WorkspaceService
 from transit_scholar.product.roles import BuiltinRoleActionPlanner, StructuredLLMRolePolicy
+from transit_scholar.layer2.schema_extraction.llm import FakeLLMProvider
 
 
 def _context(role_id, **sections):
@@ -268,3 +270,38 @@ def test_production_bridges_complete_session_role_chain(session):
     assert [link.evidence_id for link in links] == [evidence[0].evidence_id]
     assert result.final_response is not None
     assert result.final_response.citation_references == [evidence[0].evidence_id]
+
+
+def test_role_runtime_repair_context_reaches_production_policy():
+    provider = FakeLLMProvider(
+        responses={
+            "query_planning": [
+                {"completed": True, "proposed_queries": [1]},
+                {"completed": True, "proposed_queries": ["repaired"]},
+            ]
+        }
+    )
+    policy = StructuredLLMRolePolicy(provider)
+    role = QueryPlanningRole(RoleRuntimeProfile(max_llm_calls=2, max_tool_calls=4))
+    registry = built_in_role_registry({RoleId.QUERY_PLANNING: role.runtime_profile})
+    runtime = RoleRuntime(registry)
+    result = runtime.execute(
+        role,
+        {"research_session_id": "session-1", "research_question": "q"},
+        policy,
+        agent_run_id="run-1",
+        research_session_id="session-1",
+        role_context=_context(RoleId.QUERY_PLANNING),
+    )
+    assert result.status == "completed"
+    assert provider.calls[1].metadata["repair_attempt"] == 1
+    assert provider.calls[1].messages[-1]["content"].find("structured_output_repair") >= 0
+
+
+def test_builtin_role_profiles_cover_bounded_action_cardinality():
+    from transit_scholar.layer3.roles.builtin import BuiltinRoleRuntimeConfig
+
+    profiles = BuiltinRoleRuntimeConfig()
+    assert profiles.query_planning.max_tool_calls >= 4
+    assert profiles.evidence_reasoning.max_tool_calls >= 2
+    assert profiles.claim_reasoning.max_tool_calls >= 3

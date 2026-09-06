@@ -5,17 +5,21 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from transit_scholar.db.models import ConversationSession, ConversationTurn, Workspace
+from transit_scholar.db.models import ConversationSession, ConversationTurn
+from transit_scholar.layer3.workspace import WorkspaceService
+from transit_scholar.layer3.workspace.errors import WorkspaceError
 
 
 class ConversationService:
     def __init__(self, session: Session, recent_limit: int = 6):
         self.session = session
         self.recent_limit = recent_limit
+        self.workspaces = WorkspaceService(session)
 
     def create_session(self, workspace_id: str, title: str | None = None) -> ConversationSession:
-        workspace = self.session.get(Workspace, workspace_id)
-        if workspace is None or workspace.status != "active":
+        try:
+            self.workspaces.require_active(workspace_id)
+        except WorkspaceError:
             raise ValueError("conversation requires an active workspace")
         row = ConversationSession(workspace_id=workspace_id, title=title)
         self.session.add(row)
@@ -92,11 +96,27 @@ class ConversationService:
 class ConversationGoalResolver:
     """Resolve dialogue references without creating any core research state."""
 
+    def __init__(self, generator=None):
+        """Optionally accept a structured goal-generation callable.
+
+        The callable receives ``current_message`` and ``prior_turns`` and may
+        return either a goal string or a mapping containing ``resolved_user_goal``.
+        """
+        self.generator = generator
+
     def resolve(self, user_message: str, prior_turns: list[ConversationTurn] | None = None) -> str:
         message = user_message.strip()
         if not message:
             raise ValueError("user message must not be empty")
         prior_turns = prior_turns or []
+        if self.generator is not None:
+            generated = self.generator(message, prior_turns)
+            if isinstance(generated, dict):
+                generated = generated.get("resolved_user_goal")
+            elif hasattr(generated, "resolved_user_goal"):
+                generated = generated.resolved_user_goal
+            if isinstance(generated, str) and generated.strip():
+                return generated.strip()
         if not prior_turns:
             return message
         context = "\n".join(
@@ -105,7 +125,27 @@ class ConversationGoalResolver:
             f"Earlier assistant response: {turn.final_assistant_response or ''}"
             for turn in prior_turns
         )
-        return f"Considering the prior conversation:\n{context}\nCurrent user request: {message}"
+        import re
+        lowered = message.casefold()
+        referent = None
+        if "that one" in lowered or "that paper" in lowered or "the second paper" in lowered:
+            latest = prior_turns[-1]
+            response = latest.final_assistant_response
+            papers = response.get("papers") if isinstance(response, dict) else None
+            if isinstance(papers, list) and papers:
+                index = 1 if ("second" in lowered or "second" in (latest.resolved_user_goal or "").casefold()) else -1
+                if len(papers) > abs(index):
+                    referent = str(papers[index])
+            if referent is None:
+                match = re.search(r"(?:second|2nd)\s+paper", latest.resolved_user_goal or "", re.I)
+                if match:
+                    referent = "the second paper identified in the prior conversation"
+        if referent:
+            normalized = re.sub(r"\b(?:that one|that paper)\b", referent, message, flags=re.I)
+            prior_goal = (prior_turns[-1].resolved_user_goal or "").strip()
+            qualifier = f" Prior context established: {prior_goal}." if prior_goal else ""
+            return f"{normalized}.{qualifier}" if not normalized.endswith((".", "!", "?")) else f"{normalized}{qualifier}"
+        return f"{message} (use the relevant referent and constraints established in the prior conversation)\nPrior context:\n{context}"
 
     resolve_goal = resolve
 

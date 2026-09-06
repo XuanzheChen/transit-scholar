@@ -1,7 +1,17 @@
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy.orm import Session
 
-from transit_scholar.db.models import AgentRun, ResearchSession, Workspace
+from transit_scholar.db.engine import SessionLocal
+from transit_scholar.db.models import (
+    AgentRun,
+    ClaimRecord,
+    EvidenceRecord,
+    ResearchQueryRecord,
+    ResearchSession,
+    Workspace,
+)
 from transit_scholar.layer3.workspace import WorkspaceService
 from transit_scholar.product.conversation import ConversationGoalResolver, ConversationService
 
@@ -32,6 +42,37 @@ def test_session_and_turns_persist_and_reload(session):
     assert turns[0].user_message == "Find papers"
     assert turns[0].final_assistant_response == {"answer": "done"}
     assert first.sequence == 1 and second.sequence == 2
+
+
+def test_turn_all_product_fields_survive_commit_and_reopen(session):
+    workspace_id = make_workspace(session)
+    conversation = ConversationService(session).create_session(workspace_id, title="Persisted")
+    turn = ConversationService(session).create_turn(
+        conversation.id,
+        "Original question",
+        resolved_user_goal="Standalone research goal",
+        agent_run_id="agent-run-123",
+        final_assistant_response={"answer": "final", "citations": ["p1"]},
+        status="failed",
+        error_message="provider timeout",
+    )
+    turn.completed_at = datetime.now(timezone.utc)
+    turn_id = turn.id
+    session.commit()
+    session.close()
+    reopened = SessionLocal()
+    try:
+        loaded = reopened.get(type(turn), turn_id)
+        assert loaded is not None
+        assert loaded.user_message == "Original question"
+        assert loaded.resolved_user_goal == "Standalone research goal"
+        assert loaded.agent_run_id == "agent-run-123"
+        assert loaded.final_assistant_response == {"answer": "final", "citations": ["p1"]}
+        assert loaded.status == "failed"
+        assert loaded.error_message == "provider timeout"
+        assert loaded.completed_at is not None
+    finally:
+        reopened.close()
 
 
 def test_invalid_or_inactive_workspace_rejected(session):
@@ -73,9 +114,25 @@ def test_goal_resolver_is_standalone_and_side_effect_free(session):
         status="completed",
     )
     goal = ConversationGoalResolver().resolve("Summarize that one", [prior])
-    assert goal and "Summarize that one" in goal and "second paper" in goal
+    assert goal and "Summarize B" in goal and "that one" not in goal
+    assert "second paper" in goal
     assert session.query(AgentRun).count() == 0
     assert session.query(ResearchSession).count() == 0
+    assert session.query(ResearchQueryRecord).count() == 0
+    assert session.query(EvidenceRecord).count() == 0
+    assert session.query(ClaimRecord).count() == 0
+
+
+def test_goal_resolver_first_turn_preserves_research_intent_without_side_effects(session):
+    resolver = ConversationGoalResolver()
+    goal = resolver.resolve("Find the latest papers on rail transit demand forecasting")
+    assert goal
+    assert "rail transit demand forecasting" in goal
+    assert session.query(AgentRun).count() == 0
+    assert session.query(ResearchSession).count() == 0
+    assert session.query(ResearchQueryRecord).count() == 0
+    assert session.query(EvidenceRecord).count() == 0
+    assert session.query(ClaimRecord).count() == 0
 
 
 def test_core_execution_models_have_no_conversation_ownership_fields():

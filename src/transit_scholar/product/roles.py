@@ -28,9 +28,11 @@ class StructuredLLMRolePolicy:
     """RolePolicy backed by the repository's unified structured LLM client."""
 
     def __init__(self, llm_client: StructuredLLMClient | None = None) -> None:
-        self.llm_client = llm_client or resolve_runtime_llm_client()
+        self.llm_client = llm_client
 
     def decide(self, definition, role_input, state, role_context, repair_context=None):
+        if self.llm_client is None:
+            self.llm_client = resolve_runtime_llm_client()
         if not isinstance(role_context, RoleContext):
             raise TypeError("role_context must be a projected RoleContext")
         payload = {

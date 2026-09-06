@@ -1,0 +1,15 @@
+{
+  "source": "contracts-import\\260906\\P1-C03_RUNTIME_COMPOSITION.md",
+  "copy_path": "E:\\AI_Agent_Development\\transit-scholar\\.agentic-sdlc\\developing\\20260906-20260906-TransitScholar-P1-C03-runtime-composition\\contract\\imports\\1821854b0ebceced.bundle.md",
+  "sha256": "1821854b0ebcecedecf40871f97970bb5be6dcf7a37573e5ded405eea7dbaa38",
+  "version": 1,
+  "import_time": "2026-09-06T13:33:35.354780+00:00",
+  "outcome": {
+    "type": "valid",
+    "reasons": [],
+    "errors": []
+  },
+  "materialized_path": "E:\\AI_Agent_Development\\transit-scholar\\.agentic-sdlc\\developing\\20260906-20260906-TransitScholar-P1-C03-runtime-composition\\contract\\v1",
+  "warnings": [],
+  "status": "imported"
+}

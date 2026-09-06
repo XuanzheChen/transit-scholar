@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "tasks": {
+    "v1:T-001": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 1
+    },
+    "v1:T-002": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-003": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-004": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 1
+    }
+  },
+  "legacy_unclassified_attempts": {}
+}

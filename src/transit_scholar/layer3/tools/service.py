@@ -70,6 +70,14 @@ class KnowledgeToolService:
         self.context_factory = context_factory
         self.workspace_rag_retriever = workspace_rag_retriever
 
+    @property
+    def workspace_id(self) -> str:
+        return self.gateway.workspace_id
+
+    @property
+    def expected_revision(self) -> int | None:
+        return getattr(self.gateway, "expected_revision", None)
+
     def retrieve_knowledge(
         self,
         query: ResearchQuery,

@@ -6,15 +6,8 @@ from transit_scholar.layer3.planning import RunDecision
 from transit_scholar.layer3.run_context import RunRuntimeConfig
 from transit_scholar.layer3.workspace import WorkspaceService
 from transit_scholar.product.runtime import RuntimeFactory
-
-import transit_scholar.layer3.roles as _roles
-from transit_scholar.layer3.roles.run_coordinator import (
-    build_run_coordinator as _build_run_coordinator,
-)
-
-if not hasattr(_roles, "build_run_coordinator"):
-    _roles.build_run_coordinator = _build_run_coordinator
-
+from transit_scholar.layer3.tools import KnowledgeToolService
+from transit_scholar.layer3.synthesis import RunFinalSynthesisRole
 
 def _factory(root):
     class Lifecycle:
@@ -103,3 +96,32 @@ def test_run_scope_is_disposable_non_owning_container(session, project_tmp_path)
     assert scope.agent_run is not None
     scope.close()
     assert scope.session.is_active is True
+
+
+def test_factory_composes_retrieval_service_and_final_synthesis(session, project_tmp_path):
+    workspace = WorkspaceService(session).create(name="composition fixture").workspace
+    run = AgentRunService(session).create_agent_run(workspace_id=workspace.workspace_id, user_goal="Compose")
+    session.commit()
+    scope = _factory(project_tmp_path).build_run_scope(run.agent_run_id)
+    try:
+        assert isinstance(scope.knowledge, KnowledgeToolService)
+        assert scope.knowledge.gateway.workspace_id == workspace.workspace_id
+        assert isinstance(scope.run_runtime.synthesis, RunFinalSynthesisRole)
+        assert scope.role_runtime.store.__class__.__name__ == "_CommitBeforeRoleCheckpointStore"
+    finally:
+        scope.close()
+
+
+def test_workspace_gateway_rejects_other_workspace_content(session, project_tmp_path):
+    workspaces = WorkspaceService(session)
+    workspace_a = workspaces.create(name="workspace-a").workspace
+    workspace_b = workspaces.create(name="workspace-b").workspace
+    run = AgentRunService(session).create_agent_run(workspace_id=workspace_a.workspace_id, user_goal="Isolate")
+    session.commit()
+    scope = _factory(project_tmp_path).build_run_scope(run.agent_run_id)
+    try:
+        assert scope.knowledge.gateway.workspace_id == workspace_a.workspace_id
+        assert scope.knowledge.gateway.workspace_id != workspace_b.workspace_id
+        assert scope.knowledge.gateway.expected_revision == workspace_a.revision
+    finally:
+        scope.close()

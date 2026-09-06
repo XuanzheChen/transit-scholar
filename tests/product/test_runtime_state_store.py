@@ -2,7 +2,11 @@ import json
 
 import pytest
 
-from transit_scholar.product.runtime import FileRunResearchStateStore, _CommitBeforeCheckpointStore
+from transit_scholar.product.runtime import (
+    FileRunResearchStateStore,
+    _CommitBeforeCheckpointStore,
+    _CommitBeforeRoleCheckpointStore,
+)
 
 
 def test_run_state_reloads_from_fresh_store_instance(tmp_path):
@@ -62,3 +66,20 @@ def test_checkpoint_commits_sql_session_before_publishing_state():
     store.save("run-1", {"status": "completed"})
 
     assert events == ["commit", ("save", "run-1", {"status": "completed"})]
+
+
+def test_role_checkpoint_commits_sql_session_before_publishing_state():
+    events = []
+
+    class Session:
+        def commit(self):
+            events.append("commit")
+
+    class Store:
+        def save(self, execution):
+            events.append(("save", execution))
+
+    store = _CommitBeforeRoleCheckpointStore(Session(), Store())
+    store.save("role-execution")
+
+    assert events == ["commit", ("save", "role-execution")]

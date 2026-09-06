@@ -61,7 +61,8 @@ class RuntimeFactory:
                  semantic_decider=None, coordinator=None, main_config=None,
                  run_config=None, episodic_memory=None, l3s7_lifecycle=None,
                  state_store=None, role_store=None, knowledge=None,
-                 runtime_root=None):
+                 runtime_root=None, retrieval_planner_provider=None,
+                 knowledge_service=None, synthesis=None):
         from transit_scholar.db.engine import SessionLocal
         from transit_scholar.config import settings as default_settings
         self.session_factory = session_factory or SessionLocal
@@ -79,6 +80,9 @@ class RuntimeFactory:
         self.state_store = state_store
         self.role_store = role_store
         self.knowledge = knowledge
+        self.retrieval_planner_provider = retrieval_planner_provider
+        self.knowledge_service = knowledge_service
+        self.synthesis = synthesis
         self.runtime_root = runtime_root or (Path(self.data_root) / "layer3" / "runs" if self.data_root else Path("data/layer3/runs"))
 
     def build_run_scope(self, agent_run_id: str) -> RunScope:
@@ -88,12 +92,15 @@ class RuntimeFactory:
         from transit_scholar.layer3.trace import AgentTraceService
         from transit_scholar.layer3.grounding import WorkspaceGroundingService
         from transit_scholar.layer3.knowledge import WorkspaceKnowledgeGateway
+        from transit_scholar.layer3.tools import KnowledgeToolService
+        from transit_scholar.layer3.planner import HybridKnowledgeRetrievalPlanner
         from transit_scholar.layer3.agent import built_in_role_registry
         from transit_scholar.layer3.actions import ActionValidator, ActionExecutor
         from transit_scholar.layer3.runtime import RoleRuntime, MainResearchRuntime, RunResearchRuntime, FileRoleExecutionStore
         from transit_scholar.layer3.context import RuntimeContextSnapshotBuilder
         from transit_scholar.layer3.memory import L3S7Lifecycle, EpisodicMemoryRetriever
-        from transit_scholar.layer3.roles import build_run_coordinator
+        from transit_scholar.layer3.roles.run_coordinator import build_run_coordinator
+        from transit_scholar.layer3.synthesis import RunFinalSynthesisRole
         from .roles import StructuredLLMRolePolicy, BuiltinRoleActionPlanner
 
         session = self.session_factory()
@@ -102,10 +109,16 @@ class RuntimeFactory:
         workspace_service = execution.workspaces
         grounding = WorkspaceGroundingService(session, data_root=self.data_root, workspaces=workspace_service)
         workspace = grounding.ground(run.workspace_id)
-        knowledge = self.knowledge or WorkspaceKnowledgeGateway(
+        gateway = self.knowledge or WorkspaceKnowledgeGateway(
             session, workspace_id=run.workspace_id, expected_revision=run.workspace_revision,
             data_root=self.data_root, workspaces=workspace_service,
         )
+        if self.knowledge_service is not None:
+            knowledge = self.knowledge_service
+        else:
+            provider = self.retrieval_planner_provider or self.llm_client or _RuntimeRetrievalPlannerProvider()
+            planner = HybridKnowledgeRetrievalPlanner(provider) if provider is not None else None
+            knowledge = KnowledgeToolService(gateway, planner=planner)
         research_state = ResearchStateService(session)
         ledger = ResearchReasoningLedgerService(session)
         trace = AgentTraceService(session)
@@ -115,7 +128,9 @@ class RuntimeFactory:
         validator = ActionValidator(execution_service=execution, ledger_service=ledger, role_registry=registry)
         role_invoker = lambda target, role_input: None
         action_executor = ActionExecutor(validator=validator, execution_service=execution, ledger_service=ledger, knowledge_service=knowledge, role_invoker=role_invoker)
-        role_store = self.role_store or FileRoleExecutionStore(self.runtime_root / agent_run_id / "roles")
+        role_store = self.role_store or _CommitBeforeRoleCheckpointStore(
+            session, FileRoleExecutionStore(self.runtime_root / agent_run_id / "roles")
+        )
         role_runtime = RoleRuntime(registry, role_store, trace=trace, action_executor=action_executor)
         context_builder = RuntimeContextSnapshotBuilder(session, grounding=grounding)
         main_runtime = MainResearchRuntime(registry=registry, role_runtime=role_runtime, execution_service=execution,
@@ -130,7 +145,8 @@ class RuntimeFactory:
         lifecycle = self.l3s7_lifecycle or L3S7Lifecycle.for_workspace(run.workspace_id, data_root=self.data_root,
             workspace_service=workspace_service, ledger_service=ledger, execution_service=execution)
         memory = self.episodic_memory or EpisodicMemoryRetriever(lifecycle.episodic_store)
-        run_runtime = RunResearchRuntime(session_runtime=main_runtime, coordinator=coordinator, execution_service=execution,
+        run_runtime = RunResearchRuntime(session_runtime=main_runtime, coordinator=coordinator,
+            synthesis=self.synthesis or RunFinalSynthesisRole(), execution_service=execution,
             ledger_service=ledger, trace=trace, config=self.run_config, state_store=run_store,
             l3s7_lifecycle=lifecycle, episodic_memory_retriever=memory)
         return RunScope(run, session, workspace, execution, research_state, ledger, trace, knowledge, registry,
@@ -200,3 +216,33 @@ class _CommitBeforeCheckpointStore:
         if hasattr(self._delegate, "get"):
             return self._delegate.get(agent_run_id)
         raise TypeError("run state store must provide load, load_state, or get")
+
+
+class _CommitBeforeRoleCheckpointStore:
+    """Commit authoritative SQL state before publishing a Role checkpoint."""
+
+    def __init__(self, session: Any, delegate: Any) -> None:
+        self._session = session
+        self._delegate = delegate
+
+    def save(self, execution: Any) -> None:
+        self._session.commit()
+        self._delegate.save(execution)
+
+    def load(self, role_execution_id: str) -> Any:
+        return self._delegate.load(role_execution_id)
+
+
+class _RuntimeRetrievalPlannerProvider:
+    """Lazy adapter from the unified structured LLM client to retrieval planning."""
+
+    def plan(self, prompt: str) -> Any:
+        from transit_scholar.layer2.schema_extraction.llm import resolve_runtime_llm_client
+        from transit_scholar.layer3.retrieval import RetrievalStrategy
+
+        client = resolve_runtime_llm_client()
+        return client.generate_structured(
+            [{"role": "user", "content": prompt}],
+            RetrievalStrategy,
+            metadata={"prompt_key": "retrieval_planner", "raw_json_object": True},
+        )

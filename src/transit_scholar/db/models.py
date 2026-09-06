@@ -23,6 +23,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -590,6 +591,49 @@ class WorkspacePaperMembership(Base):
         ),
         Index("ix_workspace_paper_memberships_workspace_id", "workspace_id"),
         Index("ix_workspace_paper_memberships_paper_id", "paper_id"),
+    )
+
+
+CONVERSATION_TURN_STATUSES = ("preparing", "running", "completed", "failed")
+
+
+class ConversationSession(Base):
+    """Product-level conversation owned by one Workspace."""
+
+    __tablename__ = "conversation_sessions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(String(32), ForeignKey("workspaces.id"), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    workspace: Mapped["Workspace"] = relationship()
+    turns: Mapped[List["ConversationTurn"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationTurn.sequence"
+    )
+    __table_args__ = (Index("ix_conversation_sessions_workspace_id", "workspace_id"),)
+
+
+class ConversationTurn(Base):
+    """One ordered product conversation interaction."""
+
+    __tablename__ = "conversation_turns"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(String(32), ForeignKey("conversation_sessions.id"), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_message: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_user_goal: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    agent_run_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    final_assistant_response: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="preparing", nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    conversation: Mapped["ConversationSession"] = relationship(back_populates="turns")
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sequence", name="uq_conversation_turns_sequence"),
+        CheckConstraint("status IN ('preparing', 'running', 'completed', 'failed')", name="ck_conversation_turns_status"),
+        Index("ix_conversation_turns_conversation_sequence", "conversation_id", "sequence"),
     )
 
 

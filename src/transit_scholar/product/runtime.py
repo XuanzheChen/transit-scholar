@@ -116,8 +116,8 @@ class RuntimeFactory:
         if self.knowledge_service is not None:
             knowledge = self.knowledge_service
         else:
-            provider = self.retrieval_planner_provider or self.llm_client or _RuntimeRetrievalPlannerProvider()
-            planner = HybridKnowledgeRetrievalPlanner(provider) if provider is not None else None
+            provider = self.retrieval_planner_provider or _RuntimeRetrievalPlannerProvider(self.llm_client)
+            planner = HybridKnowledgeRetrievalPlanner(provider)
             knowledge = KnowledgeToolService(gateway, planner=planner)
         research_state = ResearchStateService(session)
         ledger = ResearchReasoningLedgerService(session)
@@ -236,11 +236,14 @@ class _CommitBeforeRoleCheckpointStore:
 class _RuntimeRetrievalPlannerProvider:
     """Lazy adapter from the unified structured LLM client to retrieval planning."""
 
+    def __init__(self, llm_client: Any | None = None) -> None:
+        self.llm_client = llm_client
+
     def plan(self, prompt: str) -> Any:
         from transit_scholar.layer2.schema_extraction.llm import resolve_runtime_llm_client
         from transit_scholar.layer3.retrieval import RetrievalStrategy
 
-        client = resolve_runtime_llm_client()
+        client = self.llm_client or resolve_runtime_llm_client()
         return client.generate_structured(
             [{"role": "user", "content": prompt}],
             RetrievalStrategy,

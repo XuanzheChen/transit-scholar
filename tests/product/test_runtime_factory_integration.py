@@ -1,6 +1,7 @@
 """Fixture-backed coverage for the official RuntimeFactory composition path."""
 
 from transit_scholar.db.engine import SessionLocal
+import pytest
 from transit_scholar.layer3.execution import AgentRunService
 from transit_scholar.layer3.planning import RunDecision
 from transit_scholar.layer3.run_context import RunRuntimeConfig
@@ -8,6 +9,7 @@ from transit_scholar.layer3.workspace import WorkspaceService
 from transit_scholar.product.runtime import RuntimeFactory
 from transit_scholar.layer3.tools import KnowledgeToolService
 from transit_scholar.layer3.synthesis import RunFinalSynthesisRole
+from transit_scholar.layer3.retrieval import RagRetrievalAction, ResearchQuery, RetrievalStrategy
 
 def _factory(root):
     class Lifecycle:
@@ -120,8 +122,39 @@ def test_workspace_gateway_rejects_other_workspace_content(session, project_tmp_
     session.commit()
     scope = _factory(project_tmp_path).build_run_scope(run.agent_run_id)
     try:
-        assert scope.knowledge.gateway.workspace_id == workspace_a.workspace_id
-        assert scope.knowledge.gateway.workspace_id != workspace_b.workspace_id
-        assert scope.knowledge.gateway.expected_revision == workspace_a.revision
+        with pytest.raises(ValueError, match="not members"):
+            scope.knowledge.search_rag(
+                ResearchQuery(query_id="q", session_id="s", workspace_id=workspace_a.workspace_id, query_text="query"),
+                RagRetrievalAction(action_id="rag", source_query="query", scope="papers", paper_ids=["paper-only-in-b"]),
+            )
+    finally:
+        scope.close()
+
+
+def test_shared_llm_client_is_wrapped_for_retrieval_planning(session, project_tmp_path):
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def generate_structured(self, messages, schema, metadata):
+            self.calls.append((messages, schema, metadata))
+            return RetrievalStrategy(query_id="q", actions=[RagRetrievalAction(action_id="rag", source_query="query")])
+
+    workspace = WorkspaceService(session).create(name="planner fixture").workspace
+    run = AgentRunService(session).create_agent_run(workspace_id=workspace.workspace_id, user_goal="Plan")
+    session.commit()
+    client = Client()
+    factory = RuntimeFactory(
+        session_factory=SessionLocal,
+        data_root=project_tmp_path,
+        runtime_root=project_tmp_path / "layer3" / "runs",
+        llm_client=client,
+    )
+    scope = factory.build_run_scope(run.agent_run_id)
+    try:
+        strategy = scope.knowledge.planner.provider.plan("retrieval prompt")
+        assert strategy.query_id == "q"
+        assert client.calls[0][1] is RetrievalStrategy
+        assert client.calls[0][2]["prompt_key"] == "retrieval_planner"
     finally:
         scope.close()

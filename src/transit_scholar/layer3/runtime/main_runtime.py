@@ -314,7 +314,6 @@ class MainResearchRuntime:
                                 if isinstance(output, BaseModel)
                                 else output,
                                 context,
-                                role_execution_id=role_execution_id,
                             )
                         )
                         if self.action_planner is not None

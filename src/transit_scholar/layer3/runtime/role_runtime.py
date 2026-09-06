@@ -185,7 +185,15 @@ class RoleRuntime:
                     self._boundary(execution, "role.result", classification="decision_validated")
                 actions = tuple(self._actions(output))
                 if action_planner is not None:
-                    actions += tuple(action_planner(registered, output, role_context))
+                    planner_context = role_context.model_copy(
+                        update={
+                            "sections": {
+                                **role_context.sections,
+                                "role_execution_id": execution.role_execution_id,
+                            }
+                        }
+                    )
+                    actions += tuple(action_planner(registered, output, planner_context))
                 for action_index in range(execution.working_state.next_action_index, len(actions)):
                     action = actions[action_index]
                     if self.action_executor is None:

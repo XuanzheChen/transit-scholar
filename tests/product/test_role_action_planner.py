@@ -135,6 +135,35 @@ def test_claim_reasoning_links_only_admitted_evidence():
         )
 
 
+def test_action_ids_are_stable_per_execution_but_isolated_across_executions():
+    planner = BuiltinRoleActionPlanner()
+    first = planner.plan(
+        QueryPlanningRole(), {"proposed_queries": ["same"]},
+        _context(RoleId.QUERY_PLANNING, role_execution_id="exec-1"),
+    )[0].query_id
+    second = planner.plan(
+        QueryPlanningRole(), {"proposed_queries": ["same"]},
+        _context(RoleId.QUERY_PLANNING, role_execution_id="exec-1"),
+    )[0].query_id
+    other = planner.plan(
+        QueryPlanningRole(), {"proposed_queries": ["same"]},
+        _context(RoleId.QUERY_PLANNING, role_execution_id="exec-2"),
+    )[0].query_id
+    assert first == second
+    assert first != other
+
+
+def test_claim_ids_are_execution_scoped():
+    accepted = EvidenceRecord(
+        evidence_id="evidence-1", research_session_id="session-1", source_query_id="q",
+        locator=_evidence()["locator"], text_snapshot="text", created_at=datetime.now(timezone.utc),
+    )
+    output = {"proposed_claims": [{"statement": "same", "evidence_ids": ["evidence-1"]}]}
+    first = BuiltinRoleActionPlanner().plan(ClaimReasoningRole(), output, _context(RoleId.CLAIM_REASONING, accepted_evidence=(accepted,), role_execution_id="exec-1"))[0].claim_id
+    other = BuiltinRoleActionPlanner().plan(ClaimReasoningRole(), output, _context(RoleId.CLAIM_REASONING, accepted_evidence=(accepted,), role_execution_id="exec-2"))[0].claim_id
+    assert first != other
+
+
 @pytest.mark.parametrize("role, output", [
     (ResearchCoordinatorRole(), {"completed": True}),
     (FinalSynthesisRole(), {"completed": False, "answer_text": "Not finalized."}),

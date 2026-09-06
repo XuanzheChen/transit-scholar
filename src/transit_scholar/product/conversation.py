@@ -109,43 +109,18 @@ class ConversationGoalResolver:
         if not message:
             raise ValueError("user message must not be empty")
         prior_turns = prior_turns or []
-        if self.generator is not None:
-            generated = self.generator(message, prior_turns)
-            if isinstance(generated, dict):
-                generated = generated.get("resolved_user_goal")
-            elif hasattr(generated, "resolved_user_goal"):
-                generated = generated.resolved_user_goal
-            if isinstance(generated, str) and generated.strip():
-                return generated.strip()
         if not prior_turns:
             return message
-        context = "\n".join(
-            f"Earlier user request: {turn.user_message}\n"
-            f"Earlier resolved goal: {turn.resolved_user_goal or ''}\n"
-            f"Earlier assistant response: {turn.final_assistant_response or ''}"
-            for turn in prior_turns
-        )
-        import re
-        lowered = message.casefold()
-        referent = None
-        if "that one" in lowered or "that paper" in lowered or "the second paper" in lowered:
-            latest = prior_turns[-1]
-            response = latest.final_assistant_response
-            papers = response.get("papers") if isinstance(response, dict) else None
-            if isinstance(papers, list) and papers:
-                index = 1 if ("second" in lowered or "second" in (latest.resolved_user_goal or "").casefold()) else -1
-                if len(papers) > abs(index):
-                    referent = str(papers[index])
-            if referent is None:
-                match = re.search(r"(?:second|2nd)\s+paper", latest.resolved_user_goal or "", re.I)
-                if match:
-                    referent = "the second paper identified in the prior conversation"
-        if referent:
-            normalized = re.sub(r"\b(?:that one|that paper)\b", referent, message, flags=re.I)
-            prior_goal = (prior_turns[-1].resolved_user_goal or "").strip()
-            qualifier = f" Prior context established: {prior_goal}." if prior_goal else ""
-            return f"{normalized}.{qualifier}" if not normalized.endswith((".", "!", "?")) else f"{normalized}{qualifier}"
-        return f"{message} (use the relevant referent and constraints established in the prior conversation)\nPrior context:\n{context}"
+        if self.generator is None:
+            raise RuntimeError("goal generator is required when prior conversation turns are provided")
+        generated = self.generator(message, prior_turns)
+        if isinstance(generated, dict):
+            generated = generated.get("resolved_user_goal")
+        elif hasattr(generated, "resolved_user_goal"):
+            generated = generated.resolved_user_goal
+        if not isinstance(generated, str) or not generated.strip():
+            raise ValueError("goal generator must return a non-empty resolved_user_goal")
+        return generated.strip()
 
     resolve_goal = resolve
 

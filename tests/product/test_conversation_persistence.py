@@ -113,7 +113,12 @@ def test_goal_resolver_is_standalone_and_side_effect_free(session):
         final_assistant_response={"papers": ["A", "B"]},
         status="completed",
     )
-    goal = ConversationGoalResolver().resolve("Summarize that one", [prior])
+    def fake_generator(message, prior_turns):
+        assert message == "Summarize that one"
+        assert prior_turns == [prior]
+        return {"resolved_user_goal": "Summarize B, the second paper identified in the prior conversation"}
+
+    goal = ConversationGoalResolver(fake_generator).resolve("Summarize that one", [prior])
     assert goal and "Summarize B" in goal and "that one" not in goal
     assert "second paper" in goal
     assert session.query(AgentRun).count() == 0
@@ -121,6 +126,14 @@ def test_goal_resolver_is_standalone_and_side_effect_free(session):
     assert session.query(ResearchQueryRecord).count() == 0
     assert session.query(EvidenceRecord).count() == 0
     assert session.query(ClaimRecord).count() == 0
+
+
+def test_goal_resolver_requires_generator_for_prior_turns(session):
+    workspace_id = make_workspace(session)
+    conversation = ConversationService(session).create_session(workspace_id)
+    prior = ConversationService(session).create_turn(conversation.id, "Find papers", status="completed")
+    with pytest.raises(RuntimeError, match="generator is required"):
+        ConversationGoalResolver().resolve("Summarize that", [prior])
 
 
 def test_goal_resolver_first_turn_preserves_research_intent_without_side_effects(session):

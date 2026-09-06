@@ -41,10 +41,16 @@ class BuiltinRoleRuntimeConfig(BaseModel):
     research_coordinator: RoleRuntimeProfile = Field(
         default_factory=lambda: RoleRuntimeProfile(max_steps=3, max_llm_calls=3)
     )
-    query_planning: RoleRuntimeProfile = Field(default_factory=RoleRuntimeProfile)
-    evidence_reasoning: RoleRuntimeProfile = Field(default_factory=RoleRuntimeProfile)
+    query_planning: RoleRuntimeProfile = Field(
+        default_factory=lambda: RoleRuntimeProfile(max_tool_calls=2)
+    )
+    evidence_reasoning: RoleRuntimeProfile = Field(
+        default_factory=lambda: RoleRuntimeProfile(max_tool_calls=1)
+    )
     claim_reasoning: RoleRuntimeProfile = Field(
-        default_factory=lambda: RoleRuntimeProfile(max_steps=2, max_llm_calls=2)
+        default_factory=lambda: RoleRuntimeProfile(
+            max_steps=2, max_llm_calls=2, max_tool_calls=2
+        )
     )
     final_synthesis: RoleRuntimeProfile = Field(default_factory=RoleRuntimeProfile)
 
@@ -103,8 +109,8 @@ class QueryPlanningRole(RoleDefinition):
             ),
             input_contract=QueryPlanningInput,
             output_contract=QueryPlanningOutput,
-            allowed_actions={"CREATE_QUERY", "UPDATE_QUERY"},
-            allowed_tools=set(),
+            allowed_actions={"CREATE_QUERY", "UPDATE_QUERY", "RETRIEVE_QUERY"},
+            allowed_tools={"retrieve_knowledge"},
             runtime_profile=runtime_profile or BuiltinRoleRuntimeConfig().query_planning,
         )
 

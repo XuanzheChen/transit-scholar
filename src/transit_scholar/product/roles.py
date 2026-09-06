@@ -7,9 +7,11 @@ from uuid import NAMESPACE_URL, uuid5
 
 from collections.abc import Mapping
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from transit_scholar.layer2.schema_extraction.llm import StructuredLLMClient, resolve_runtime_llm_client
+from transit_scholar.layer2.schema_extraction.errors import LLMCapabilityError, LLMRequestError
+from transit_scholar.layer3.runtime.role_runtime import ProviderRetryableError
 from transit_scholar.layer3.actions.models import (
     AdmitEvidenceAction, CreateClaimAction, CreateQueryAction, LinkEvidenceAction,
     RetrieveQueryAction,
@@ -42,32 +44,37 @@ class StructuredLLMRolePolicy:
             {"role": "system", "content": definition.prompt_template},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, sort_keys=True)},
         ]
-        class RawRoleOutput(BaseModel):
-            model_config = ConfigDict(extra="allow")
-
-        raw = self.llm_client.generate_structured(
+        try:
+            raw = self.llm_client.generate_structured(
                 messages,
-                RawRoleOutput,
+                definition.output_contract,
             metadata={
                 "role_id": definition.role_id.value,
                 "prompt_key": definition.role_id.value,
-                "repair_attempt": getattr(repair_context, "attempt", 0),
+                    "repair_attempt": getattr(repair_context, "attempt", 0),
+                    "raw_json_object": True,
             },
             )
-        return raw.model_dump(mode="python")
+        except LLMRequestError as exc:
+            if not isinstance(exc, LLMCapabilityError):
+                raise ProviderRetryableError(str(exc)) from exc
+            raise
+        return raw
 
 
 class BuiltinRoleActionPlanner:
     """Pure deterministic conversion of built-in semantic outputs to actions."""
 
-    def __call__(self, definition, output, role_context):
-        return self.plan(definition, output, role_context)
+    def __call__(self, definition, output, role_context, role_execution_id=None):
+        return self.plan(definition, output, role_context, role_execution_id=role_execution_id)
 
     def plan(
         self,
         definition: RoleDefinition,
         output: BaseModel | Mapping[str, object],
         role_context: RoleContext,
+        *,
+        role_execution_id: str | None = None,
     ) -> tuple[object, ...]:
         if not isinstance(role_context, RoleContext):
             raise TypeError("role_context must be a projected RoleContext")
@@ -76,7 +83,7 @@ class BuiltinRoleActionPlanner:
 
         validated_output = definition.output_contract.model_validate(output)
         if definition.role_id == RoleId.QUERY_PLANNING:
-            return self._queries(QueryPlanningOutput.model_validate(validated_output), role_context)
+            return self._queries(QueryPlanningOutput.model_validate(validated_output), role_context, role_execution_id)
         if definition.role_id == RoleId.EVIDENCE_REASONING:
             return self._evidence(EvidenceReasoningOutput.model_validate(validated_output), role_context)
         if definition.role_id == RoleId.CLAIM_REASONING:
@@ -104,14 +111,14 @@ class BuiltinRoleActionPlanner:
             raise ValueError("role context is missing action ownership identifiers")
         return str(workspace_id), str(run_id), str(session_id)
 
-    def _queries(self, output, context):
+    def _queries(self, output, context, role_execution_id=None):
         workspace_id, run_id, session_id = self._ids(context)
         actions = []
         for index, text in enumerate(output.proposed_queries):
             query = str(text).strip()
             if not query:
                 continue
-            query_id = uuid5(NAMESPACE_URL, f"{session_id}:query:{index}:{query}").hex
+            query_id = uuid5(NAMESPACE_URL, f"{session_id}:{role_execution_id or 'legacy'}:query:{index}:{query}").hex
             common = dict(workspace_id=workspace_id, agent_run_id=run_id, research_session_id=session_id)
             actions.extend((CreateQueryAction(**common, query_id=query_id, query_text=query), RetrieveQueryAction(**common, query_id=query_id)))
         return tuple(actions)

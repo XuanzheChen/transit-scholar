@@ -272,6 +272,11 @@ class FakeLLMProvider:
                 field_id=metadata.get("field_id"),
             )
         try:
+            if metadata.get("raw_json_object"):
+                if isinstance(raw, dict):
+                    record.outcome = "ok"
+                    self.calls.append(record)
+                    return raw
             parsed = output_schema.model_validate(raw)
         except (ValidationError, TypeError, ValueError) as exc:
             record.outcome = "invalid_output"
@@ -633,12 +638,27 @@ class OpenAICompatibleLLMClient:
             status_code=response.status_code,
         )
 
+    def _generate_raw_json(self, messages, metadata=None):
+        response = self._request(
+            url=self._endpoint_url(),
+            headers={"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"},
+            payload={"model": self.config.model, "messages": self._messages_for_mode(messages, "json_object", {}), "response_format": {"type": "json_object"}},
+        )
+        if response.status_code != 200:
+            self._raise_request_error(response)
+        value = json.loads(_strip_code_fence(self._extract_response_content(response)))
+        if not isinstance(value, dict):
+            raise LLMInvalidOutputError("LLM output must be a JSON object")
+        return value
+
     def generate_structured(
         self,
         messages: list[dict[str, Any]],
         output_schema: type[BaseModel],
         metadata: dict[str, Any] | None = None,
     ) -> BaseModel:
+        if (metadata or {}).get("raw_json_object"):
+            return self._generate_raw_json(messages, metadata)
         url = self._endpoint_url()
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",

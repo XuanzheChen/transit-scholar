@@ -28,27 +28,34 @@ class DeterministicKnowledge:
         self.calls.append(query)
         evidence = ResearchEvidence(
             evidence_id=f"evidence:{query.session_id}",
-            locator=EvidenceLocator(workspace_id=query.workspace_id, source_kind="paper", paper_id=self.paper_id, block_id="block-1"),
+            locator=EvidenceLocator(workspace_id=query.workspace_id, source_kind="paper", paper_id=self.paper_id, canonical_source_version="fixture-v1", block_id="block-1"),
             text="Transit demand forecasting is improved by the fixture method.",
             source_kind="rag",
             query_provenance=QueryProvenance(query_id=query.query_id, session_id=query.session_id, query_text=query.query_text),
-            paper_provenance=PaperProvenance(paper_id=self.paper_id, title="Transit demand forecasting"),
+            paper_provenance=PaperProvenance(paper_id=self.paper_id, title="Transit demand forecasting", canonical_source_version="fixture-v1"),
         )
         return RetrievalResultEnvelope(query=query, evidence_results=[evidence], workspace_revision=self.workspace_revision)
+
+
+class DeterministicEpisodicMemory:
+    def retrieve(self, *, workspace_id, query, top_k):
+        return ()
 
 
 class DeterministicPolicy:
     def __init__(self):
         self.coordinator_calls = {}
+        self.calls = []
 
     def decide(self, definition, role_input, state, role_context, repair_context=None):
         role_id = definition.role_id
+        self.calls.append(role_id)
         if role_id == RoleId.RESEARCH_COORDINATOR:
             session_id = role_input.research_session_id
             count = self.coordinator_calls.get(session_id, 0)
             self.coordinator_calls[session_id] = count + 1
             next_roles = [RoleId.QUERY_PLANNING, RoleId.EVIDENCE_REASONING, RoleId.CLAIM_REASONING, RoleId.FINAL_SYNTHESIS]
-            return {"next_role_id": next_roles[count] if count < len(next_roles) else None}
+            return {"completed": True, "next_role_id": next_roles[count] if count < len(next_roles) else None}
         if role_id == RoleId.QUERY_PLANNING:
             return QueryPlanningOutput(completed=True, proposed_queries=[role_input.research_question])
         if role_id == RoleId.EVIDENCE_REASONING:
@@ -71,7 +78,11 @@ def test_two_related_turns_are_independent_runs_with_product_owned_history(sessi
     session.commit()
 
     policy = DeterministicPolicy()
-    registry = built_in_role_registry()
+    registry = built_in_role_registry({
+        RoleId.QUERY_PLANNING: {"max_tool_calls": 4},
+        RoleId.EVIDENCE_REASONING: {"max_tool_calls": 2},
+        RoleId.CLAIM_REASONING: {"max_tool_calls": 3},
+    })
     def coordinator(snapshot):
         if snapshot.session_outcomes:
             return RunDecision(mode="complete", completion_reason="fixture research complete")
@@ -91,7 +102,7 @@ def test_two_related_turns_are_independent_runs_with_product_owned_history(sessi
             "maintain_before_session": lambda self, *_, **__: None,
             "complete_agent_run": lambda self, *_, **__: None,
         })(),
-        episodic_memory=object(),
+        episodic_memory=DeterministicEpisodicMemory(),
         run_config=RunRuntimeConfig(max_episodic_memory_candidates=0),
     )
 
@@ -114,6 +125,7 @@ def test_two_related_turns_are_independent_runs_with_product_owned_history(sessi
     assert second.final_assistant_response["answer_text"]
     runs = session.query(AgentRun).filter_by(workspace_id=workspace.workspace_id).all()
     assert {run.id for run in runs} == {first.agent_run_id, second.agent_run_id}
+    assert all(run.workspace_id == workspace.workspace_id for run in runs)
     assert all(run.status == "completed" for run in runs)
 
     execution = AgentRunService(session)
@@ -123,6 +135,13 @@ def test_two_related_turns_are_independent_runs_with_product_owned_history(sessi
         for run in runs
     }
     assert all(len(research_sessions) == 1 for research_sessions in sessions_by_run.values())
+    expected_session_ids = {
+        research_sessions[0].research_session_id
+        for research_sessions in sessions_by_run.values()
+    }
+    assert len(knowledge.calls) == 2, policy.calls
+    assert {query.session_id for query in knowledge.calls} == expected_session_ids
+    assert all(query.workspace_id == workspace.workspace_id for query in knowledge.calls)
     all_evidence = []
     all_claims = []
     for run_id, research_sessions in sessions_by_run.items():
@@ -137,23 +156,30 @@ def test_two_related_turns_are_independent_runs_with_product_owned_history(sessi
                 claim_id=claim.claim_id,
             )
         ]
+        assert len(evidence) == 1, policy.calls
+        assert len(claims) == 1
+        assert len(links) == 1
+        assert evidence[0].research_session_id == research_session.research_session_id
+        assert evidence[0].locator.workspace_id == workspace.workspace_id
+        assert evidence[0].locator.paper_id == paper.id
+        assert evidence[0].source_query_id in {
+            query.query_id
+            for query in knowledge.calls
+            if query.session_id == research_session.research_session_id
+        }
+        assert claims[0].research_session_id == research_session.research_session_id
+        assert links[0].claim_id == claims[0].claim_id
+        assert links[0].evidence_id == evidence[0].evidence_id
         assert all(item.research_session_id == research_session.research_session_id for item in evidence)
         assert all(item.research_session_id == research_session.research_session_id for item in claims)
         assert all(item.locator.workspace_id == workspace.workspace_id for item in evidence)
         assert all(item.locator.paper_id == paper.id for item in evidence)
         assert all(link.claim_id in {claim.claim_id for claim in claims} for link in links)
         assert all(link.evidence_id in {item.evidence_id for item in evidence} for link in links)
-        if evidence:
-            assert claims
-            assert links
         all_evidence.extend(evidence)
         all_claims.extend(claims)
-    session_ids = {
-        research_sessions[0].research_session_id
-        for research_sessions in sessions_by_run.values()
-    }
-    assert all(item.research_session_id in session_ids for item in all_evidence)
-    assert all(item.research_session_id in session_ids for item in all_claims)
+    assert all(item.research_session_id in expected_session_ids for item in all_evidence)
+    assert all(item.research_session_id in expected_session_ids for item in all_claims)
     conversation_text = {
         first.user_message, second.user_message,
         first.resolved_user_goal, second.resolved_user_goal,
@@ -161,5 +187,7 @@ def test_two_related_turns_are_independent_runs_with_product_owned_history(sessi
     assert all(item.text_snapshot not in conversation_text for item in all_evidence)
     view = product.read_conversation(conversation.id)
     assert [turn["sequence"] for turn in view["turns"]] == [1, 2]
-    assert view["turns"][1]["run_state"].workspace_id == workspace.workspace_id
-    assert view["turns"][1]["run_state"].phase == "completed"
+    assert all(turn["status"] == "completed" for turn in view["turns"])
+    assert all(turn["assistant_response"] for turn in view["turns"])
+    assert all(turn["run_state"].workspace_id == workspace.workspace_id for turn in view["turns"])
+    assert all(turn["run_state"].phase == "completed" for turn in view["turns"])

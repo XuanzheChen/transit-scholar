@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field
 
 from transit_scholar.db.models import ConversationSession, ConversationTurn
 from transit_scholar.layer3.workspace import WorkspaceService
@@ -126,3 +127,9 @@ class ConversationGoalResolver:
 
     def __call__(self, user_message: str, prior_turns: list[ConversationTurn] | None = None) -> str:
         return self.resolve(user_message, prior_turns)
+
+
+class ConversationGoalOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolved_user_goal: str = Field(min_length=1)

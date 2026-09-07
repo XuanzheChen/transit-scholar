@@ -36,14 +36,18 @@ class ResearchService:
         run = self.execution.get_agent_run(agent_run_id)
         self.execution.update_agent_run_status(agent_run_id, "running")
         self.session.commit()
-        scope = self.runtime_factory.build_run_scope(agent_run_id)
+        scope = None
         try:
+            scope = self.runtime_factory.build_run_scope(agent_run_id)
             runtime = getattr(scope, "run_research_runtime", None) or getattr(scope, "run_runtime", None)
             if runtime is None:
                 raise TypeError("run scope does not expose a research runtime")
             result = runtime.execute(
                 agent_run_id=agent_run_id, user_goal=user_goal or run.user_goal, agent_run=run
             )
+            if hasattr(scope, "close"):
+                scope.close()
+            scope = None
             data = _result_data(result)
             status = data.get("status")
             if hasattr(status, "value"):
@@ -71,7 +75,7 @@ class ResearchService:
             )
             raise
         finally:
-            if hasattr(scope, "close"):
+            if scope is not None and hasattr(scope, "close"):
                 scope.close()
 
     def resume_run(self, agent_run_id: str):

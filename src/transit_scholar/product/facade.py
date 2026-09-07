@@ -10,7 +10,10 @@ class TransitScholarProduct:
         self.research = ResearchService(session, runtime_factory, conversations=self.conversations, goal_resolver=goal_resolver)
         self.projector = ProductStateProjector(session, runtime_factory)
 
-    def create_conversation(self, workspace_id, title=None): return self.conversations.create_session(workspace_id, title)
+    def create_conversation(self, workspace_id, title=None):
+        conversation = self.conversations.create_session(workspace_id, title)
+        self.session.commit()
+        return conversation
     create_session = create_conversation
     def list_conversations(self, workspace_id): return self.conversations.list_sessions(workspace_id)
     def get_conversation(self, conversation_id):

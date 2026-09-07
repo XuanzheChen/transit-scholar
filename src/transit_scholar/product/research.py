@@ -10,6 +10,10 @@ from transit_scholar.layer3.execution import AgentRunService
 from .conversation import ConversationGoalResolver, ConversationService
 
 
+class InvalidRunCommand(ValueError):
+    """The requested product command is incompatible with the run status."""
+
+
 def _dump(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -34,6 +38,10 @@ class ResearchService:
 
     def execute_run(self, agent_run_id: str, *, user_goal: str | None = None):
         run = self.execution.get_agent_run(agent_run_id)
+        self._validate_execute_command(run)
+        return self._execute(run, agent_run_id, user_goal=user_goal)
+
+    def _execute(self, run, agent_run_id: str, *, user_goal: str | None = None):
         self.execution.update_agent_run_status(agent_run_id, "running")
         self.session.commit()
         scope = None
@@ -79,9 +87,25 @@ class ResearchService:
                 scope.close()
 
     def resume_run(self, agent_run_id: str):
-        result = self.execute_run(agent_run_id)
+        run = self.execution.get_agent_run(agent_run_id)
+        self._validate_resume_command(run)
+        result = self._execute(run, agent_run_id)
         self._sync_linked_turn(agent_run_id, result)
         return result
+
+    @staticmethod
+    def _validate_execute_command(run):
+        if run.status != "created":
+            raise InvalidRunCommand(
+                f"execute_run is only allowed for created runs; current status is {run.status}"
+            )
+
+    @staticmethod
+    def _validate_resume_command(run):
+        if run.status not in {"running", "failed"}:
+            raise InvalidRunCommand(
+                f"resume_run is only allowed for running or failed runs; current status is {run.status}"
+            )
 
     def _sync_linked_turn(self, agent_run_id: str, result):
         turn = self.session.scalar(

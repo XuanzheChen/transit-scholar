@@ -3,8 +3,8 @@ from .facade import TransitScholarProduct
 from .runtime import RuntimeFactory
 from sqlalchemy.orm import sessionmaker
 from transit_scholar.db.engine import engine_for
-from transit_scholar.db.base import Base
 import transit_scholar.db.models  # noqa: F401 - register ORM models
+from transit_scholar.db.lifecycle import alembic_upgrade_head
 from transit_scholar.layer2.schema_extraction.llm import resolve_runtime_llm_client
 from .conversation import ConversationGoalOutput, ConversationGoalResolver
 
@@ -13,8 +13,13 @@ def build_local_product(settings=None):
     if settings is None:
         from transit_scholar.config import settings as settings
     settings.init_directories()
+    # Alembic resolves its URL from the module-level settings. Align that
+    # target with the explicitly supplied product settings before upgrading.
+    from transit_scholar.config import settings as global_settings
+    global_settings.data_root = settings.data_root
+    global_settings.init_directories()
+    alembic_upgrade_head()
     engine = engine_for(settings.database_url)
-    Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     llm_client = resolve_runtime_llm_client()
     runtime = RuntimeFactory(settings=settings, session_factory=session_factory, llm_client=llm_client)

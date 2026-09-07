@@ -143,7 +143,8 @@ class RuntimeFactory:
             session, self.state_store or FileRunResearchStateStore(self.runtime_root)
         )
         lifecycle = self.l3s7_lifecycle or L3S7Lifecycle.for_workspace(run.workspace_id, data_root=self.data_root,
-            workspace_service=workspace_service, ledger_service=ledger, execution_service=execution)
+            semantic_provider=self.llm_client, workspace_service=workspace_service,
+            ledger_service=ledger, execution_service=execution)
         memory = self.episodic_memory or EpisodicMemoryRetriever(lifecycle.episodic_store)
         run_runtime = RunResearchRuntime(session_runtime=main_runtime, coordinator=coordinator,
             synthesis=self.synthesis or RunFinalSynthesisRole(), execution_service=execution,

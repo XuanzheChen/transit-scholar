@@ -51,6 +51,7 @@ class RunResearchRuntime:
                  config: RunRuntimeConfig | None = None, snapshot_builder: Any | None = None,
                  handoff_projector: Any | None = None, trace: Any | None = None,
                  is_cancelled: Callable[[], bool] | None = None, state_store: Any | None = None,
+                 is_pause_requested: Callable[[], bool] | None = None,
                  requires_execution_service: bool | None = None,
                  l3s7_lifecycle: Any | None = None,
                  episodic_memory_retriever: EpisodicMemoryRetriever | None = None):
@@ -62,6 +63,7 @@ class RunResearchRuntime:
         self.snapshot_builder = snapshot_builder or RunContextSnapshotBuilder()
         self.handoff_projector = handoff_projector or SessionHandoffProjector()
         self.trace, self.is_cancelled, self.state_store = trace, is_cancelled or (lambda: False), state_store
+        self.is_pause_requested = is_pause_requested or (lambda: False)
         self.l3s7_lifecycle = l3s7_lifecycle
         if l3s7_lifecycle is not None and hasattr(
             l3s7_lifecycle, "configure_authoritative_readers"
@@ -136,6 +138,16 @@ class RunResearchRuntime:
         self._event(agent_run_id, "run.started", {})
         while True:
             state.run_steps += 1
+            if self.is_pause_requested():
+                state.status = "running"
+                state.termination_reason = "pause_requested"
+                self._persist(state, outcomes, plan)
+                if self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
+                    self.execution_service.update_agent_run_status(agent_run_id, "paused")
+                self._event(agent_run_id, "run.paused", {"reason": "pause_requested"})
+                return {"status": "paused", "termination_reason": "pause_requested", "outcomes": outcomes,
+                        "session_outcomes": outcomes, "research_plan": plan,
+                        "orchestration_state": state, "final_response": None}
             reason = self._limit(state, outcomes)
             if reason: return self._result(state, outcomes, plan, reason)
             snapshot = self._build_snapshot(run, outcomes, plan, state)

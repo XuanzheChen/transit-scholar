@@ -103,6 +103,10 @@ def test_recent_completed_context_is_bounded_and_isolated(session):
 
 
 def test_goal_resolver_is_standalone_and_side_effect_free(session):
+    before_counts = {
+        model: session.query(model).count()
+        for model in (AgentRun, ResearchSession, ResearchQueryRecord, EvidenceRecord, ClaimRecord)
+    }
     workspace_id = make_workspace(session)
     service = ConversationService(session)
     conversation = service.create_session(workspace_id)
@@ -121,11 +125,10 @@ def test_goal_resolver_is_standalone_and_side_effect_free(session):
     goal = ConversationGoalResolver(fake_generator).resolve("Summarize that one", [prior])
     assert goal and "Summarize B" in goal and "that one" not in goal
     assert "second paper" in goal
-    assert session.query(AgentRun).count() == 0
-    assert session.query(ResearchSession).count() == 0
-    assert session.query(ResearchQueryRecord).count() == 0
-    assert session.query(EvidenceRecord).count() == 0
-    assert session.query(ClaimRecord).count() == 0
+    assert {
+        model: session.query(model).count()
+        for model in before_counts
+    } == before_counts
 
 
 def test_goal_resolver_requires_generator_for_prior_turns(session):
@@ -137,15 +140,18 @@ def test_goal_resolver_requires_generator_for_prior_turns(session):
 
 
 def test_goal_resolver_first_turn_preserves_research_intent_without_side_effects(session):
+    before_counts = {
+        model: session.query(model).count()
+        for model in (AgentRun, ResearchSession, ResearchQueryRecord, EvidenceRecord, ClaimRecord)
+    }
     resolver = ConversationGoalResolver()
     goal = resolver.resolve("Find the latest papers on rail transit demand forecasting")
     assert goal
     assert "rail transit demand forecasting" in goal
-    assert session.query(AgentRun).count() == 0
-    assert session.query(ResearchSession).count() == 0
-    assert session.query(ResearchQueryRecord).count() == 0
-    assert session.query(EvidenceRecord).count() == 0
-    assert session.query(ClaimRecord).count() == 0
+    assert {
+        model: session.query(model).count()
+        for model in before_counts
+    } == before_counts
 
 
 def test_core_execution_models_have_no_conversation_ownership_fields():

@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "tasks": {
+    "v1:T-001": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-002": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-003": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-004": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 2,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-005": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 1,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-006": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 1,
+      "abnormal_retries_used": 1
+    },
+    "v1:T-007": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 3,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-008": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 3,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-009": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 1
+    },
+    "v1:T-010": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-011": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 2,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-012": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-013": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 0
+    },
+    "v1:T-014": {
+      "execution_round": 1,
+      "initial_attempted": true,
+      "quality_retries_used": 0,
+      "abnormal_retries_used": 1
+    }
+  },
+  "legacy_unclassified_attempts": {}
+}

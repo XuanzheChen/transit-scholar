@@ -39,6 +39,10 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ParsePaperResult": "transit_scholar.layer2.schema",
     "SourceRef": "transit_scholar.layer2.schema",
     "GoldQuery": "transit_scholar.layer2.schema",
+    "SchemaCatalog": "transit_scholar.layer2.schema_catalog",
+    "SchemaCatalogError": "transit_scholar.layer2.schema_catalog",
+    "SchemaNotFoundError": "transit_scholar.layer2.schema_catalog",
+    "SchemaVersionExistsError": "transit_scholar.layer2.schema_catalog",
 }
 
 

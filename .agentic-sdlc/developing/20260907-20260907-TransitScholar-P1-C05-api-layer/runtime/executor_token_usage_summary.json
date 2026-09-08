@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-09-08T01:17:49.089813+00:00",
+  "contracts": {
+    "v1": {
+      "contract_version": 1,
+      "contract": "v1",
+      "invocations": 29,
+      "exact_invocations": 26,
+      "inexact_invocations": 0,
+      "unavailable_invocations": 3,
+      "exact": false,
+      "lower_bound": true,
+      "input_tokens": 17269233,
+      "uncached_input_tokens": 5550321,
+      "cached_input_tokens": 11718912,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 161368,
+      "reasoning_output_tokens": 47102,
+      "total_tokens": 17430601
+    }
+  }
+}

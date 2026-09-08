@@ -84,6 +84,7 @@ class RuntimeFactory:
         self.knowledge_service = knowledge_service
         self.synthesis = synthesis
         self.runtime_root = runtime_root or (Path(self.data_root) / "layer3" / "runs" if self.data_root else Path("data/layer3/runs"))
+        self.run_control = FileRunControlStore(self.runtime_root)
 
     def build_run_scope(self, agent_run_id: str) -> RunScope:
         from transit_scholar.layer3.execution import AgentRunService
@@ -149,6 +150,7 @@ class RuntimeFactory:
         run_runtime = RunResearchRuntime(session_runtime=main_runtime, coordinator=coordinator,
             synthesis=self.synthesis or RunFinalSynthesisRole(), execution_service=execution,
             ledger_service=ledger, trace=trace, config=self.run_config, state_store=run_store,
+            is_pause_requested=lambda: self.run_control.is_pause_requested(agent_run_id),
             l3s7_lifecycle=lifecycle, episodic_memory_retriever=memory)
         return RunScope(run, session, workspace, execution, research_state, ledger, trace, knowledge, registry,
             validator, action_executor, role_runtime, main_runtime, coordinator, run_runtime, memory, lifecycle)
@@ -189,6 +191,28 @@ class FileRunResearchStateStore:
         if not isinstance(agent_run_id, str) or not agent_run_id or Path(agent_run_id).name != agent_run_id:
             raise ValueError("agent_run_id must be a non-empty file-safe identifier")
         return self.root / agent_run_id / "run_state.json"
+
+
+class FileRunControlStore:
+    """Small durable control seam for cooperative run commands."""
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root)
+
+    def request_pause(self, agent_run_id: str) -> None:
+        self._path(agent_run_id).parent.mkdir(parents=True, exist_ok=True)
+        self._path(agent_run_id).write_text("pause\n", encoding="utf-8")
+
+    def clear_pause(self, agent_run_id: str) -> None:
+        self._path(agent_run_id).unlink(missing_ok=True)
+
+    def is_pause_requested(self, agent_run_id: str) -> bool:
+        return self._path(agent_run_id).exists()
+
+    def _path(self, agent_run_id: str) -> Path:
+        if not isinstance(agent_run_id, str) or not agent_run_id or Path(agent_run_id).name != agent_run_id:
+            raise ValueError("agent_run_id must be a non-empty file-safe identifier")
+        return self.root / agent_run_id / "pause.request"
 
 
 class _CommitBeforeCheckpointStore:

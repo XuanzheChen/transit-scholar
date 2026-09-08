@@ -730,6 +730,7 @@ def extract_schema_instance_in_memory(
     paper_id: str,
     schema_id: str,
     *,
+    definition: SchemaDefinition | None = None,
     llm_client: StructuredLLMClient | None = None,
     retrieval: RetrievalBoundary | None = None,
     top_k: int = 8,
@@ -752,7 +753,7 @@ def extract_schema_instance_in_memory(
         top_k=top_k,
         canonical_reader=canonical_reader,
     )
-    return engine.run(paper_id, schema_id, run_id=run_id)
+    return engine.run(paper_id, schema_id, definition=definition, run_id=run_id)
 
 
 def extract_field_instance_in_memory(

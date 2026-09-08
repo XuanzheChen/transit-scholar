@@ -1,0 +1,15 @@
+{
+  "source": "contracts-import\\260907\\API-Layer-Contract-V1-approved.md",
+  "copy_path": "E:\\AI_Agent_Development\\transit-scholar\\.agentic-sdlc\\developing\\20260907-20260907-TransitScholar-P1-C05-api-layer\\contract\\imports\\d711b420dd127e6c.bundle.md",
+  "sha256": "d711b420dd127e6c716fe43ed4ee83027e4de24064755a429d34d86bc30caa5d",
+  "version": 1,
+  "import_time": "2026-09-07T11:23:57.558457+00:00",
+  "outcome": {
+    "type": "valid",
+    "reasons": [],
+    "errors": []
+  },
+  "materialized_path": "E:\\AI_Agent_Development\\transit-scholar\\.agentic-sdlc\\developing\\20260907-20260907-TransitScholar-P1-C05-api-layer\\contract\\v1",
+  "warnings": [],
+  "status": "imported"
+}

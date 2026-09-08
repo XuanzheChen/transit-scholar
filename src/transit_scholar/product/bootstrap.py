@@ -40,4 +40,4 @@ def build_local_product(settings=None):
             metadata={"prompt_key": "conversation_goal_resolver"},
         )
 
-    return TransitScholarProduct(session, runtime, goal_resolver=ConversationGoalResolver(generate_goal))
+    return TransitScholarProduct(session, runtime, goal_resolver=ConversationGoalResolver(generate_goal), data_root=settings.data_root)

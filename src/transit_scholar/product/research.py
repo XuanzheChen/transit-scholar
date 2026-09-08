@@ -14,6 +14,15 @@ class InvalidRunCommand(ValueError):
     """The requested product command is incompatible with the run status."""
 
 
+@dataclass(frozen=True)
+class PreparedMessage:
+    """Persisted identities produced before an AgentRun is executed."""
+
+    turn_id: str
+    agent_run_id: str
+    resolved_user_goal: str
+
+
 def _dump(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -43,6 +52,7 @@ class ResearchService:
 
     def _execute(self, run, agent_run_id: str, *, user_goal: str | None = None):
         self.execution.update_agent_run_status(agent_run_id, "running")
+        self._mark_linked_turn_running(agent_run_id)
         self.session.commit()
         scope = None
         try:
@@ -89,9 +99,22 @@ class ResearchService:
     def resume_run(self, agent_run_id: str):
         run = self.execution.get_agent_run(agent_run_id)
         self._validate_resume_command(run)
+        control = getattr(self.runtime_factory, "run_control", None)
+        if control is not None:
+            control.clear_pause(agent_run_id)
         result = self._execute(run, agent_run_id)
         self._sync_linked_turn(agent_run_id, result)
         return result
+
+    def request_pause(self, agent_run_id: str):
+        run = self.execution.get_agent_run(agent_run_id)
+        if run.status != "running":
+            raise InvalidRunCommand(f"pause_run is only allowed for running runs; current status is {run.status}")
+        control = getattr(self.runtime_factory, "run_control", None)
+        if control is None:
+            raise RuntimeError("runtime factory does not support run control")
+        control.request_pause(agent_run_id)
+        return run
 
     @staticmethod
     def _validate_execute_command(run):
@@ -102,9 +125,9 @@ class ResearchService:
 
     @staticmethod
     def _validate_resume_command(run):
-        if run.status not in {"running", "failed"}:
+        if run.status != "paused":
             raise InvalidRunCommand(
-                f"resume_run is only allowed for running or failed runs; current status is {run.status}"
+                f"resume_run is only allowed for paused runs; current status is {run.status}"
             )
 
     def _sync_linked_turn(self, agent_run_id: str, result):
@@ -122,32 +145,46 @@ class ResearchService:
             self.conversations.update_turn(turn.id, status="failed", error_message="Research execution failed")
         self.session.commit()
 
-    def submit_message(self, conversation_id: str, message: str):
+    def _mark_linked_turn_running(self, agent_run_id: str) -> None:
+        turn = self.session.scalar(
+            select(ConversationTurn).where(ConversationTurn.agent_run_id == agent_run_id)
+        )
+        if turn is not None and turn.status == "preparing":
+            self.conversations.update_turn(turn.id, status="running")
+
+    def prepare_message(self, conversation_id: str, message: str) -> PreparedMessage:
+        """Create and commit a linked Turn and AgentRun without executing it."""
         turn = self.conversations.create_turn(conversation_id, message, status="preparing")
-        conversation = self.conversations.get_session(conversation_id)
         try:
+            conversation = self.conversations.get_session(conversation_id)
+            if conversation is None:
+                raise ValueError("conversation not found")
             prior = self.conversations.recent_completed(conversation_id)
             goal = self.goal_resolver.resolve(message, prior)
             self.conversations.update_turn(turn.id, resolved_user_goal=goal)
             run = self.execution.create_agent_run(workspace_id=conversation.workspace_id, user_goal=goal)
-            self.conversations.update_turn(turn.id, agent_run_id=run.agent_run_id, status="running")
+            self.conversations.update_turn(turn.id, agent_run_id=run.agent_run_id)
             self.session.commit()
-            result = self.execute_run(run.agent_run_id, user_goal=goal)
-            data = _dump(result)
-            artifact = data.get("final_response") if isinstance(data, dict) else None
-            run_status = data.get("status") if isinstance(data, dict) else "completed"
-            if run_status == "completed":
-                self.conversations.update_turn(turn.id, final_assistant_response=_dump(artifact), status="completed", error_message=None)
-            else:
-                self.conversations.update_turn(turn.id, status="failed", error_message="Research execution failed")
-            self.session.commit()
-            return self.conversations.get_turn(turn.id)
+            return PreparedMessage(
+                turn_id=turn.id,
+                agent_run_id=run.agent_run_id,
+                resolved_user_goal=goal,
+            )
         except Exception as exc:
             # Keep product-facing failures concise; detailed diagnostics remain
             # in the Core trace/state and the original exception is propagated.
             self.conversations.update_turn(turn.id, status="failed", error_message=str(exc)[:500] or "Research execution failed")
             self.session.commit()
             raise
+
+    def submit_message(self, conversation_id: str, message: str):
+        """Synchronously prepare, execute, and return the completed Turn."""
+        prepared = self.prepare_message(conversation_id, message)
+        self.execute_run(
+            prepared.agent_run_id,
+            user_goal=prepared.resolved_user_goal,
+        )
+        return self.conversations.get_turn(prepared.turn_id)
 
 
 @dataclass(frozen=True)
@@ -157,3 +194,5 @@ class ProductRunState:
     status: str
     phase: str
     user_goal: str
+    pause_requested: bool = False
+    display_status: str | None = None

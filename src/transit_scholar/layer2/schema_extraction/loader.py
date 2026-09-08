@@ -91,4 +91,17 @@ def get_schema_definition(schema_id: str) -> SchemaDefinition:
         definition = _load_definition(plugin_dir, plugin_dir.name)
         if definition.schema_id == schema_id:
             return definition
+    # User schemas are stored as immutable version files by the unified
+    # catalog. Existing consumers resolve an id only, so select the latest
+    # available user version for backwards-compatible downstream use.
+    from transit_scholar.config import settings
+    user_paths = sorted((settings.data_root / "schemas" / schema_id).glob("*.json"))
+    if user_paths:
+        try:
+            import json
+            return SchemaDefinition.model_validate(json.loads(user_paths[-1].read_text(encoding="utf-8")))
+        except (OSError, ValueError, ValidationError) as exc:
+            raise InvalidSchemaDefinitionError(
+                f"user schema {schema_id!r}: invalid stored schema definition"
+            ) from exc
     raise SchemaPluginNotFoundError(f"schema plugin {schema_id!r} not found")

@@ -166,6 +166,7 @@ _INJECTION_KEYS = frozenset(
         "storage",
         "storage_root",
         "top_k",
+        "definition",
     }
 )
 
@@ -364,9 +365,11 @@ def extract_schema(
     )
     cross_field_validators = inj.get("cross_field_validators")
 
+    definition = inj.get("definition")
     run = extract_schema_instance_in_memory(
         paper_id,
         schema_id,
+        definition=definition,
         llm_client=llm_client,
         retrieval=retrieval,
         top_k=top_k,
@@ -380,7 +383,7 @@ def extract_schema(
 
     instance = run.instance
     manifest = run.manifest
-    definition = get_schema_definition(schema_id)
+    definition = definition or get_schema_definition(schema_id)
 
     report = run_validation_pipeline_in_memory(
         definition,

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "version": 1,
+  "status": "approved",
+  "created_by": "external-planner",
+  "created_at": "2026-09-07T11:17:00Z",
+  "supersedes": null,
+  "workflow_policy": {
+    "restart": "all"
+  },
+  "project_name": "TransitScholar",
+  "contract_summary": "API Layer contract for the local TransitScholar product, covering HTTP exposure of papers, schemas, workspaces, conversations, AgentRun execution and control, timelines, citations, and wiki capabilities."
+}

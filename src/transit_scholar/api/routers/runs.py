@@ -5,6 +5,7 @@ from transit_scholar.api.errors import ApiError
 from transit_scholar.api.runtime import RunnerBusyError
 from transit_scholar.api.schemas.run_control import RunStateResponse, TimelineResponse, TimelineEventResponse
 from transit_scholar.layer3.execution.errors import AgentRunNotFoundError
+from transit_scholar.product.errors import ProductConflictError
 
 
 def _state(product, agent_run_id: str) -> RunStateResponse:
@@ -43,7 +44,7 @@ def pause_run(agent_run_id: str, product=Depends(get_product)):
         return _state(product, agent_run_id)
     except AgentRunNotFoundError as exc:
         raise ApiError("NOT_FOUND", "agent run not found", {"agent_run_id": agent_run_id}, 404) from exc
-    except ValueError as exc:
+    except ProductConflictError as exc:
         raise ApiError("RUN_STATE_CONFLICT", str(exc), {"agent_run_id": agent_run_id}, 409) from exc
 
 
@@ -59,5 +60,5 @@ def resume_run(request: Request, agent_run_id: str, product=Depends(get_product)
         raise ApiError("RUNNER_BUSY", "Another AgentRun is already executing", {}, 409) from exc
     except AgentRunNotFoundError as exc:
         raise ApiError("NOT_FOUND", "agent run not found", {"agent_run_id": agent_run_id}, 404) from exc
-    except ValueError as exc:
-        raise ApiError("NOT_FOUND", "agent run not found", {"agent_run_id": agent_run_id}, 404) from exc
+    except ProductConflictError as exc:
+        raise ApiError("RUN_STATE_CONFLICT", str(exc), {"agent_run_id": agent_run_id}, 409) from exc

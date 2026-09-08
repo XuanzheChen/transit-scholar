@@ -114,6 +114,7 @@ class MainResearchRuntime:
         action_planner: ActionPlanner | None = None,
         action_executor: object | None = None,
         is_cancelled: Callable[[], bool] | None = None,
+        is_pause_requested: Callable[[], bool] | None = None,
         state_store: MainRuntimeStateStore | None = None,
         agentic_wiki_maintenance: Callable[[str], object] | None = None,
         agentic_wiki_base_dir: str | None = None,
@@ -139,6 +140,7 @@ class MainResearchRuntime:
         ):
             self.role_runtime.action_executor = action_executor
         self.is_cancelled = is_cancelled or (lambda: False)
+        self.is_pause_requested = is_pause_requested or (lambda: False)
         self.state_store = state_store
         self._agentic_wiki_maintenance_explicit = agentic_wiki_maintenance is not None
         self.agentic_wiki_maintenance = agentic_wiki_maintenance
@@ -228,6 +230,9 @@ class MainResearchRuntime:
             or state.research_session_id != research_session_id
         ):
             raise ValueError("Persisted Main Runtime state belongs to another session")
+        if state.status == "paused":
+            state.status = "running"
+            state.termination_reason = None
         handoff = state.session_handoff if state.session_handoff is not None else session_handoff
         return self._execute_state(state, resumed=True, session_handoff=handoff)
 
@@ -415,9 +420,17 @@ class MainResearchRuntime:
             state.failure_message = failure_message
             state.final_response = final_response
             self._save_state(state)
+            if status == "running" and self.is_pause_requested():
+                status, reason = "paused", "pause_requested"
+                state.status = status
+                state.termination_reason = reason
+                self._save_state(state)
+                break
 
         session_status = "completed" if status == "completed" else (
+            "paused" if status == "paused" else (
             "cancelled" if reason == "cancelled" else "failed"
+            )
         )
         self.execution_service.update_research_session_status(
             agent_run_id, research_session_id, session_status

@@ -6,6 +6,7 @@ from copy import deepcopy
 from sqlalchemy import select
 
 from transit_scholar.db.models import AgentTraceEvent, EvidenceRecord, Paper, ResearchSession
+from .errors import ProductNotFoundError, ProductValidationError
 from .research import ProductRunState
 
 
@@ -40,7 +41,7 @@ class ProductStateProjector:
         """Project durable trace events into a UI-safe incremental timeline."""
         from transit_scholar.layer3.execution import AgentRunService
         if after_sequence < 0:
-            raise ValueError("after_sequence must be non-negative")
+            raise ProductValidationError("after_sequence must be non-negative")
         AgentRunService(self.session).get_agent_run(agent_run_id)
         rows = self.session.execute(
             select(AgentTraceEvent)
@@ -61,7 +62,6 @@ class ProductStateProjector:
         safe_keys = {
             "role_id", "role_status", "action_type", "status", "termination_reason",
             "query_id", "evidence_id", "claim_id", "research_session_id",
-            "message", "warning", "error", "failure_message",
         }
         result = []
         for row in rows:
@@ -86,6 +86,8 @@ class ProductStateProjector:
                     ("synth", "synthesis"), ("warn", "warning"),
                     ("error", "error"),
                 ) if token in lowered), "status")
+            if kind in {"error", "warning"}:
+                data.update(_timeline_issue(payload, kind))
             result.append({
                 "sequence": row.sequence,
                 "kind": kind,
@@ -101,7 +103,7 @@ class ProductStateProjector:
         from .conversation import ConversationService
         conversation = ConversationService(self.session).get_session(conversation_id)
         if conversation is None:
-            raise ValueError("conversation not found")
+            raise ProductNotFoundError("conversation not found")
         turns = []
         for turn in ConversationService(self.session).list_turns(conversation_id):
             # A conversation is product-owned history.  A stale/missing link
@@ -172,7 +174,7 @@ class ProductStateProjector:
             paper_provenance = paper_provenance if isinstance(paper_provenance, dict) else {}
             span = locator.get("span")
             span = span if isinstance(span, dict) else {}
-            paper_id = locator.get("paper_id")
+            paper_id = locator.get("paper_id") or paper_provenance.get("paper_id")
             citations.append({
                 "evidence_id": row.id,
                 "research_session_id": row.research_session_id,
@@ -183,8 +185,13 @@ class ProductStateProjector:
                 "block_id": locator.get("block_id"),
                 "character_start": span.get("start"),
                 "character_end": span.get("end"),
-                "parse_run_id": locator.get("parse_run_id"),
-                "canonical_source_version": locator.get("canonical_source_version"),
+                "parse_run_id": (
+                    locator.get("parse_run_id") or paper_provenance.get("parse_run_id")
+                ),
+                "canonical_source_version": (
+                    locator.get("canonical_source_version")
+                    or paper_provenance.get("canonical_source_version")
+                ),
                 "evidence_quote": row.text_snapshot,
             })
         return citations
@@ -260,6 +267,26 @@ def _timeline_value(value):
     if isinstance(value, list) and all(item is None or isinstance(item, (str, int, float, bool)) for item in value):
         return deepcopy(value)
     return None
+
+
+def _timeline_issue(payload: dict, kind: str) -> dict:
+    """Project runtime diagnostics into stable, user-safe issue details."""
+    raw_code = " ".join(
+        str(payload.get(key, ""))
+        for key in ("error_code", "failure_code", "code", "failure_message", "error")
+    ).lower()
+    if "structured" in raw_code or "invalid_output" in raw_code or "validation" in raw_code:
+        code, summary = "STRUCTURED_OUTPUT_INVALID", "The provider returned an unusable structured response."
+    elif "provider" in raw_code or "llm_" in raw_code:
+        code, summary = "PROVIDER_REQUEST_FAILED", "The provider request could not be completed."
+    elif kind == "warning":
+        code, summary = "RUN_WARNING", "The run reported a non-fatal warning."
+    else:
+        code, summary = "RUN_FAILED", "The run encountered an internal failure."
+    data = {"code": code, "summary": summary}
+    if isinstance(payload.get("retryable"), bool):
+        data["retryable"] = payload["retryable"]
+    return data
 
 
 def _json_object(value: object) -> dict:

@@ -1,7 +1,8 @@
 # Supervisor Review
 
-Contract: v1
+Contract: v2
 Task: T-007
-Outcome: rejected for scope violation and incomplete verification
+Outcome: pass
 
-Workspace implementation passed after two scope reworks. The forbidden schema service is restored exactly, final attempt changed no paths, and the combined Layer2/Layer3/Product/API suite reports 65 passed.
+- Paper API focused suite: 6 passed.
+- Import, size rejection, paper-in-use guard, soft delete/restore, and safe file lookup verified.

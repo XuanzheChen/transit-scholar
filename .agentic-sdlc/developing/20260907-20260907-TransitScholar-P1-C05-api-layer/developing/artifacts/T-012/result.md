@@ -1,7 +1,8 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-012
-Outcome: passed
+Status: passed
 Attempts: 1
-Tests: focused startup reconciliation passed; combined relevant suite 52 passed plus two unrelated failures
+
+- AC-032 and AC-033: passed.

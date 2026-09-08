@@ -74,3 +74,19 @@ def test_validation_and_not_found_errors_use_the_stable_envelope(project_tmp_pat
 def test_response_dto_omits_internal_model_fields():
     assert "internal_runtime_checkpoint" not in PaperSummaryResponse.model_fields
     assert "internal_runtime_checkpoint" not in PaperSummaryResponse.model_json_schema()["properties"]
+
+
+def test_capabilities_do_not_advertise_agent_execution_without_runtime(project_tmp_path):
+    with TestClient(create_app(data_root=project_tmp_path / "api")) as client:
+        capabilities = client.get("/api/v1/capabilities").json()
+
+    assert capabilities["pause_resume"] is False
+    assert capabilities["user_schema_creation"] is True
+
+
+def test_capabilities_advertise_agent_execution_with_configured_runtime(project_tmp_path, monkeypatch):
+    monkeypatch.setenv("TRANSIT_SCHOLAR_LLM_PROVIDER", "fake")
+    with TestClient(create_app(data_root=project_tmp_path / "api")) as client:
+        capabilities = client.get("/api/v1/capabilities").json()
+
+    assert capabilities["pause_resume"] is True

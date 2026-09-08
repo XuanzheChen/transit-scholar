@@ -1,9 +1,9 @@
-# Supervisor Review — Rework Required
+# Supervisor Review
 
-Contract: v1
+Contract: v2
 Task: T-005
-Outcome: pass after one quality rework
+Outcome: pass
 
-- Focused paper/API/Product tests: 5 passed.
-- Root API composition remained untouched in the passing attempt.
-- `compileall` and `git diff --check` passed.
+- Timeline projection tests: 2 passed.
+- Public timeline sanitizes raw errors while preserving cursor semantics.
+- `git diff --check` passed.

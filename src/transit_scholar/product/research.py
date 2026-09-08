@@ -4,13 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from sqlalchemy import select
-from transit_scholar.db.models import ConversationTurn
+from transit_scholar.db.models import AgentRun, ConversationTurn
 
 from transit_scholar.layer3.execution import AgentRunService
 from .conversation import ConversationGoalResolver, ConversationService
+from .errors import ProductConflictError, ProductNotFoundError
 
 
-class InvalidRunCommand(ValueError):
+class InvalidRunCommand(ProductConflictError):
     """The requested product command is incompatible with the run status."""
 
 
@@ -158,7 +159,7 @@ class ResearchService:
         try:
             conversation = self.conversations.get_session(conversation_id)
             if conversation is None:
-                raise ValueError("conversation not found")
+                raise ProductNotFoundError("conversation not found")
             prior = self.conversations.recent_completed(conversation_id)
             goal = self.goal_resolver.resolve(message, prior)
             self.conversations.update_turn(turn.id, resolved_user_goal=goal)
@@ -176,6 +177,16 @@ class ResearchService:
             self.conversations.update_turn(turn.id, status="failed", error_message=str(exc)[:500] or "Research execution failed")
             self.session.commit()
             raise
+
+    def discard_prepared_message(self, prepared: PreparedMessage) -> None:
+        """Remove persisted preparation state when local scheduling fails."""
+        turn = self.conversations.get_turn(prepared.turn_id)
+        if turn is not None and turn.agent_run_id == prepared.agent_run_id:
+            self.session.delete(turn)
+        run = self.session.get(AgentRun, prepared.agent_run_id)
+        if run is not None and run.status == "created":
+            self.session.delete(run)
+        self.session.commit()
 
     def submit_message(self, conversation_id: str, message: str):
         """Synchronously prepare, execute, and return the completed Turn."""

@@ -1,11 +1,9 @@
 # Supervisor Review
 
-Contract: v1
+Contract: v2
 Task: T-003
 Outcome: pass
 
-- API suite: 4 passed.
-- Product suite: 45 passed.
-- Single-slot concurrency rejects a second active run.
-- Worker creates and closes an independent Product scope after the request scope is gone.
-- Changed paths are within allowed scope and `git diff --check` passed.
+- Execution-manager focused suite: 5 passed.
+- Submission failure release, Future cleanup, and sequential runs are covered.
+- `git diff --check` passed; scope is compliant.

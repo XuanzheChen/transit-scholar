@@ -133,6 +133,8 @@ class RunResearchRuntime:
         state, outcomes, plan = self._load(agent_run_id)
         if state.current_research_session_id:
             state, outcomes, plan = self._recover_current(run, state, outcomes, plan)
+            if state.current_research_session_id and self.is_pause_requested():
+                return self._pause_result(state, outcomes, plan)
         state.status = "running"
         self._persist(state, outcomes, plan)
         self._event(agent_run_id, "run.started", {})
@@ -228,12 +230,16 @@ class RunResearchRuntime:
             self._event(agent_run_id, "run.session.started", {"research_session_id": sid}, sid)
             try:
                 if hasattr(self.session_runtime, "execute"):
-                    raw = self.session_runtime.execute(agent_run_id=agent_run_id, research_session_id=sid, session_handoff=handoff)
+                    raw = self._invoke_session("execute", agent_run_id=agent_run_id, research_session_id=sid, session_handoff=handoff)
                 else:
                     raw = self.session_runtime(session, handoff)
+                if self._session_paused(raw):
+                    return self._pause_result(state, outcomes, plan)
                 outcome = self._adapt_outcome(raw, sid, question)
             except Exception as exc:
                 outcome = SessionOutcome(research_session_id=sid, research_question=question, status="failed", failure_reason=str(exc))
+            if outcome.status == "paused":
+                return self._pause_result(state, outcomes, plan)
             outcomes.append(outcome); state.current_research_session_id = None; state.current_plan_item_id = None
             if outcome.status == "completed": state.completed_session_ids.append(sid)
             else: state.failed_session_ids.append(sid)
@@ -276,18 +282,21 @@ class RunResearchRuntime:
         )
         try:
             if hasattr(self.session_runtime, "resume_session"):
-                raw = self.session_runtime.resume_session(
-                    agent_run_id=state.agent_run_id, research_session_id=sid,
-                    session_handoff=handoff,
-                )
+                raw = self._invoke_session("resume_session", agent_run_id=state.agent_run_id, research_session_id=sid, session_handoff=handoff)
             else:
-                raw = self.session_runtime.execute(
-                    agent_run_id=state.agent_run_id, research_session_id=sid,
-                    session_handoff=handoff,
-                )
+                raw = self._invoke_session("execute", agent_run_id=state.agent_run_id, research_session_id=sid, session_handoff=handoff)
+            if self._session_paused(raw):
+                return state, outcomes, plan
             outcome = self._adapt_outcome(raw, sid, question)
         except Exception as exc:
             outcome = SessionOutcome(research_session_id=sid, research_question=question, status="failed", failure_reason=str(exc))
+        if outcome.status == "paused":
+            state.status = "running"
+            state.termination_reason = "pause_requested"
+            self._persist(state, outcomes, plan)
+            if self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
+                self.execution_service.update_agent_run_status(state.agent_run_id, "paused")
+            return state, outcomes, plan
         outcomes.append(outcome)
         if outcome.status == "completed":
             if sid not in state.completed_session_ids: state.completed_session_ids.append(sid)
@@ -300,6 +309,37 @@ class RunResearchRuntime:
         state.current_plan_item_id = None
         self._persist(state, outcomes, plan)
         return state, outcomes, plan
+
+    def _pause_result(self, state, outcomes, plan):
+        state.status = "running"
+        state.termination_reason = "pause_requested"
+        self._persist(state, outcomes, plan)
+        if self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
+            self.execution_service.update_agent_run_status(state.agent_run_id, "paused")
+        self._event(
+            state.agent_run_id,
+            "run.paused",
+            {"reason": "pause_requested", "research_session_id": state.current_research_session_id},
+            state.current_research_session_id,
+        )
+        return {"status": "paused", "termination_reason": "pause_requested", "outcomes": outcomes,
+                "session_outcomes": outcomes, "research_plan": plan,
+                "orchestration_state": state, "final_response": None}
+
+    def _invoke_session(self, method: str, **kwargs: Any) -> Any:
+        target = getattr(self.session_runtime, method)
+        try:
+            parameters = inspect.signature(target).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "is_pause_requested" in parameters or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+            kwargs["is_pause_requested"] = self.is_pause_requested
+        return target(**kwargs)
+
+    @staticmethod
+    def _session_paused(value: Any) -> bool:
+        status = value.get("status") if isinstance(value, dict) else getattr(value, "status", None)
+        return getattr(status, "value", status) == "paused"
 
     @staticmethod
     def _validate(value): return value if isinstance(value, RunDecision) else RunDecision.model_validate(value)

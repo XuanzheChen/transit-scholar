@@ -1,6 +1,10 @@
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from transit_scholar.product.errors import (
+    ProductConflictError, ProductNotFoundError, ProductValidationError,
+    ProductPayloadTooLargeError, ProviderUnavailableError,
+)
 
 
 class ApiError(Exception):
@@ -25,3 +29,31 @@ def install_error_handlers(app):
                 }
             },
         )
+
+    @app.exception_handler(ProductNotFoundError)
+    async def product_not_found_handler(request: Request, exc: ProductNotFoundError):
+        return _product_response("NOT_FOUND", str(exc), 404)
+
+    @app.exception_handler(ProductConflictError)
+    async def product_conflict_handler(request: Request, exc: ProductConflictError):
+        return _product_response("CONFLICT", str(exc), 409)
+
+    @app.exception_handler(ProductValidationError)
+    async def product_validation_handler(request: Request, exc: ProductValidationError):
+        return _product_response("VALIDATION_ERROR", str(exc), 422)
+
+    @app.exception_handler(ProductPayloadTooLargeError)
+    async def product_payload_too_large_handler(request: Request, exc: ProductPayloadTooLargeError):
+        return _product_response("UPLOAD_TOO_LARGE", str(exc), 413)
+
+    @app.exception_handler(ProviderUnavailableError)
+    async def provider_unavailable_handler(request: Request, exc: ProviderUnavailableError):
+        return _product_response("PROVIDER_UNAVAILABLE", "Provider is temporarily unavailable", 503)
+
+    @app.exception_handler(Exception)
+    async def unexpected_handler(request: Request, exc: Exception):
+        return _product_response("INTERNAL_ERROR", "An unexpected internal error occurred", 500)
+
+
+def _product_response(code: str, message: str, status_code: int):
+    return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message, "details": {}}})

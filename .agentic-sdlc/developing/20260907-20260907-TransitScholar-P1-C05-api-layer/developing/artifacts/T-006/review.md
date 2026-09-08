@@ -1,9 +1,9 @@
-# Supervisor Review — Final Scope Rework
+# Supervisor Review
 
-Contract: v1
+Contract: v2
 Task: T-006
-Outcome: pass after one abnormal retry and one scope rework
+Outcome: pass
 
-- Focused Layer2/Product/API tests: 6 passed.
-- Final attempt changed no paths.
-- `compileall` and `git diff --check` passed.
+- Focused error, paper, and conversation tests: 13 passed.
+- Typed mappings and sanitized catch-all behavior are covered.
+- `git diff --check` passed.

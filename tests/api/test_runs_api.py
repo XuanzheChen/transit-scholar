@@ -47,6 +47,14 @@ def test_timeline_is_ordered_incremental_and_private_fields_are_omitted(session,
     trace.append_event(agent_run_id=run.agent_run_id, event_type="run.plan.created", payload={"message": "plan", "prompt": "secret"})
     trace.append_event(agent_run_id=run.agent_run_id, event_type="query.created", payload={"query_id": "q1", "scratchpad": "secret"})
     trace.append_event(agent_run_id=run.agent_run_id, event_type="evidence.admitted", payload={"evidence_id": "e1", "provider_reasoning": "secret"})
+    trace.append_event(
+        agent_run_id=run.agent_run_id,
+        event_type="runtime.failure",
+        payload={
+            "failure_message": "ProviderError: sk-test-secret raw model reasoning",
+            "provider_output": "private completion",
+        },
+    )
     session.commit()
     app = create_app(data_root=project_tmp_path)
     app.dependency_overrides[get_product] = lambda: product
@@ -54,11 +62,19 @@ def test_timeline_is_ordered_incremental_and_private_fields_are_omitted(session,
         first = client.get(f"/api/v1/runs/{run.agent_run_id}/timeline")
         assert first.status_code == 200
         body = first.json()
-        assert [event["sequence"] for event in body["events"]] == [1, 2, 3]
-        assert body["next_sequence"] == 3
-        assert all("prompt" not in event["data"] and "scratchpad" not in event["data"] for event in body["events"])
+        assert [event["sequence"] for event in body["events"]] == [1, 2, 3, 4]
+        assert body["next_sequence"] == 4
+        serialized = str(body)
+        assert "secret" not in serialized
+        assert "raw model reasoning" not in serialized
+        assert "private completion" not in serialized
+        assert body["events"][-1]["data"] == {
+            "code": "PROVIDER_REQUEST_FAILED",
+            "summary": "The provider request could not be completed.",
+        }
         second = client.get(f"/api/v1/runs/{run.agent_run_id}/timeline?after_sequence=1")
-        assert [event["sequence"] for event in second.json()["events"]] == [2, 3]
+        assert [event["sequence"] for event in second.json()["events"]] == [2, 3, 4]
+        assert second.json()["next_sequence"] == 4
 
 
 def test_pause_and_resume_endpoints(session, project_tmp_path):

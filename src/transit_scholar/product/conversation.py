@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from transit_scholar.db.models import ConversationSession, ConversationTurn
 from transit_scholar.layer3.workspace import WorkspaceService
 from transit_scholar.layer3.workspace.errors import WorkspaceError
+from .errors import ProductConflictError, ProductNotFoundError, ProductValidationError
 
 
 class ConversationService:
@@ -21,7 +22,7 @@ class ConversationService:
         try:
             self.workspaces.require_active(workspace_id)
         except WorkspaceError:
-            raise ValueError("conversation requires an active workspace")
+            raise ProductConflictError("conversation requires an active workspace")
         row = ConversationSession(workspace_id=workspace_id, title=title)
         self.session.add(row)
         self.session.flush()
@@ -44,11 +45,11 @@ class ConversationService:
     def create_turn(self, conversation_id: str, user_message: str, **values) -> ConversationTurn:
         conversation = self.session.get(ConversationSession, conversation_id)
         if conversation is None:
-            raise ValueError("conversation not found")
+            raise ProductNotFoundError("conversation not found")
         if not isinstance(user_message, str) or not user_message.strip():
-            raise ValueError("user message must not be empty")
+            raise ProductValidationError("user message must not be empty")
         if "status" in values and values["status"] not in {"preparing", "running", "completed", "failed"}:
-            raise ValueError("invalid conversation turn status")
+            raise ProductValidationError("invalid conversation turn status")
         next_sequence = self.session.scalar(
             select(func.coalesce(func.max(ConversationTurn.sequence), 0) + 1).where(
                 ConversationTurn.conversation_id == conversation_id
@@ -74,10 +75,10 @@ class ConversationService:
     def update_turn(self, turn_id: str, **values) -> ConversationTurn:
         row = self.session.get(ConversationTurn, turn_id)
         if row is None:
-            raise ValueError("turn not found")
+            raise ProductNotFoundError("turn not found")
         for key, value in values.items():
             if key not in {"resolved_user_goal", "agent_run_id", "final_assistant_response", "status", "error_message", "completed_at"}:
-                raise ValueError(f"unsupported turn field: {key}")
+                raise ProductValidationError(f"unsupported turn field: {key}")
             setattr(row, key, value)
         if row.status == "completed" and row.completed_at is None:
             row.completed_at = datetime.now(timezone.utc)
@@ -108,19 +109,19 @@ class ConversationGoalResolver:
     def resolve(self, user_message: str, prior_turns: list[ConversationTurn] | None = None) -> str:
         message = user_message.strip()
         if not message:
-            raise ValueError("user message must not be empty")
+            raise ProductValidationError("user message must not be empty")
         prior_turns = prior_turns or []
         if not prior_turns:
             return message
         if self.generator is None:
-            raise RuntimeError("goal generator is required when prior conversation turns are provided")
+            raise ProductValidationError("goal generator is required when prior conversation turns are provided")
         generated = self.generator(message, prior_turns)
         if isinstance(generated, dict):
             generated = generated.get("resolved_user_goal")
         elif hasattr(generated, "resolved_user_goal"):
             generated = generated.resolved_user_goal
         if not isinstance(generated, str) or not generated.strip():
-            raise ValueError("goal generator must return a non-empty resolved_user_goal")
+            raise ProductValidationError("goal generator must return a non-empty resolved_user_goal")
         return generated.strip()
 
     resolve_goal = resolve

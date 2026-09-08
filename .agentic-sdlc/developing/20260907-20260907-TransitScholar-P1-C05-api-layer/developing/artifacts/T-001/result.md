@@ -1,19 +1,13 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-001
-Outcome: passed
-Attempts: initial executor attempt (one valid invocation; one pre-launch invalid-input rejection did not launch Executor)
+Status: passed
+Attempts: 4
 
-Acceptance evidence:
-- FastAPI foundation and `/api/v1/` health/capability routes implemented.
-- Explicit DTO and request-scoped dependency modules implemented.
-- API and Product verification passed: 2 and 43 tests respectively.
+Acceptance:
+- AC-003, AC-004, AC-005, AC-037: passed
 
-Modified product paths:
-- `src/transit_scholar/api/__init__.py`
-- `src/transit_scholar/api/app.py`
-- `src/transit_scholar/api/dependencies.py`
-- `src/transit_scholar/api/errors.py`
-- `src/transit_scholar/api/schemas.py`
-- `tests/api/test_foundation.py`
+Verification:
+- `tests/api/test_runtime_context.py`: 2 passed
+- `git diff --check`: passed

@@ -11,6 +11,11 @@ from transit_scholar.api.schemas import (
     ConversationSummaryResponse, TurnCreateRequest, TurnResponse,
     TurnSubmissionResponse,
 )
+from transit_scholar.product.errors import (
+    ProductConflictError,
+    ProductNotFoundError,
+    ProductValidationError,
+)
 
 
 router = APIRouter(prefix="/api/v1")
@@ -70,7 +75,7 @@ def list_conversations(workspace_id: str, product=Depends(get_product)):
 def create_conversation(workspace_id: str, payload: ConversationCreateRequest, product=Depends(get_product)):
     try:
         return _summary(product.create_conversation(workspace_id, payload.title))
-    except ValueError as exc:
+    except ProductConflictError as exc:
         raise ApiError("WORKSPACE_NOT_AVAILABLE", str(exc), {"workspace_id": workspace_id}, 409) from exc
 
 
@@ -78,7 +83,7 @@ def create_conversation(workspace_id: str, payload: ConversationCreateRequest, p
 def read_conversation(conversation_id: str, product=Depends(get_product)):
     try:
         view = product.read_conversation(conversation_id)
-    except ValueError as exc:
+    except ProductNotFoundError as exc:
         raise ApiError("NOT_FOUND", str(exc), {"conversation_id": conversation_id}, 404) from exc
     conversation = product.get_conversation(conversation_id)
     return ConversationResponse(
@@ -103,15 +108,30 @@ def read_conversation(conversation_id: str, product=Depends(get_product)):
     status_code=status.HTTP_202_ACCEPTED,
 )
 def submit_turn(request: Request, conversation_id: str, payload: TurnCreateRequest, product=Depends(get_product)):
-    if request.app.state.execution_manager.is_busy:
+    manager = request.app.state.execution_manager
+    try:
+        reservation = manager.reserve()
+    except RunnerBusyError as exc:
         raise ApiError("RUNNER_BUSY", "Another AgentRun is already executing", {}, 409)
+    prepared = None
+    scheduled = False
     try:
         prepared = product.prepare_message(conversation_id, payload.message)
-        request.app.state.execution_manager.submit(prepared.agent_run_id)
-    except RunnerBusyError as exc:
-        raise ApiError("RUNNER_BUSY", "Another AgentRun is already executing", {}, 409) from exc
-    except ValueError as exc:
+        manager.submit_reserved(reservation, prepared.agent_run_id)
+        scheduled = True
+    except ProductNotFoundError as exc:
         raise ApiError("NOT_FOUND", str(exc), {"conversation_id": conversation_id}, 404) from exc
+    except ProductValidationError as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc), {"conversation_id": conversation_id}, 422) from exc
+    except ProductConflictError as exc:
+        raise ApiError("CONVERSATION_CONFLICT", str(exc), {"conversation_id": conversation_id}, 409) from exc
+    except Exception as exc:
+        if prepared is not None:
+            product.discard_prepared_message(prepared)
+        raise ApiError("INTERNAL_ERROR", "Unable to schedule AgentRun", {}, 500) from exc
+    finally:
+        if not scheduled:
+            reservation.release()
     return TurnSubmissionResponse(turn_id=prepared.turn_id, agent_run_id=prepared.agent_run_id)
 
 

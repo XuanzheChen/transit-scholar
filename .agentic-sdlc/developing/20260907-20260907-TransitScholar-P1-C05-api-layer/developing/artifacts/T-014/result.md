@@ -1,9 +1,10 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-014
-Outcome: passed
-Attempts: initial plus 1 abnormal retry
-Tests: 77 passed
+Status: passed
+Attempts: 1
 
-The complete API Layer acceptance surface passed across papers, schemas, workspaces, conversations, AgentRun execution/control, timeline, citations, Wiki, deletion guards, and restart reconciliation.
+- AC-001 through AC-038: passed.
+- `.venv\\Scripts\\python.exe -m pytest tests/api tests/product tests/layer1 tests/layer2 tests/layer3 -q --basetemp=temp\\psc-v2-final`: 100 passed.
+- `git diff --check`: passed.

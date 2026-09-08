@@ -137,6 +137,7 @@ class RuntimeFactory:
         main_runtime = MainResearchRuntime(registry=registry, role_runtime=role_runtime, execution_service=execution,
             context_builder=context_builder, policies=policies, config=self.main_config,
             trace=trace, action_planner=BuiltinRoleActionPlanner(), action_executor=action_executor,
+            is_pause_requested=lambda: self.run_control.is_pause_requested(agent_run_id),
             workspace_service=workspace_service, ledger_service=ledger,
             state_store=research_state)
         coordinator = self.coordinator or build_run_coordinator(semantic_decider=self.semantic_decider, llm_client=self.llm_client)

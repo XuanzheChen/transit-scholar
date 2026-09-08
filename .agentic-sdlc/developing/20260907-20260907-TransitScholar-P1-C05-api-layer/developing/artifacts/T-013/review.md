@@ -1,10 +1,8 @@
 # Supervisor Review
 
-Contract: v1
+Contract: v2
 Task: T-013
 Outcome: pass
 
-- API/Product regression: 71 passed using repository-local basetemp.
-- Root application composes all formal routers under `/api/v1/`.
-- Stable error mappings, DTO isolation, OpenAPI surface, and side-effect-free resolver regression pass.
-- Scope and diff checks passed.
+- Startup/shutdown/capability focused suite: 13 passed.
+- Reconciliation, graceful cleanup, and runtime-aware capability behavior verified.

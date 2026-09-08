@@ -9,6 +9,8 @@ from transit_scholar.api import create_app
 from transit_scholar.api.errors import ApiError
 from transit_scholar.api.routers import papers as paper_router
 from transit_scholar.config import settings
+from transit_scholar.product.errors import ProductPayloadTooLargeError
+from transit_scholar.identity.result import PaperActionResult
 from transit_scholar.workflow.result import ImportPipelineResult
 
 
@@ -43,12 +45,11 @@ def test_oversized_pdf_is_rejected_before_ingestion(monkeypatch):
         def import_paper(self, path):
             pytest.fail("ingestion must not run")
 
-    with pytest.raises(ApiError) as raised:
+    with pytest.raises(ProductPayloadTooLargeError) as raised:
         paper_router.import_paper(
             UploadFile(filename="large.pdf", file=BytesIO(b"%PDF-too-large"), headers={"content-type": "application/pdf"}), Product()
         )
-    assert raised.value.status_code == 413
-    assert raised.value.code == "UPLOAD_TOO_LARGE"
+    assert str(raised.value) == "PDF exceeds configured upload limit"
 
 
 def test_file_content_contract_accepts_only_registered_file_identity(project_tmp_path):
@@ -56,3 +57,26 @@ def test_file_content_contract_accepts_only_registered_file_identity(project_tmp
     operation = app.openapi()["paths"]["/api/v1/files/{file_id}/content"]["get"]
     assert [item["name"] for item in operation["parameters"]] == ["file_id"]
     assert "path" not in operation
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_code", "expected_status"),
+    [
+        ("PAPER_NOT_FOUND", "NOT_FOUND", 404),
+        ("INVALID_STATE", "INVALID_STATE", 409),
+        ("INVALID_FIELDS", "VALIDATION_ERROR", 422),
+    ],
+)
+def test_paper_action_errors_preserve_stable_http_categories(
+    error_code, expected_code, expected_status,
+):
+    result = PaperActionResult(
+        paper_id="paper", status="failed", updated_fields=[], audit_log_id=None,
+        error_code=error_code, error_message="workflow failure",
+    )
+
+    with pytest.raises(ApiError) as raised:
+        paper_router._action(result)
+
+    assert raised.value.code == expected_code
+    assert raised.value.status_code == expected_status

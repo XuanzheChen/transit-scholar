@@ -1,9 +1,9 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-004
-Outcome: passed
-Attempts: initial plus 2 quality reworks
-Tests: 52 passed
+Status: passed
+Attempts: 2
 
-Implemented durable cooperative pause and same-run resume across allowed runtime, Product, API submodule, and test scopes.
+- AC-011 through AC-014: passed.
+- Focused verification: 4 passed.

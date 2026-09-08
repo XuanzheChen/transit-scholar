@@ -1,7 +1,8 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-008
-Outcome: passed
-Attempts: initial plus 3 quality reworks
-Tests: 6 focused tests passed
+Status: passed
+Attempts: 1
+
+- AC-025 and AC-026: passed.

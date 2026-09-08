@@ -1,7 +1,8 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-009
-Outcome: passed
-Attempts: initial plus 1 abnormal retry
-Tests: focused timeline/run-control and combined relevant suite passed with two unrelated pre-existing failures
+Status: passed
+Attempts: 1
+
+- AC-027 through AC-029: passed.

@@ -1,7 +1,8 @@
 # Supervisor Review
 
-Contract: v1
+Contract: v2
 Task: T-011
-Outcome: rejected for scope violation
+Outcome: pass
 
-Wiki implementation passed after two quality reworks. Final attempt changed no paths; the combined relevant suite reports 70 passed.
+- Answer citation projection suite: 3 passed.
+- Evidence provenance and DTO separation verified.

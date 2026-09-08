@@ -1,9 +1,9 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-002
-Outcome: passed
+Status: passed
 Attempts: 1
-Tests: 45 passed
 
-Modified paths: `src/transit_scholar/product/__init__.py`, `facade.py`, `research.py`, `service.py`, and `tests/product/test_message_preparation.py`.
+- AC-006, AC-007, AC-010: passed.
+- Focused verification: 7 passed.

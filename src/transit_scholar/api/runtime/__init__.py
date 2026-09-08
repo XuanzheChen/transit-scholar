@@ -1,8 +1,9 @@
 from .manager import (
     AgentRunExecutionManager,
+    ExecutionReservation,
     LocalAgentRunExecutionManager,
     LocalExecutionManager,
     RunnerBusyError,
 )
 
-__all__ = ["LocalExecutionManager", "LocalAgentRunExecutionManager", "AgentRunExecutionManager", "RunnerBusyError"]
+__all__ = ["LocalExecutionManager", "LocalAgentRunExecutionManager", "AgentRunExecutionManager", "ExecutionReservation", "RunnerBusyError"]

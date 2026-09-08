@@ -22,13 +22,14 @@ from .conversation import ConversationService
 from .projection import ProductStateProjector
 from .research import ResearchService
 from transit_scholar.layer2.schema_catalog import SchemaCatalog
+from .errors import ProductConflictError
 
 
-class PaperInUseError(ValueError):
+class PaperInUseError(ProductConflictError):
     """Raised when an active Workspace still references a library paper."""
 
 
-class WorkspaceBusyError(ValueError):
+class WorkspaceBusyError(ProductConflictError):
     """Raised when a run still depends on a Workspace revision."""
 
 
@@ -42,13 +43,13 @@ class RegisteredPaperFile:
 
 
 class TransitScholarProduct:
-    def __init__(self, session, runtime_factory, *, goal_resolver=None, data_root=None):
+    def __init__(self, session, runtime_factory, *, goal_resolver=None, data_root=None, schema_catalog=None):
         self.session = session
         self.data_root = data_root
         self.conversations = ConversationService(session)
         self.research = ResearchService(session, runtime_factory, conversations=self.conversations, goal_resolver=goal_resolver)
         self.projector = ProductStateProjector(session, runtime_factory)
-        self.schema_catalog = SchemaCatalog(data_root)
+        self.schema_catalog = schema_catalog or SchemaCatalog(data_root)
 
     def describe_schema(self, definition):
         return self.schema_catalog.describe(definition)
@@ -117,14 +118,14 @@ class TransitScholarProduct:
     def workspace_schema_readiness(self, workspace_id, paper_id=None):
         from transit_scholar.layer3.schema import WorkspaceSchemaService
         result = WorkspaceSchemaService(
-            self.session, data_root=settings.data_root, schema_catalog=self.schema_catalog
+            self.session, data_root=self.data_root or settings.data_root
         ).paper_schema_readiness(workspace_id, [paper_id] if paper_id else None)
         return result
 
     def materialize_workspace_schema(self, workspace_id, paper_id, **options):
         from transit_scholar.layer3.schema import WorkspaceSchemaService
         return WorkspaceSchemaService(
-            self.session, data_root=settings.data_root, schema_catalog=self.schema_catalog
+            self.session, data_root=self.data_root or settings.data_root
         ).materialize(workspace_id, paper_id, **options)
 
     def _workspace_wiki(self):
@@ -228,6 +229,7 @@ class TransitScholarProduct:
     read_conversation_state = read_conversation
     conversation_state = read_conversation
     def prepare_message(self, conversation_id, message): return self.research.prepare_message(conversation_id, message)
+    def discard_prepared_message(self, prepared): return self.research.discard_prepared_message(prepared)
     def submit_message(self, conversation_id, message): return self.research.submit_message(conversation_id, message)
     def execute_run(self, agent_run_id, **kwargs): return self.research.execute_run(agent_run_id, **kwargs)
     def request_pause(self, agent_run_id): return self.research.request_pause(agent_run_id)

@@ -6,6 +6,10 @@ from .runtime import FileRunControlStore, FileRunResearchStateStore, RunScope, R
 from .research import PreparedMessage, ProductRunState, ResearchService
 from .projection import ProductStateProjector
 from .facade import PaperInUseError, RegisteredPaperFile, TransitScholarProduct
+from .errors import (
+    ProductError, ProductNotFoundError, ProductConflictError,
+    ProductValidationError, ProviderUnavailableError, ProductPayloadTooLargeError,
+)
 from .bootstrap import build_local_product
 
 __all__ = [
@@ -19,4 +23,6 @@ __all__ = [
     "StructuredLLMRolePolicy",
     "PreparedMessage", "ProductRunState", "ResearchService", "ProductStateProjector",
     "TransitScholarProduct", "PaperInUseError", "RegisteredPaperFile", "build_local_product",
+    "ProductError", "ProductNotFoundError", "ProductConflictError",
+    "ProductValidationError", "ProviderUnavailableError", "ProductPayloadTooLargeError",
 ]

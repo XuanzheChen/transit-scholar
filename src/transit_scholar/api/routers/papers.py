@@ -17,6 +17,7 @@ from transit_scholar.api.schemas import (
     PaperSummaryResponse,
 )
 from transit_scholar.config import settings
+from transit_scholar.product.errors import ProductPayloadTooLargeError
 
 router = APIRouter(prefix="/api/v1")
 
@@ -32,9 +33,25 @@ def _summary(row) -> PaperSummaryResponse:
 
 def _action(result) -> PaperActionResponse:
     if result.error_code:
-        code = "NOT_FOUND" if result.error_code == "PAPER_NOT_FOUND" else result.error_code
-        raise ApiError(code, result.error_message or "Paper operation failed", {"paper_id": result.paper_id}, 404 if code == "NOT_FOUND" else 400)
+        code, status_code = _result_error_mapping(result.error_code)
+        raise ApiError(
+            code,
+            result.error_message or "Paper operation failed",
+            {"paper_id": result.paper_id},
+            status_code,
+        )
     return PaperActionResponse(paper_id=result.paper_id, status=result.status, updated_fields=result.updated_fields, audit_log_id=result.audit_log_id)
+
+
+def _result_error_mapping(error_code: str) -> tuple[str, int]:
+    """Translate frozen Layer 1 result codes to stable HTTP categories."""
+    if error_code in {"PAPER_NOT_FOUND", "RELATION_NOT_FOUND", "FILE_NOT_FOUND"}:
+        return "NOT_FOUND", 404
+    if error_code in {"INVALID_STATE", "PAPER_IN_USE"}:
+        return error_code, 409
+    if error_code in {"INVALID_FIELDS", "INVALID_DECISION"}:
+        return "VALIDATION_ERROR", 422
+    return error_code, 500
 
 
 @router.get("/papers", response_model=PaperLibraryListResponse)
@@ -55,7 +72,7 @@ def import_paper(file: UploadFile = File(...), product=Depends(get_product)):
             while chunk := file.file.read(1024 * 1024):
                 total += len(chunk)
                 if total > settings.max_file_size_bytes:
-                    raise ApiError("UPLOAD_TOO_LARGE", "PDF exceeds configured upload limit", {"max_bytes": settings.max_file_size_bytes}, 413)
+                    raise ProductPayloadTooLargeError("PDF exceeds configured upload limit")
                 output.write(chunk)
         result = product.import_paper(target)
         return PaperImportResponse.model_validate({k: getattr(result, k) for k in ("paper_id", "file_id", "status", "import_status", "metadata_status", "duplicate_status", "current_stage", "second_layer_ready", "second_layer_blockers", "error_code", "error_message")})
@@ -129,8 +146,8 @@ def duplicate_relations(paper_id: str, product=Depends(get_product)):
 def resolve_relation(relation_id: str, payload: DuplicateResolutionRequest, product=Depends(get_product)):
     result = product.resolve_duplicate_relation(relation_id, payload.decision)
     if result.error_code:
-        code = "NOT_FOUND" if result.error_code == "RELATION_NOT_FOUND" else result.error_code
-        raise ApiError(code, result.error_message or "Duplicate resolution failed", {"relation_id": relation_id}, 404 if code == "NOT_FOUND" else 400)
+        code, status_code = _result_error_mapping(result.error_code)
+        raise ApiError(code, result.error_message or "Duplicate resolution failed", {"relation_id": relation_id}, status_code)
     return DuplicateResolutionResponse.model_validate(result.__dict__)
 
 

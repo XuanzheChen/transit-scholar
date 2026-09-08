@@ -1,7 +1,8 @@
 # Task Result
 
-Contract: v1
+Contract: v2
 Task: T-010
-Outcome: passed
+Status: passed
 Attempts: 1
-Tests: 4 focused tests passed; Executor full relevant suite 67 passed
+
+- AC-010, AC-013, AC-030: passed.

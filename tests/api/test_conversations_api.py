@@ -6,6 +6,8 @@ from sqlalchemy import select
 
 from transit_scholar.api import create_app
 from transit_scholar.api.dependencies import get_product
+from transit_scholar.api.runtime_context import ApiRuntimeContext
+from transit_scholar.config import Settings
 from transit_scholar.db.models import (
     AgentRun, ConversationSession, ConversationTurn, EvidenceRecord, Paper,
     ResearchQueryRecord, ResearchSession,
@@ -14,6 +16,18 @@ from transit_scholar.product.facade import TransitScholarProduct
 from transit_scholar.product.errors import ProductValidationError
 import json
 
+class AvailableContext(ApiRuntimeContext):
+    def __init__(self, data_root):
+        super().__init__(Settings(data_root=data_root))
+
+    @property
+    def agent_runtime_available(self):
+        return True
+
+class UnavailableContext(AvailableContext):
+    @property
+    def agent_runtime_available(self):
+        return False
 
 class RecordingExecutionManager:
     def __init__(self):
@@ -35,6 +49,19 @@ class RecordingExecutionManager:
 
     def shutdown(self, wait: bool = True):
         pass
+
+    def reconcile_interrupted_runs(self):
+        return []
+
+
+class CountingManager(RecordingExecutionManager):
+    def __init__(self):
+        super().__init__()
+        self.reserve_calls = 0
+
+    def reserve(self):
+        self.reserve_calls += 1
+        return super().reserve()
 
 
 class HoldingExecutionManager:
@@ -61,6 +88,9 @@ class HoldingExecutionManager:
     def shutdown(self, wait: bool = True):
         pass
 
+    def reconcile_interrupted_runs(self):
+        return []
+
 
 class FailingExecutionManager(RecordingExecutionManager):
     def submit_reserved(self, _reservation, agent_run_id: str):
@@ -70,9 +100,8 @@ class FailingExecutionManager(RecordingExecutionManager):
 def test_conversation_creation_and_prompt_submission_are_non_blocking(session, project_tmp_path):
     product = TransitScholarProduct(session, runtime_factory=None, data_root=project_tmp_path)
     workspace = product.create_workspace("Conversation API")
-    app = create_app(data_root=project_tmp_path)
     manager = RecordingExecutionManager()
-    app.state.execution_manager = manager
+    app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
     app.dependency_overrides[get_product] = lambda: product
 
     with TestClient(app) as client:
@@ -145,9 +174,8 @@ def test_completed_turn_exposes_admitted_evidence_citations(session, project_tmp
 
 
 def test_racing_prompt_submissions_admit_only_one_before_product_mutation(project_tmp_path):
-    app = create_app(data_root=project_tmp_path)
     manager = HoldingExecutionManager()
-    app.state.execution_manager = manager
+    app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
 
     with TestClient(app) as client:
         workspace = client.post("/api/v1/workspaces", json={"name": "Race workspace"})
@@ -190,8 +218,8 @@ def test_racing_prompt_submissions_admit_only_one_before_product_mutation(projec
 
 
 def test_scheduling_failure_discards_prepared_turn_and_run(project_tmp_path):
-    app = create_app(data_root=project_tmp_path)
-    app.state.execution_manager = FailingExecutionManager()
+    manager = FailingExecutionManager()
+    app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
 
     with TestClient(app) as client:
         workspace = client.post("/api/v1/workspaces", json={"name": "Failure workspace"})
@@ -218,7 +246,8 @@ def test_prompt_preparation_validation_uses_stable_error_envelope(session, proje
     product = TransitScholarProduct(session, runtime_factory=None, data_root=project_tmp_path)
     workspace = product.create_workspace("Validation workspace")
     conversation = product.create_conversation(workspace.workspace_id)
-    app = create_app(data_root=project_tmp_path)
+    manager = RecordingExecutionManager()
+    app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
     app.dependency_overrides[get_product] = lambda: product
 
     def reject(_conversation_id, _message):
@@ -237,3 +266,48 @@ def test_prompt_preparation_validation_uses_stable_error_envelope(session, proje
         "message": "goal generator is required",
         "details": {"conversation_id": conversation.id},
     }
+
+def test_runtime_unavailable_rejects_prompt_without_mutation(project_tmp_path):
+    manager = CountingManager()
+    app = create_app(data_root=project_tmp_path, runtime_context=UnavailableContext(project_tmp_path), execution_manager=manager)
+    with TestClient(app) as client:
+        workspace = client.post("/api/v1/workspaces", json={"name": "No runtime"}).json()
+        conversation = client.post(f"/api/v1/workspaces/{workspace['workspace_id']}/conversations", json={}).json()
+        response = client.post(f"/api/v1/conversations/{conversation['conversation_id']}/turns", json={"message": "hello"})
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "PROVIDER_UNAVAILABLE"
+        assert manager.reserve_calls == 0 and not manager._busy
+        assert client.get("/api/v1/schemas").status_code == 200
+
+def test_workspace_conversation_missing_and_inactive_mapping(project_tmp_path):
+    app = create_app(data_root=project_tmp_path)
+    with TestClient(app) as client:
+        missing = client.post("/api/v1/workspaces/missing/conversations", json={})
+        assert missing.status_code == 404 and missing.json()["error"]["code"] == "NOT_FOUND"
+        missing_list = client.get("/api/v1/workspaces/missing/conversations")
+        assert missing_list.status_code == 404
+        workspace = client.post("/api/v1/workspaces", json={"name": "Archived"}).json()["workspace_id"]
+        assert client.post(f"/api/v1/workspaces/{workspace}/archive").status_code == 200
+        inactive = client.post(f"/api/v1/workspaces/{workspace}/conversations", json={})
+        assert inactive.status_code == 409
+
+def test_prepare_failure_sanitizes_raw_exception_from_public_reads(session, project_tmp_path):
+    product = TransitScholarProduct(session, runtime_factory=None, data_root=project_tmp_path)
+    workspace = product.create_workspace("Sanitize")
+    conversation = product.create_conversation(workspace.workspace_id)
+    product.conversations.create_turn(conversation.id, "Earlier question", status="completed")
+    product.goal_resolver = lambda *_: (_ for _ in ()).throw(RuntimeError("SECRET_PROVIDER_DIAGNOSTIC raw-model-output C:\\private\\provider\\path"))
+    manager = RecordingExecutionManager()
+    app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
+    app.dependency_overrides[get_product] = lambda: product
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/conversations/{conversation.id}/turns", json={"message": "hello"})
+        assert "SECRET_PROVIDER_DIAGNOSTIC" not in response.text
+        turns = client.get(f"/api/v1/conversations/{conversation.id}")
+        assert "SECRET_PROVIDER_DIAGNOSTIC" not in turns.text
+        failed_turn = turns.json()["turns"][-1]
+        turn_id = failed_turn["turn_id"]
+        read = client.get(f"/api/v1/turns/{turn_id}")
+        assert "SECRET_PROVIDER_DIAGNOSTIC" not in read.text
+        assert failed_turn["status"] == "failed"
+        assert failed_turn["error_message"] == "Research execution failed"

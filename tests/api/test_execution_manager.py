@@ -165,5 +165,19 @@ def test_shutdown_does_not_wait_indefinitely_for_uncooperative_run():
     manager.shutdown(checkpoint_timeout=0.01)
 
     assert monotonic() - began < 0.5
-    assert not manager.is_busy
+    assert manager.closed
+    assert manager.is_busy
+    assert manager.active_run_id == "run-1"
+    with pytest.raises(RunnerBusyError):
+        manager.reserve()
+    with pytest.raises(RunnerBusyError):
+        manager.submit("run-2")
     release.set()
+    for _ in range(20):
+        if not manager.is_busy:
+            break
+        Event().wait(0.01)
+    assert not manager.is_busy
+    assert manager.active_run_id is None
+    assert manager.future("run-1") is None
+    assert manager.closed

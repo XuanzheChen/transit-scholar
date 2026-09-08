@@ -14,7 +14,7 @@ from transit_scholar.db.models import (
 )
 from transit_scholar.layer3.workspace import WorkspaceService
 from transit_scholar.product.conversation import ConversationGoalResolver, ConversationService
-from transit_scholar.product.errors import ProductConflictError, ProductValidationError
+from transit_scholar.product.errors import ProductConflictError, ProductNotFoundError, ProductValidationError
 
 
 def make_workspace(session, name="workspace"):
@@ -78,7 +78,7 @@ def test_turn_all_product_fields_survive_commit_and_reopen(session):
 
 def test_invalid_or_inactive_workspace_rejected(session):
     service = ConversationService(session)
-    with pytest.raises(ProductConflictError):
+    with pytest.raises(ProductNotFoundError):
         service.create_session("missing")
     workspace_id = make_workspace(session)
     workspace = session.get(Workspace, workspace_id)

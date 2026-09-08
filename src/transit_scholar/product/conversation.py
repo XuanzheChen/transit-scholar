@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from transit_scholar.db.models import ConversationSession, ConversationTurn
 from transit_scholar.layer3.workspace import WorkspaceService
-from transit_scholar.layer3.workspace.errors import WorkspaceError
+from transit_scholar.layer3.workspace.errors import WorkspaceError, WorkspaceNotFoundError
 from .errors import ProductConflictError, ProductNotFoundError, ProductValidationError
 
 
@@ -21,6 +21,8 @@ class ConversationService:
     def create_session(self, workspace_id: str, title: str | None = None) -> ConversationSession:
         try:
             self.workspaces.require_active(workspace_id)
+        except WorkspaceNotFoundError as exc:
+            raise ProductNotFoundError("workspace not found") from exc
         except WorkspaceError:
             raise ProductConflictError("conversation requires an active workspace")
         row = ConversationSession(workspace_id=workspace_id, title=title)
@@ -32,6 +34,10 @@ class ConversationService:
         return self.session.get(ConversationSession, conversation_id)
 
     def list_sessions(self, workspace_id: str) -> list[ConversationSession]:
+        try:
+            self.workspaces.get(workspace_id)
+        except WorkspaceNotFoundError as exc:
+            raise ProductNotFoundError("workspace not found") from exc
         return list(self.session.scalars(
             select(ConversationSession)
             .where(ConversationSession.workspace_id == workspace_id)

@@ -14,7 +14,7 @@ from transit_scholar.api.schemas import CapabilityResponse, HealthResponse
 from transit_scholar.config import Settings
 
 
-def create_app(*, data_root: Path | str | None = None) -> FastAPI:
+def create_app(*, data_root: Path | str | None = None, runtime_context=None, execution_manager=None) -> FastAPI:
     """Create an API app with request-owned product facades and one worker."""
     product_settings = Settings(data_root=Path(data_root)) if data_root is not None else Settings()
     @asynccontextmanager
@@ -37,9 +37,9 @@ def create_app(*, data_root: Path | str | None = None) -> FastAPI:
             app.state.execution_manager.shutdown()
 
     app = FastAPI(title="Transit Scholar API", version="1.0.0", lifespan=lifespan)
-    app.state.runtime_context = ApiRuntimeContext(product_settings)
+    app.state.runtime_context = runtime_context or ApiRuntimeContext(product_settings)
     app.state.product_factory = app.state.runtime_context.create_product
-    app.state.execution_manager = LocalExecutionManager(app.state.product_factory)
+    app.state.execution_manager = execution_manager or LocalExecutionManager(app.state.product_factory)
     install_error_handlers(app)
 
     @app.get("/api/v1/health", response_model=HealthResponse)

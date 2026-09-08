@@ -38,11 +38,17 @@ class LocalExecutionManager:
         self._active_run_id: str | None = None
         self._reservation: ExecutionReservation | None = None
         self._futures: dict[str, Future] = {}
+        self._closed = False
 
     @property
     def active_run_id(self) -> str | None:
         with self._lock:
             return self._active_run_id
+
+    @property
+    def closed(self) -> bool:
+        with self._lock:
+            return self._closed
 
     @property
     def is_busy(self) -> bool:
@@ -54,12 +60,17 @@ class LocalExecutionManager:
         with self._lock:
             if self._active_run_id is not None or self._reservation is not None:
                 raise RunnerBusyError("another AgentRun is already executing")
+            if self._closed:
+                raise RunnerBusyError("execution manager is shut down")
             reservation = ExecutionReservation(self, object())
             self._reservation = reservation
             return reservation
 
     def release_reservation(self, reservation: ExecutionReservation) -> None:
         with self._lock:
+            if self._closed:
+                reservation.release()
+                raise RunnerBusyError("execution manager is shut down")
             if self._reservation is reservation:
                 self._reservation = None
 
@@ -180,9 +191,10 @@ class LocalExecutionManager:
 
         self._executor.shutdown(wait=False, cancel_futures=True)
         with self._lock:
-            self._active_run_id = None
+            self._closed = True
+            if active_future is None or active_future.done():
+                self._active_run_id = None
             self._reservation = None
-            self._futures.clear()
 
 
 AgentRunExecutionManager = LocalExecutionManager

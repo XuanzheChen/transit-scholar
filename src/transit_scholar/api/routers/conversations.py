@@ -64,7 +64,10 @@ def _final_answer(response: object) -> str | None:
 
 @router.get("/workspaces/{workspace_id}/conversations", response_model=ConversationListResponse)
 def list_conversations(workspace_id: str, product=Depends(get_product)):
-    return ConversationListResponse(items=[_summary(row) for row in product.list_conversations(workspace_id)])
+    try:
+        return ConversationListResponse(items=[_summary(row) for row in product.list_conversations(workspace_id)])
+    except ProductNotFoundError as exc:
+        raise ApiError("NOT_FOUND", str(exc), {"workspace_id": workspace_id}, 404) from exc
 
 
 @router.post(
@@ -75,6 +78,8 @@ def list_conversations(workspace_id: str, product=Depends(get_product)):
 def create_conversation(workspace_id: str, payload: ConversationCreateRequest, product=Depends(get_product)):
     try:
         return _summary(product.create_conversation(workspace_id, payload.title))
+    except ProductNotFoundError as exc:
+        raise ApiError("NOT_FOUND", str(exc), {"workspace_id": workspace_id}, 404) from exc
     except ProductConflictError as exc:
         raise ApiError("WORKSPACE_NOT_AVAILABLE", str(exc), {"workspace_id": workspace_id}, 409) from exc
 
@@ -108,6 +113,8 @@ def read_conversation(conversation_id: str, product=Depends(get_product)):
     status_code=status.HTTP_202_ACCEPTED,
 )
 def submit_turn(request: Request, conversation_id: str, payload: TurnCreateRequest, product=Depends(get_product)):
+    if not request.app.state.runtime_context.agent_runtime_available:
+        raise ApiError("PROVIDER_UNAVAILABLE", "Provider is temporarily unavailable", {}, 503)
     manager = request.app.state.execution_manager
     try:
         reservation = manager.reserve()

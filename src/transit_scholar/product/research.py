@@ -174,7 +174,7 @@ class ResearchService:
         except Exception as exc:
             # Keep product-facing failures concise; detailed diagnostics remain
             # in the Core trace/state and the original exception is propagated.
-            self.conversations.update_turn(turn.id, status="failed", error_message=str(exc)[:500] or "Research execution failed")
+            self.conversations.update_turn(turn.id, status="failed", error_message="Research execution failed")
             self.session.commit()
             raise
 

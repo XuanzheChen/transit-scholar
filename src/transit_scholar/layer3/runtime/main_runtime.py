@@ -340,7 +340,8 @@ class MainResearchRuntime:
                 break
 
             results.append(role_result)
-            state.current_role_execution_id = None
+            if role_result.status != "paused":
+                state.current_role_execution_id = None
             usage.steps += 1
             usage.llm_calls += role_result.working_state.usage.llm_calls
             usage.tool_calls += role_result.working_state.usage.tool_calls
@@ -352,7 +353,6 @@ class MainResearchRuntime:
             if role_result.status != "completed":
                 if role_result.status == "paused":
                     status, reason = "paused", role_result.termination_reason or "pause_requested"
-                    next_role = RoleId.RESEARCH_COORDINATOR
                     continue
                 usage.failures += 1
                 failure_message = role_result.failure_message

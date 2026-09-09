@@ -139,7 +139,10 @@ class RoleRuntime:
             self._boundary(execution, "role.start")
         else:
             self._validate_recovery(execution, registered, agent_run_id, research_session_id)
-            if execution.status != "running":
+            if execution.status == "paused":
+                execution.start()
+                self._boundary(execution, "role.resume", classification="pause_resumed")
+            elif execution.status != "running":
                 return self._result(execution)
             if execution.working_state.operation_in_flight is not None:
                 abandoned = execution.working_state.operation_in_flight
@@ -169,7 +172,7 @@ class RoleRuntime:
 
         try:
             while execution.status == "running":
-                limit_reason = self._limit_reason(execution)
+                limit_reason = self._limit_reason(execution, has_recovered_output=execution.working_state.last_output is not None)
                 if limit_reason:
                     execution.end(status="terminated", reason=limit_reason)
                     break
@@ -252,6 +255,7 @@ class RoleRuntime:
             "completed": "role.completion",
             "failed": "role.failure",
             "terminated": "role.termination",
+            "paused": "role.pause",
         }[execution.status]
         self._boundary(execution, terminal_event, classification=execution.termination_reason)
         return self._result(execution)
@@ -329,14 +333,14 @@ class RoleRuntime:
                     execution, "role.retry", classification="structured_output_repair"
                 )
 
-    def _limit_reason(self, execution: RoleExecution) -> str | None:
+    def _limit_reason(self, execution: RoleExecution, *, has_recovered_output: bool = False) -> str | None:
         state = execution.working_state
         profile = execution.runtime_profile
         if self.is_cancelled():
             return "cancelled"
         if state.current_step >= profile.max_steps:
             return "max_steps"
-        if state.usage.llm_calls >= profile.max_llm_calls:
+        if not has_recovered_output and state.usage.llm_calls >= profile.max_llm_calls:
             return "max_llm_calls"
         return None
 

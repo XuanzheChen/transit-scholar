@@ -1,6 +1,7 @@
 """Explicit HTTP DTOs for the paper library contract."""
 
-from typing import Literal
+from typing import Any, Literal
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -110,11 +111,24 @@ class DuplicateResolutionResponse(BaseModel):
     audit_log_id: str | None = None
 
 
+class EnrichmentProviderResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str
+    status: str
+    http_status: int | None = None
+    fetched_at: datetime | None = None
+    attempt_count: int = 0
+    next_retry_at: datetime | None = None
+    fields: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+
+
 class EnrichmentResponse(BaseModel):
     paper_id: str
     doi: str | None = None
     metadata_enrichment_status: str
-    providers: list[dict[str, object]] = Field(default_factory=list)
+    providers: list[EnrichmentProviderResponse] = Field(default_factory=list)
     resolved: dict[str, str] = Field(default_factory=dict)
     error_code: str | None = None
     error_message: str | None = None
@@ -136,8 +150,8 @@ class CitationResponse(BaseModel):
     id: str
     paper_id: str
     source_format: str
-    raw_text: str
-    structured_json: str | None = None
+    raw_text: str | None = None
+    structured_json: dict[str, Any] | None = None
     parse_status: str
     parse_warnings: list[str] = Field(default_factory=list)
     is_selected: bool

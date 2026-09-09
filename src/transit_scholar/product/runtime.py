@@ -132,7 +132,10 @@ class RuntimeFactory:
         role_store = self.role_store or _CommitBeforeRoleCheckpointStore(
             session, FileRoleExecutionStore(self.runtime_root / agent_run_id / "roles")
         )
-        role_runtime = RoleRuntime(registry, role_store, trace=trace, action_executor=action_executor)
+        role_runtime = RoleRuntime(
+            registry, role_store, trace=trace, action_executor=action_executor,
+            is_pause_requested=lambda: self.run_control.is_pause_requested(agent_run_id),
+        )
         context_builder = RuntimeContextSnapshotBuilder(session, grounding=grounding)
         main_runtime = MainResearchRuntime(registry=registry, role_runtime=role_runtime, execution_service=execution,
             context_builder=context_builder, policies=policies, config=self.main_config,

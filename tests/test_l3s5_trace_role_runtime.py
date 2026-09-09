@@ -162,6 +162,35 @@ def test_zero_role_tool_budget_blocks_action_before_mutation():
     assert executor.committed == []
 
 
+def test_role_pause_resumes_same_execution_after_committed_action():
+    original = built_in_role_registry({"query_planning": RoleRuntimeProfile(max_steps=2, max_llm_calls=2, max_tool_calls=2)}).get("query_planning")
+    role = original.model_copy(update={"output_contract": ActionOutput})
+    registry = RoleRegistry([role])
+    store = InMemoryRoleExecutionStore()
+    executor = RecordingExecutor()
+    calls = [0]
+
+    class Policy:
+        def decide(self, definition, role_input, state, role_context, repair_context=None):
+            return ActionOutput(completed=True, actions=[{"id": "a"}, {"id": "b"}])
+
+    kwargs = dict(role_input={"research_session_id": "s", "research_question": "q"},
+                  policy=Policy(), agent_run_id="r", research_session_id="s",
+                  role_execution_id="paused-role",
+                  role_context=RoleContext(role_id="query_planning", sections={}, omitted_sections=frozenset(), serialized_chars=2))
+    def pause_after_first():
+        calls[0] += 1
+        return calls[0] >= 2
+    first = RoleRuntime(registry, store, action_executor=executor,
+                        is_pause_requested=pause_after_first).execute(role, **kwargs)
+    assert first.status == "paused"
+    assert executor.committed == [{"id": "a"}]
+    second = RoleRuntime(registry, store, action_executor=executor,
+                         is_pause_requested=lambda: False).execute(role, **kwargs)
+    assert second.status == "completed"
+    assert executor.committed == [{"id": "a"}, {"id": "b"}]
+
+
 def test_committed_action_and_snapshot_survive_later_role_failure():
     original = built_in_role_registry(
         {"query_planning": RoleRuntimeProfile(max_steps=2, max_llm_calls=2, max_tool_calls=1)}

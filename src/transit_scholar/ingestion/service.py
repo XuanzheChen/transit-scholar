@@ -91,7 +91,7 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal, s
                 paper_id=paper_id,
                 completed_at=datetime.now(timezone.utc),
             )
-            file_ops.cleanup_temporary(job_id)
+            file_ops.cleanup_temporary(job_id, settings_obj=settings_obj)
             return _make_result(
                 job_id=job_id,
                 status="rejected",
@@ -136,7 +136,7 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal, s
             job.current_stage = "database_write"
             session.commit()
     except Exception as exc:  # noqa: BLE001
-        file_ops.cleanup_temporary(job_id)
+        file_ops.cleanup_temporary(job_id, settings_obj=settings_obj)
         raise IngestionError(DATABASE_WRITE_FAILED, f"Database write failed: {exc}") from exc
 
     # --- Step 6: move the temporary file to originals (after DB commit). ---
@@ -171,7 +171,7 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal, s
         current_stage="completed",
         completed_at=datetime.now(timezone.utc),
     )
-    file_ops.cleanup_temporary(job_id)
+    file_ops.cleanup_temporary(job_id, settings_obj=settings_obj)
 
     return _make_result(
         job_id=job_id,

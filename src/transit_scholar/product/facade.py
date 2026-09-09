@@ -138,8 +138,10 @@ class TransitScholarProduct:
 
     def _workspace_wiki(self):
         from transit_scholar.layer3.wiki import WorkspaceWikiService
+        from transit_scholar.metadata.service import read_paper_metadata
         return WorkspaceWikiService(
-            self.session, data_root=self.data_root
+            self.session, data_root=self.data_root,
+            paper_metadata_loader=lambda paper_id: read_paper_metadata(paper_id, session_factory=self.session_factory),
         )
 
     def workspace_wiki_status(self, workspace_id):

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, status
 
 from transit_scholar.api.dependencies import get_product
 from transit_scholar.api.errors import ApiError
+from transit_scholar.api.schemas.conversations import PublicAssistantResponse
 from transit_scholar.api.runtime import RunnerBusyError
 from transit_scholar.api.schemas import (
     ConversationCreateRequest, ConversationListResponse, ConversationResponse,
@@ -29,11 +30,17 @@ def _summary(conversation) -> ConversationSummaryResponse:
         created_at=conversation.created_at,
     )
 
-def _public_assistant_response(response: object) -> dict | None:
+def _public_assistant_response(response: object) -> PublicAssistantResponse | None:
     if not isinstance(response, dict):
         return None
-    allowed = ("answer_text", "answer", "citation_references", "citations")
-    return {key: response[key] for key in allowed if key in response}
+    public = {}
+    for key in ("answer_text", "answer"):
+        if isinstance(response.get(key), str):
+            public[key] = response[key]
+    for key in ("citation_references", "citations"):
+        if isinstance(response.get(key), list):
+            public[key] = [value for value in response[key] if isinstance(value, str)]
+    return PublicAssistantResponse.model_validate(public)
 
 
 def _turn(turn, product=None) -> TurnResponse:
@@ -47,9 +54,9 @@ def _turn(turn, product=None) -> TurnResponse:
         agent_run_id=turn.agent_run_id,
         status=turn.status,
         assistant_response=response,
-        final_answer=_final_answer(response),
+        final_answer=_final_answer(turn.final_assistant_response),
         answer_citations=(
-            product.answer_citations(turn.agent_run_id, response)
+            product.answer_citations(turn.agent_run_id, turn.final_assistant_response)
             if product is not None else []
         ),
         error_message=turn.error_message,

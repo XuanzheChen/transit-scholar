@@ -14,6 +14,20 @@ from transit_scholar.identity.result import PaperActionResult
 from transit_scholar.workflow.result import ImportPipelineResult
 
 
+def test_enrichment_projects_real_provider_result_without_internal_attributes():
+    from transit_scholar.doi_enrichment.result import EnrichmentJobResult, ProviderResult
+    provider = ProviderResult(provider="crossref", status="fetched", http_status=200,
+                              attempt_count=2, fields=["title"])
+    provider.internal_debug_payload = "SECRET"
+    result = paper_router._enrichment(EnrichmentJobResult(
+        paper_id="paper", doi="10.1234/example", status="fetched", providers=[provider]))
+    public = result.model_dump(mode="json")
+    assert public["providers"][0]["provider"] == "crossref"
+    assert public["providers"][0]["fields"] == ["title"]
+    assert public["providers"][0]["attempt_count"] == 2
+    assert "SECRET" not in str(public)
+
+
 def test_pdf_import_uses_ingestion_workflow(monkeypatch):
     captured = {}
 
@@ -80,3 +94,26 @@ def test_paper_action_errors_preserve_stable_http_categories(
 
     assert raised.value.code == expected_code
     assert raised.value.status_code == expected_status
+
+
+def test_paper_action_hides_internal_error_message():
+    result = PaperActionResult(
+        paper_id="paper", status="failed", updated_fields=[], audit_log_id=None,
+        error_code="DATABASE_WRITE_FAILED", error_message="SECRET password=/tmp/key",
+    )
+    with pytest.raises(ApiError) as raised:
+        paper_router._action(result)
+    assert raised.value.status_code == 500
+    assert "SECRET" not in raised.value.message
+
+
+def test_citation_dto_accepts_structured_object_and_nullable_raw_text():
+    from types import SimpleNamespace
+    response = paper_router.citations("paper", SimpleNamespace(
+        bibliography_citations=lambda _: [SimpleNamespace(
+            id="c1", paper_id="paper", source_format="bibtex", raw_text=None,
+            structured_json={"title": "Study"}, parse_status="parsed",
+            parse_warnings=[], is_selected=True,
+        )]
+    ))
+    assert response[0].structured_json["title"] == "Study"

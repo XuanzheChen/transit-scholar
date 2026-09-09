@@ -48,7 +48,7 @@ def validate_source_file(file_path: Path, *, settings_obj=None) -> int:
     if size > cfg.max_file_size_bytes:
         raise IngestionError(
             FILE_TOO_LARGE,
-            f"File too large: {size} bytes (limit {settings.max_file_size_bytes})",
+            f"File too large: {size} bytes (limit {cfg.max_file_size_bytes})",
         )
 
     # Must be readable and start with the PDF magic header.
@@ -129,8 +129,8 @@ def move_to_originals(temp_file: Path, file_id: str, *, settings_obj=None) -> Pa
     return dest
 
 
-def cleanup_temporary(job_id: str) -> None:
+def cleanup_temporary(job_id: str, *, settings_obj=None) -> None:
     """Remove the temporary directory for a job, ignoring errors."""
-    temp_dir = settings.temporary_dir / job_id
+    temp_dir = (settings_obj or settings).temporary_dir / job_id
     if temp_dir.exists():
         shutil.rmtree(temp_dir, ignore_errors=True)

@@ -35,9 +35,10 @@ def _summary(row) -> PaperSummaryResponse:
 def _action(result) -> PaperActionResponse:
     if result.error_code:
         code, status_code = _result_error_mapping(result.error_code)
+        message = result.error_message if status_code < 500 else "Paper operation failed"
         raise ApiError(
             code,
-            result.error_message or "Paper operation failed",
+            message or "Paper operation failed",
             {"paper_id": result.paper_id},
             status_code,
         )
@@ -53,6 +54,15 @@ def _result_error_mapping(error_code: str) -> tuple[str, int]:
     if error_code in {"INVALID_FIELDS", "INVALID_DECISION"}:
         return "VALIDATION_ERROR", 422
     return error_code, 500
+
+
+def _public_error_message(error_code: str | None, message: str | None) -> str | None:
+    """Keep lower-layer diagnostic text out of the public paper contract."""
+    if not message:
+        return None
+    if error_code and _result_error_mapping(error_code)[1] >= 500:
+        return "Paper operation failed"
+    return message
 
 
 @router.get("/papers", response_model=PaperLibraryListResponse)
@@ -76,7 +86,9 @@ def import_paper(file: UploadFile = File(...), product=Depends(get_product)):
                     raise ProductPayloadTooLargeError("PDF exceeds configured upload limit")
                 output.write(chunk)
         result = product.import_paper(target)
-        return PaperImportResponse.model_validate({k: getattr(result, k) for k in ("paper_id", "file_id", "status", "import_status", "metadata_status", "duplicate_status", "current_stage", "second_layer_ready", "second_layer_blockers", "error_code", "error_message")})
+        data = {k: getattr(result, k) for k in ("paper_id", "file_id", "status", "import_status", "metadata_status", "duplicate_status", "current_stage", "second_layer_ready", "second_layer_blockers", "error_code", "error_message")}
+        data["error_message"] = _public_error_message(data.get("error_code"), data.get("error_message"))
+        return PaperImportResponse.model_validate(data)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -126,8 +138,10 @@ def metadata_candidates(paper_id: str, product=Depends(get_product)):
 def _enrichment(result):
     providers = []
     for provider in result.providers:
-        providers.append({k: getattr(provider, k) for k in ("provider_name", "status", "title", "authors", "year", "doi", "error_code", "error_message") if hasattr(provider, k)})
-    return EnrichmentResponse.model_validate({"paper_id": result.paper_id, "doi": result.doi, "metadata_enrichment_status": result.status, "providers": providers, "resolved": result.resolved, "error_code": result.error_code, "error_message": result.error_message})
+        item = {k: getattr(provider, k) for k in ("provider", "status", "http_status", "fetched_at", "attempt_count", "next_retry_at", "error_code", "fields", "error_message")}
+        item["error_message"] = _public_error_message(item.get("error_code"), item.get("error_message"))
+        providers.append(item)
+    return EnrichmentResponse.model_validate({"paper_id": result.paper_id, "doi": result.doi, "metadata_enrichment_status": result.status, "providers": providers, "resolved": result.resolved, "error_code": result.error_code, "error_message": _public_error_message(result.error_code, result.error_message)})
 
 
 @router.get("/papers/{paper_id}/enrichment", response_model=EnrichmentResponse)

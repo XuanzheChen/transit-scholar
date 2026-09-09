@@ -296,7 +296,7 @@ def test_prepare_failure_sanitizes_raw_exception_from_public_reads(session, proj
     workspace = product.create_workspace("Sanitize")
     conversation = product.create_conversation(workspace.workspace_id)
     product.conversations.create_turn(conversation.id, "Earlier question", status="completed")
-    product.goal_resolver = lambda *_: (_ for _ in ()).throw(RuntimeError("SECRET_PROVIDER_DIAGNOSTIC raw-model-output C:\\private\\provider\\path"))
+    product.research.goal_resolver = lambda *_: (_ for _ in ()).throw(RuntimeError("SECRET_PROVIDER_DIAGNOSTIC raw-model-output C:\\private\\provider\\path"))
     manager = RecordingExecutionManager()
     app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
     app.dependency_overrides[get_product] = lambda: product

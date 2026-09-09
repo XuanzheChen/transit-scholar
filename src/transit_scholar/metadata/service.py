@@ -35,13 +35,13 @@ PDF_OPEN_FAILED = "PDF_OPEN_FAILED"
 DATABASE_WRITE_FAILED = "DATABASE_WRITE_FAILED"
 
 
-def read_paper_metadata(paper_id: str) -> "PaperMetadata | None":
+def read_paper_metadata(paper_id: str, *, session_factory=SessionLocal) -> "PaperMetadata | None":
     """Read the persisted metadata required to build a Wiki paper page."""
     from transit_scholar.layer2.wiki.models import PaperMetadata
 
     if not isinstance(paper_id, str) or not paper_id:
         return None
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, paper_id)
         if paper is None or not isinstance(paper.title, str) or not paper.title.strip():
             return None

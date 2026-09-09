@@ -43,6 +43,14 @@ class AnswerEvidenceCitationResponse(BaseModel):
     evidence_quote: str | None = None
 
 
+class PublicAssistantResponse(BaseModel):
+    model_config = {"extra": "forbid"}
+    answer_text: str | None = None
+    answer: str | None = None
+    citation_references: list[str] | None = None
+    citations: list[str] | None = None
+
+
 class TurnResponse(BaseModel):
     turn_id: str
     conversation_id: str
@@ -51,7 +59,7 @@ class TurnResponse(BaseModel):
     resolved_user_goal: str | None = None
     agent_run_id: str | None = None
     status: str
-    assistant_response: dict[str, Any] | None = None
+    assistant_response: PublicAssistantResponse | None = None
     final_answer: str | None = None
     answer_citations: list[AnswerEvidenceCitationResponse] = Field(default_factory=list)
     error_message: str | None = None

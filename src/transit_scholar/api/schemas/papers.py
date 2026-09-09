@@ -55,6 +55,15 @@ class PaperImportResponse(BaseModel):
     error_code: str | None = None
     error_message: str | None = None
 
+class SecondLayerResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paper_id: str
+    status: str
+    second_layer_ready: bool
+    second_layer_blockers: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+
 
 class MetadataUpdateRequest(BaseModel):
     title: str | None = None

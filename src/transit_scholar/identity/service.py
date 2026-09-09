@@ -232,10 +232,10 @@ def _classify(scored: dict[str, Any]) -> str | None:
 
 
 def list_duplicate_candidates(
-    paper_id: str, *, status: str | None = "pending"
+    paper_id: str, *, status: str | None = "pending", session_factory=SessionLocal
 ) -> list[DuplicateCandidateView]:
     """Return relations involving ``paper_id``, optionally filtered by status."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         stmt = select(PaperRelation).where(
             (PaperRelation.source_paper_id == paper_id)
             | (PaperRelation.target_paper_id == paper_id)

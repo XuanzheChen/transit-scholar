@@ -15,6 +15,7 @@ from transit_scholar.api.schemas import (
     MetadataCandidateResponse, MetadataUpdateRequest, PaperActionResponse,
     PaperDetailResponse, PaperFileResponse, PaperImportResponse, PaperLibraryListResponse,
     PaperSummaryResponse,
+    SecondLayerResponse,
 )
 from transit_scholar.config import settings
 from transit_scholar.product.errors import ProductPayloadTooLargeError
@@ -89,14 +90,12 @@ def paper_detail(paper_id: str, product=Depends(get_product)):
     return PaperDetailResponse.model_validate(data)
 
 
-@router.get("/papers/{paper_id}/second-layer")
+@router.get("/papers/{paper_id}/second-layer", response_model=SecondLayerResponse)
 def second_layer(paper_id: str, product=Depends(get_product)):
     result = product.read_second_layer_input(paper_id)
     if result is None or getattr(result, "error_code", None) == "paper_not_found":
         raise ApiError("NOT_FOUND", "Paper not found", {"paper_id": paper_id}, 404)
-    data = result.__dict__.copy()
-    data.pop("source_pdf_path", None)
-    return data
+    return SecondLayerResponse.model_validate({k: getattr(result, k) for k in ("paper_id", "status", "second_layer_ready", "second_layer_blockers", "error_code", "error_message")})
 
 
 @router.patch("/papers/{paper_id}/metadata", response_model=PaperActionResponse)
@@ -177,7 +176,7 @@ def delete_paper(paper_id: str, product=Depends(get_product)):
     try:
         return _action(product.soft_delete_library_paper(paper_id))
     except PaperInUseError as exc:
-        raise ApiError("PAPER_IN_USE", "Paper is still a member of an active Workspace", {"paper_id": str(exc)}, 409) from exc
+        raise ApiError("PAPER_IN_USE", str(exc), {"paper_id": exc.paper_id, "workspace_ids": exc.workspace_ids}, 409) from exc
 
 
 @router.post("/papers/{paper_id}/restore", response_model=PaperActionResponse)

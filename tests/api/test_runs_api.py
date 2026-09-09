@@ -89,6 +89,7 @@ def test_pause_and_resume_endpoints(session, project_tmp_path):
     app.dependency_overrides[get_product] = lambda: product
     with TestClient(app) as client:
         paused = client.post(f"/api/v1/runs/{run.agent_run_id}/pause")
+        app.state.runtime_context.runtime_factory = runtime_factory
         assert paused.status_code == 200
         assert paused.json()["pause_requested"] is True
         session.get(AgentRun, run.agent_run_id).status = "paused"

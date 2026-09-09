@@ -54,6 +54,8 @@ def resume_run(request: Request, agent_run_id: str, product=Depends(get_product)
         current = product.read_run_state(agent_run_id)
         if current.status != "paused":
             raise ApiError("RUN_STATE_CONFLICT", "resume_run is only allowed for paused runs", {"agent_run_id": agent_run_id}, 409)
+        if not request.app.state.runtime_context.agent_runtime_available:
+            raise ApiError("PROVIDER_UNAVAILABLE", "Agent runtime is unavailable", {}, 503)
         request.app.state.execution_manager.submit(agent_run_id, resume=True)
         return RunStateResponse.model_validate(current.__dict__)
     except RunnerBusyError as exc:

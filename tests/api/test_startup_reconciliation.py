@@ -49,6 +49,7 @@ def test_startup_pauses_interrupted_run_without_execution_and_allows_resume(
     app.dependency_overrides[get_product] = lambda: product
 
     with TestClient(app) as client:
+        app.state.runtime_context.runtime_factory = object()
         session.expire_all()
         assert session.get(AgentRun, run.agent_run_id).status == "paused"
 

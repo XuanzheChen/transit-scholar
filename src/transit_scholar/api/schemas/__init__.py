@@ -57,6 +57,7 @@ from .papers import (
     MetadataCandidateResponse, MetadataUpdateRequest, PaperActionResponse,
     PaperDetailResponse, PaperFileResponse, PaperImportResponse, PaperListResponse as PaperLibraryListResponse,
     PaperSummaryResponse,
+    SecondLayerResponse,
 )
 from .workspaces import (
     PaperSchemaStateResponse, SchemaMaterializationResponse, WorkspaceCreateRequest,
@@ -82,6 +83,7 @@ __all__ = [
     "MetadataCandidateResponse", "MetadataUpdateRequest", "PaperActionResponse",
     "PaperDetailResponse", "PaperFileResponse", "PaperImportResponse", "PaperSummaryResponse",
     "PaperLibraryListResponse",
+    "SecondLayerResponse",
     "SchemaDraftRequest", "SchemaResponse", "SchemaValidationResponse",
     "WorkspaceCreateRequest", "WorkspaceResponse", "WorkspaceListResponse",
     "WorkspacePaperRequest", "WorkspacePaperResponse", "WorkspacePaperListResponse",

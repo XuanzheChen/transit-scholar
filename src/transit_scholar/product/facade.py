@@ -28,6 +28,11 @@ from .errors import ProductConflictError
 class PaperInUseError(ProductConflictError):
     """Raised when an active Workspace still references a library paper."""
 
+    def __init__(self, paper_id: str, workspace_ids: list[str] | None = None):
+        super().__init__(f"Paper is in use by active workspaces: {paper_id}")
+        self.paper_id = paper_id
+        self.workspace_ids = list(workspace_ids or [])
+
 
 class WorkspaceBusyError(ProductConflictError):
     """Raised when a run still depends on a Workspace revision."""
@@ -239,16 +244,16 @@ class TransitScholarProduct:
         return self.projector.run_timeline(agent_run_id, after_sequence)
 
     def import_paper(self, upload_path: str | Path):
-        return run_import_pipeline(upload_path)
+        return run_import_pipeline(upload_path, session_factory=lambda: self.session)
 
     def list_library_papers(self, **filters):
-        return list_papers(**filters)
+        return list_papers(session_factory=lambda: self.session, **filters)
 
     def read_paper(self, paper_id: str):
-        return get_paper(paper_id)
+        return get_paper(paper_id, session_factory=lambda: self.session)
 
     def read_second_layer_input(self, paper_id: str):
-        return get_second_layer_input(paper_id)
+        return get_second_layer_input(paper_id, session_factory=lambda: self.session, data_root=self.data_root)
 
     def reconcile_paper(self, paper_id: str):
         return reconcile_paper(paper_id)
@@ -257,7 +262,7 @@ class TransitScholarProduct:
         return update_paper_metadata(paper_id, fields)
 
     def metadata_candidates(self, paper_id: str):
-        return list_metadata_candidates(paper_id=paper_id)
+        return list_metadata_candidates(paper_id=paper_id, session_factory=lambda: self.session)
 
     def enrichment(self, paper_id: str):
         return collect_provider_results(paper_id)
@@ -266,7 +271,7 @@ class TransitScholarProduct:
         return refresh_enrichment(paper_id)
 
     def duplicate_relations(self, paper_id: str):
-        return list_duplicate_candidates(paper_id, status=None)
+        return list_duplicate_candidates(paper_id, status=None, session_factory=lambda: self.session)
 
     def resolve_duplicate_relation(self, relation_id: str, decision: str):
         return resolve_duplicate(relation_id, decision)
@@ -284,7 +289,7 @@ class TransitScholarProduct:
             )
         ).scalars().all()
         if active_memberships:
-            raise PaperInUseError(paper_id)
+            raise PaperInUseError(paper_id, list(active_memberships))
         return soft_delete_paper(paper_id)
 
     def restore_library_paper(self, paper_id: str):

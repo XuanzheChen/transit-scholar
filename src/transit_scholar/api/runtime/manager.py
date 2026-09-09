@@ -68,9 +68,6 @@ class LocalExecutionManager:
 
     def release_reservation(self, reservation: ExecutionReservation) -> None:
         with self._lock:
-            if self._closed:
-                reservation.release()
-                raise RunnerBusyError("execution manager is shut down")
             if self._reservation is reservation:
                 self._reservation = None
 
@@ -110,6 +107,8 @@ class LocalExecutionManager:
             reservation.release()
             raise ValueError("agent_run_id is required")
         with self._lock:
+            if self._closed:
+                raise RunnerBusyError("execution manager is shut down")
             if self._reservation is not reservation:
                 raise RuntimeError("execution reservation is not active")
             self._reservation = None
@@ -163,6 +162,7 @@ class LocalExecutionManager:
         shutdown wait indefinitely for it.
         """
         with self._lock:
+            self._closed = True
             active_run_id = self._active_run_id
             active_future = self._futures.get(active_run_id) if active_run_id else None
 
@@ -191,7 +191,6 @@ class LocalExecutionManager:
 
         self._executor.shutdown(wait=False, cancel_futures=True)
         with self._lock:
-            self._closed = True
             if active_future is None or active_future.done():
                 self._active_run_id = None
             self._reservation = None

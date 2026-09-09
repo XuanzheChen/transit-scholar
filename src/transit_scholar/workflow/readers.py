@@ -16,9 +16,10 @@ def list_metadata_candidates(
     *,
     paper_id: str | None = None,
     file_id: str | None = None,
+    session_factory=SessionLocal,
 ) -> list[MetadataCandidate]:
     """Return metadata candidates, optionally filtered by paper or file."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         stmt = select(MetadataCandidate)
         if paper_id is not None:
             stmt = stmt.where(MetadataCandidate.paper_id == paper_id)

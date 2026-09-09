@@ -122,9 +122,11 @@ def workspace_schema(workspace_id: str, product=Depends(get_product)):
 def paper_schema(workspace_id: str, paper_id: str, product=Depends(get_product)):
     try:
         record = product.get_workspace(workspace_id)
-        if record.schema_mode == "none":
-            return PaperSchemaStateResponse(workspace_id=workspace_id, paper_id=paper_id, status="disabled", error_code="schema_disabled")
         readiness = product.workspace_schema_readiness(workspace_id, paper_id)[paper_id]
+        if record.schema_mode == "none":
+            if getattr(readiness, "error_code", None) in {"paper_not_found", "paper_not_member"}:
+                raise ApiError("NOT_FOUND", "Paper not found or not a workspace member", {"paper_id": paper_id}, 404)
+            return PaperSchemaStateResponse(workspace_id=workspace_id, paper_id=paper_id, status="disabled", error_code="schema_disabled")
         return PaperSchemaStateResponse(workspace_id=workspace_id, paper_id=paper_id, **readiness.model_dump())
     except WorkspaceError as exc:
         _workspace_error(exc, workspace_id)

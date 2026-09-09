@@ -61,7 +61,7 @@ METADATA_QUALITY_FLAG_ORDER = (
 CRITICAL_DUPLICATE_RELATION_TYPES = ("exact_duplicate", "probable_duplicate")
 
 
-def run_import_pipeline(file_path: str | Path) -> ImportPipelineResult:
+def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) -> ImportPipelineResult:
     """End-to-end PDF ingestion pipeline.
 
     Orchestrates import_paper -> extract_metadata_candidates -> DOI metadata
@@ -74,7 +74,7 @@ def run_import_pipeline(file_path: str | Path) -> ImportPipelineResult:
     warnings: list[str] = []
 
     # --- Step 1: import -------------------------------------------------------
-    import_result = import_paper(file_path)
+    import_result = import_paper(file_path, session_factory=session_factory)
 
     if import_result.status == "failed":
         return ImportPipelineResult(
@@ -543,9 +543,10 @@ def list_papers(
     include_deleted: bool = False,
     limit: int = 100,
     offset: int = 0,
+    session_factory=SessionLocal,
 ) -> list[PaperSummary]:
     """Read-only list of papers. Does not mutate any state."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         stmt = select(Paper)
         if status is not None:
             stmt = stmt.where(Paper.status == status)
@@ -572,9 +573,9 @@ def list_papers(
         return summaries
 
 
-def get_paper(paper_id: str) -> PaperDetail | None:
+def get_paper(paper_id: str, *, session_factory=SessionLocal) -> PaperDetail | None:
     """Read-only paper detail. Returns None when not found. No state change."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, paper_id)
         if paper is None:
             return None
@@ -639,7 +640,7 @@ def get_paper(paper_id: str) -> PaperDetail | None:
         )
 
 
-def get_second_layer_input(paper_id: str) -> SecondLayerInputResult:
+def get_second_layer_input(paper_id: str, *, session_factory=SessionLocal, data_root=None) -> SecondLayerInputResult:
     """Read-only gate for the second layer.
 
     Hard blockers come only from the frozen gate vocabulary in acceptance.json
@@ -658,7 +659,7 @@ def get_second_layer_input(paper_id: str) -> SecondLayerInputResult:
     source_pdf_path: str | None = None
     relative_path: str | None = None
 
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, paper_id)
         if paper is None:
             return _blocked(paper_id, blockers=["paper_not_found"], flags=[])
@@ -687,7 +688,7 @@ def get_second_layer_input(paper_id: str) -> SecondLayerInputResult:
             # a file that exists on disk. A record without a relative_path
             # cannot locate a source, so it blocks with the same frozen fact.
             if primary.relative_path:
-                disk = Path(settings.data_root) / primary.relative_path
+                disk = Path(data_root or settings.data_root) / primary.relative_path
                 if not disk.is_file():
                     blockers.append("source_file_missing")
                 else:

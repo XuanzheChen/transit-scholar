@@ -22,7 +22,7 @@ from transit_scholar.ingestion.errors import (
 from transit_scholar.ingestion.result import ImportResult
 
 
-def import_paper(file_path: str | Path) -> ImportResult:
+def import_paper(file_path: str | Path, *, session_factory=SessionLocal) -> ImportResult:
     """Import a local PDF into the TransitScholar library.
 
     Returns an ``ImportResult`` describing the outcome. Never raises for
@@ -39,13 +39,13 @@ def import_paper(file_path: str | Path) -> ImportResult:
         status="created",
         started_at=datetime.now(timezone.utc),
     )
-    with SessionLocal() as session:
+    with session_factory() as session:
         session.add(job)
         session.commit()
         job_id = job.id
 
     try:
-        return _run_import(session_factory=SessionLocal, job=job, source=source)
+        return _run_import(session_factory=session_factory, job=job, source=source)
     except IngestionError as exc:
         return _fail(job_id, exc.code, exc.message)
     except Exception as exc:  # noqa: BLE001 — capture anything unexpected

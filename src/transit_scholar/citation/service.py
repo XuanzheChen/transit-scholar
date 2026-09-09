@@ -233,9 +233,10 @@ def list_citation_records(
     paper_id: str,
     *,
     include_deleted: bool = False,
+    session_factory=SessionLocal,
 ) -> list[CitationRecordView]:
     """Return citation records for a paper, optionally including deleted ones."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         stmt = select(CitationRecord).where(CitationRecord.paper_id == paper_id)
         if not include_deleted:
             stmt = stmt.where(CitationRecord.deleted_at.is_(None))

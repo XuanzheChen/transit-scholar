@@ -92,12 +92,14 @@ class RoleRuntime:
         trace: RoleTrace | None = None,
         action_executor: RoleActionExecutor | None = None,
         is_cancelled: Callable[[], bool] | None = None,
+        is_pause_requested: Callable[[], bool] | None = None,
     ) -> None:
         self.registry = registry
         self.store = store or InMemoryRoleExecutionStore()
         self.trace = trace
         self.action_executor = action_executor
         self.is_cancelled = is_cancelled or (lambda: False)
+        self.is_pause_requested = is_pause_requested or (lambda: False)
 
     def execute(
         self,
@@ -183,6 +185,10 @@ class RoleRuntime:
                     execution.working_state.next_action_index = 0
                     execution.working_state.operation_in_flight = None
                     self._boundary(execution, "role.result", classification="decision_validated")
+                    if self.is_pause_requested():
+                        execution.end(status="paused", reason="pause_requested")
+                        self._boundary(execution, "role.pause", classification="decision_validated")
+                        break
                 actions = tuple(self._actions(output))
                 if action_planner is not None:
                     planner_context = role_context.model_copy(
@@ -220,6 +226,10 @@ class RoleRuntime:
                         }
                     )
                     self._boundary(execution, "role.action", classification="action_committed")
+                    if self.is_pause_requested():
+                        execution.end(status="paused", reason="pause_requested")
+                        self._boundary(execution, "role.pause", classification="action_committed")
+                        break
                 if execution.status != "running":
                     break
                 if bool(getattr(output, "completed", False)):

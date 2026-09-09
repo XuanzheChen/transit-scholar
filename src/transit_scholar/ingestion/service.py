@@ -22,13 +22,14 @@ from transit_scholar.ingestion.errors import (
 from transit_scholar.ingestion.result import ImportResult
 
 
-def import_paper(file_path: str | Path, *, session_factory=SessionLocal) -> ImportResult:
+def import_paper(file_path: str | Path, *, session_factory=None, settings_obj=None) -> ImportResult:
     """Import a local PDF into the TransitScholar library.
 
     Returns an ``ImportResult`` describing the outcome. Never raises for
     expected failure modes — they are captured in the result's ``status``,
     ``error_code`` and ``error_message`` fields.
     """
+    session_factory = session_factory or SessionLocal
     source = Path(file_path)
     original_filename = source.name
 
@@ -45,34 +46,34 @@ def import_paper(file_path: str | Path, *, session_factory=SessionLocal) -> Impo
         job_id = job.id
 
     try:
-        return _run_import(session_factory=session_factory, job=job, source=source)
+        return _run_import(session_factory=session_factory, job=job, source=source, settings_obj=settings_obj)
     except IngestionError as exc:
-        return _fail(job_id, exc.code, exc.message)
+        return _fail(job_id, exc.code, exc.message, session_factory=session_factory)
     except Exception as exc:  # noqa: BLE001 — capture anything unexpected
-        return _fail(job_id, DATABASE_WRITE_FAILED, str(exc))
+        return _fail(job_id, DATABASE_WRITE_FAILED, str(exc), session_factory=session_factory)
 
 
-def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal) -> ImportResult:
+def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal, settings_obj=None) -> ImportResult:
     """Execute the import flow for a validated job."""
     job_id = job.id
     original_filename = source.name
 
     # --- Step 1: validate the source file. --------------------------------
-    file_ops.validate_source_file(source)
+    file_ops.validate_source_file(source, settings_obj=settings_obj)
 
     # --- Step 2: copy to temporary. ----------------------------------------
     # status/current_stage stay within the frozen disjoint vocabularies:
     # status=hashing pairs only with current_stage=sha256, and the terminal
     # pair for a successful final move is status=accepted/current_stage=completed.
-    _update_job(job_id, status="created", current_stage="temp_copy")
-    temp_file = file_ops.copy_to_temporary(source, job_id)
+    _update_job(job_id, session_factory=session_factory, status="created", current_stage="temp_copy")
+    temp_file = file_ops.copy_to_temporary(source, job_id, settings_obj=settings_obj)
 
     # --- Step 3: compute SHA256 on the temporary copy. ---------------------
-    _update_job(job_id, status="hashing", current_stage="sha256")
+    _update_job(job_id, session_factory=session_factory, status="hashing", current_stage="sha256")
     sha = file_ops.compute_sha256(temp_file)
 
     # --- Step 4: exact-duplicate check. ------------------------------------
-    _update_job(job_id, status="created", current_stage="exact_duplicate_check")
+    _update_job(job_id, session_factory=session_factory, status="created", current_stage="exact_duplicate_check")
     with session_factory() as session:
         existing = session.execute(
             select(PaperFile).where(PaperFile.sha256 == sha)
@@ -83,6 +84,7 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal) -
             paper_id = existing.paper_id
             _update_job(
                 job_id,
+                session_factory=session_factory,
                 status="rejected",
                 current_stage="exact_duplicate_check",
                 file_id=existing.id,
@@ -103,7 +105,7 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal) -
             )
 
     # --- Step 5: new file — write to database first. -----------------------
-    _update_job(job_id, status="created", current_stage="database_write")
+    _update_job(job_id, session_factory=session_factory, status="created", current_stage="database_write")
     file_id = None
     try:
         with session_factory() as session:
@@ -138,15 +140,15 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal) -
         raise IngestionError(DATABASE_WRITE_FAILED, f"Database write failed: {exc}") from exc
 
     # --- Step 6: move the temporary file to originals (after DB commit). ---
-    _update_job(job_id, status="created", current_stage="final_move")
+    _update_job(job_id, session_factory=session_factory, status="created", current_stage="final_move")
     try:
-        file_ops.move_to_originals(temp_file, file_id)
+        file_ops.move_to_originals(temp_file, file_id, settings_obj=settings_obj)
     except IngestionError as exc:
         # The Paper/PaperFile/job transaction already committed, but the file
         # is still in temporary. Reconcile the database facts to the disk
         # facts and return a failed result that keeps the committed ids,
         # SHA256 and the real temporary path — never the erasing _fail path.
-        _reconcile_committed_move_failure(job_id, file_id, exc.code, exc.message)
+        _reconcile_committed_move_failure(job_id, file_id, exc.code, exc.message, session_factory=session_factory)
         return _make_result(
             job_id=job_id,
             status="failed",
@@ -164,6 +166,7 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal) -
     # --- Step 7: finalize the job and clean up. ---------------------------
     _update_job(
         job_id,
+        session_factory=session_factory,
         status="accepted",
         current_stage="completed",
         completed_at=datetime.now(timezone.utc),
@@ -188,9 +191,9 @@ def _run_import(job: IngestionJob, source: Path, session_factory=SessionLocal) -
 # ---------------------------------------------------------------------------
 
 
-def _update_job(job_id: str, **fields) -> None:
+def _update_job(job_id: str, *, session_factory, **fields) -> None:
     """Merge extra fields onto an existing job within its own transaction."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         job = session.get(IngestionJob, job_id)
         for key, value in fields.items():
             setattr(job, key, value)
@@ -198,7 +201,7 @@ def _update_job(job_id: str, **fields) -> None:
 
 
 def _reconcile_committed_move_failure(
-    job_id: str, file_id: str, error_code: str, error_message: str
+    job_id: str, file_id: str, error_code: str, error_message: str, *, session_factory
 ) -> None:
     """Atomically align committed records with the retained temporary copy.
 
@@ -211,7 +214,7 @@ def _reconcile_committed_move_failure(
     """
     now = datetime.now(timezone.utc)
     temporary_relative_path = f"library/temporary/{job_id}/source.pdf"
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper_file = session.get(PaperFile, file_id)
         if paper_file is not None:
             paper_file.relative_path = temporary_relative_path
@@ -224,10 +227,10 @@ def _reconcile_committed_move_failure(
         session.commit()
 
 
-def _fail(job_id: str, error_code: str, error_message: str) -> ImportResult:
+def _fail(job_id: str, error_code: str, error_message: str, *, session_factory) -> ImportResult:
     """Record a failed job and return a failed ImportResult."""
     now = datetime.now(timezone.utc)
-    with SessionLocal() as session:
+    with session_factory() as session:
         job = session.get(IngestionJob, job_id)
         job.status = "failed"
         job.error_code = error_code

@@ -350,6 +350,10 @@ class MainResearchRuntime:
                 role_status=role_result.status,
             )
             if role_result.status != "completed":
+                if role_result.status == "paused":
+                    status, reason = "paused", role_result.termination_reason or "pause_requested"
+                    next_role = RoleId.RESEARCH_COORDINATOR
+                    continue
                 usage.failures += 1
                 failure_message = role_result.failure_message
                 status, reason = self._failure_outcome(usage)

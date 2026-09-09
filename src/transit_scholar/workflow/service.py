@@ -61,7 +61,7 @@ METADATA_QUALITY_FLAG_ORDER = (
 CRITICAL_DUPLICATE_RELATION_TYPES = ("exact_duplicate", "probable_duplicate")
 
 
-def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) -> ImportPipelineResult:
+def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal, data_root=None, settings_obj=None) -> ImportPipelineResult:
     """End-to-end PDF ingestion pipeline.
 
     Orchestrates import_paper -> extract_metadata_candidates -> DOI metadata
@@ -74,7 +74,7 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
     warnings: list[str] = []
 
     # --- Step 1: import -------------------------------------------------------
-    import_result = import_paper(file_path, session_factory=session_factory)
+    import_result = import_paper(file_path, session_factory=session_factory, settings_obj=settings_obj)
 
     if import_result.status == "failed":
         return ImportPipelineResult(
@@ -121,11 +121,11 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
         )
 
     # --- Step 2: metadata extraction -----------------------------------------
-    _update_stage(import_result.job_id, "metadata_extracting")
-    meta_result = extract_metadata_candidates(import_result.file_id)
+    _update_stage(import_result.job_id, "metadata_extracting", session_factory=session_factory)
+    meta_result = extract_metadata_candidates(import_result.file_id, session_factory=session_factory, data_root=data_root)
 
     if meta_result.status in ("failed", "partial"):
-        _update_stage(import_result.job_id, "metadata_failed")
+        _update_stage(import_result.job_id, "metadata_failed", session_factory=session_factory)
         blockers = ["metadata_extraction_failed"]
         if meta_result.status == "partial":
             blockers.append("metadata_processing_pending")
@@ -163,12 +163,12 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
     metadata_enrichment_status: str | None = None
     enrichment_provider_results: list[dict[str, object]] | None = None
 
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, meta_result.paper_id)
         paper_normalized_doi = paper.normalized_doi if paper else None
 
     if not paper_normalized_doi:
-        _update_stage(import_result.job_id, "doi_required")
+        _update_stage(import_result.job_id, "doi_required", session_factory=session_factory)
         return ImportPipelineResult(
             status="partial",
             job_id=import_result.job_id,
@@ -192,7 +192,7 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
             enrichment_provider_results=[],
         )
 
-    enrichment = enrich_paper_by_doi(meta_result.paper_id)
+    enrichment = enrich_paper_by_doi(meta_result.paper_id, session_factory=session_factory)
     metadata_enrichment_status = enrichment.status
     enrichment_provider_results = [
         {
@@ -209,13 +209,13 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
     ]
 
     # --- Step 3: duplicate detection -----------------------------------------
-    _update_stage(import_result.job_id, "duplicate_checking")
-    dup_result = detect_duplicate_candidates(meta_result.paper_id)
+    _update_stage(import_result.job_id, "duplicate_checking", session_factory=session_factory)
+    dup_result = detect_duplicate_candidates(meta_result.paper_id, session_factory=session_factory)
 
     if dup_result.status == "failed":
         # The paper exists, so its metadata quality flags stay visible
         # alongside the pipeline-level duplicate-detection blocker.
-        quality_flags = _paper_quality_flags(meta_result.paper_id)
+        quality_flags = _paper_quality_flags(meta_result.paper_id, session_factory=session_factory)
         return ImportPipelineResult(
             status="partial",
             job_id=import_result.job_id,
@@ -240,7 +240,7 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
         )
 
     if dup_result.relations_created > 0:
-        _update_stage(import_result.job_id, "awaiting_user_review")
+        _update_stage(import_result.job_id, "awaiting_user_review", session_factory=session_factory)
         return ImportPipelineResult(
             status="awaiting_user_review",
             job_id=import_result.job_id,
@@ -264,11 +264,11 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
             enrichment_provider_results=enrichment_provider_results,
         )
 
-    _update_stage(import_result.job_id, "completed")
+    _update_stage(import_result.job_id, "completed", session_factory=session_factory)
 
     # Honor the second-layer gate: pipeline status stays completed, but
     # second_layer_ready follows the independent gate verdict.
-    gate = get_second_layer_input(meta_result.paper_id)
+    gate = get_second_layer_input(meta_result.paper_id, session_factory=session_factory)
     second_layer_ready = gate.status == "ready"
     second_layer_blockers = list(gate.blockers)
     metadata_quality_flags = list(gate.metadata_quality_flags)
@@ -297,7 +297,7 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal) 
     )
 
 
-def reconcile_paper(paper_id: str) -> ImportPipelineResult:
+def reconcile_paper(paper_id: str, *, session_factory=SessionLocal, data_root=None) -> ImportPipelineResult:
     """Resume the first-layer tail of an already-imported paper (AC-RECONCILE).
 
     Entry point for the manual-correction loop: after a user fixes metadata,
@@ -326,7 +326,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
     flags: list[str] = []
 
     # --- Step 1: validate the paper and its primary file -------------------
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, paper_id)
         if paper is None:
             return _reconcile_result(
@@ -379,7 +379,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
                 metadata_quality_flags=flags,
             )
         if not primary.relative_path or not (
-            Path(settings.data_root) / primary.relative_path
+            Path(data_root or settings.data_root) / primary.relative_path
         ).is_file():
             return _reconcile_result(
                 status="failed",
@@ -401,7 +401,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
     # --- Step 2: converge metadata candidates when needed -------------------
     metadata_status: str | None = "completed"
     if not metadata_converged:
-        meta_result = extract_metadata_candidates(file_id)
+        meta_result = extract_metadata_candidates(file_id, session_factory=session_factory, data_root=data_root)
         if meta_result.status in ("failed", "partial"):
             blockers = ["metadata_extraction_failed"]
             if meta_result.status == "partial":
@@ -421,7 +421,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
             )
         # Record the convergence as an accepted/completed ingestion job so the
         # gate sees a converged metadata path on later calls (idempotent).
-        with SessionLocal() as session:
+        with session_factory() as session:
             session.add(IngestionJob(
                 uploaded_filename=(
                     session.get(PaperFile, file_id).original_filename
@@ -438,7 +438,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
 
     # --- Step 3: DOI enrichment (skipped without a DOI) ---------------------
     metadata_enrichment_status: str | None
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, paper_id)
         paper_has_doi = bool(paper and paper.normalized_doi)
     if not paper_has_doi:
@@ -448,7 +448,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
             "(stable_identifier_missing:doi quality flag)"
         )
     else:
-        enrichment = enrich_paper_by_doi(paper_id)
+        enrichment = enrich_paper_by_doi(paper_id, session_factory=session_factory)
         metadata_enrichment_status = enrichment.status
         enrichment_provider_results = [
             {
@@ -465,7 +465,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
         ]
 
     # --- Step 4: duplicate detection ----------------------------------------
-    dup_result = detect_duplicate_candidates(paper_id)
+    dup_result = detect_duplicate_candidates(paper_id, session_factory=session_factory)
 
     if dup_result.status == "failed":
         return _reconcile_result(
@@ -481,13 +481,13 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
                 f"Duplicate detection failed: {dup_result.error_message}"
             ),
             second_layer_blockers=["duplicate_detection_failed"],
-            metadata_quality_flags=_paper_quality_flags(paper_id),
+            metadata_quality_flags=_paper_quality_flags(paper_id, session_factory=session_factory),
             warnings=warnings,
             enrichment_provider_results=enrichment_provider_results,
         )
 
     # --- Step 5: pending critical relations -> awaiting user review ---------
-    with SessionLocal() as session:
+    with session_factory() as session:
         pending_critical = session.execute(
             select(PaperRelation).where(
                 PaperRelation.status == "pending",
@@ -516,7 +516,7 @@ def reconcile_paper(paper_id: str) -> ImportPipelineResult:
         )
 
     # --- Step 6: completed; the latest gate verdict is written truthfully ---
-    gate = get_second_layer_input(paper_id)
+    gate = get_second_layer_input(paper_id, session_factory=session_factory, data_root=data_root)
     return _reconcile_result(
         status="completed",
         paper_id=paper_id,
@@ -830,9 +830,9 @@ def _compute_metadata_quality_flags(session, paper: Paper) -> list[str]:
     return flags
 
 
-def _paper_quality_flags(paper_id: str) -> list[str]:
+def _paper_quality_flags(paper_id: str, *, session_factory=SessionLocal) -> list[str]:
     """Compute quality flags for an existing paper in a fresh session."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, paper_id)
         if paper is None:
             return []
@@ -926,11 +926,11 @@ def _metadata_blocker(session, primary: PaperFile) -> str | None:
     return "metadata_processing_pending"
 
 
-def _update_stage(job_id: str | None, stage: str) -> None:
+def _update_stage(job_id: str | None, stage: str, *, session_factory=SessionLocal) -> None:
     """Set ingestion_jobs.current_stage in its own transaction."""
     if job_id is None:
         return
-    with SessionLocal() as session:
+    with session_factory() as session:
         job = session.get(IngestionJob, job_id)
         if job is not None:
             job.current_stage = stage

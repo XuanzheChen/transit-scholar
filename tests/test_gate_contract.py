@@ -703,7 +703,7 @@ def test_pipeline_duplicate_detection_failed_keeps_frozen_blocker(
     _config.settings.data_root = project_tmp_path
     monkeypatch.setattr(_config.settings, "metadata_enrichment_allow_network", False)
 
-    def _fail_detect(paper_id, *, create_relations=True):
+    def _fail_detect(paper_id, *, create_relations=True, session_factory):
         return DuplicateDetectionResult(
             paper_id=paper_id,
             status="failed",
@@ -757,7 +757,7 @@ def test_pipeline_never_emits_doi_enrichment_stage(project_tmp_path, monkeypatch
     pdf_path = _make_pdf(
         project_tmp_path, title="Stage Normalization", author="Evan"
     )
-    result = run_import_pipeline(pdf_path)
+    result = run_import_pipeline(pdf_path, session_factory=recording_factory)
     assert result.status == PIPELINE_COMPLETED
     assert result.current_stage == "completed"
     assert observed, "no service-emitted records were captured"

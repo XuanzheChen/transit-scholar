@@ -1124,7 +1124,7 @@ def test_w30_reconcile_duplicate_detection_failed(project_tmp_path, monkeypatch)
     imported = run_import_pipeline(pdf_path)
     assert imported.status == PIPELINE_COMPLETED
 
-    def _fail_detect(paper_id, *, create_relations=True):
+    def _fail_detect(paper_id, *, create_relations=True, session_factory):
         return DuplicateDetectionResult(
             paper_id=paper_id,
             status="failed",

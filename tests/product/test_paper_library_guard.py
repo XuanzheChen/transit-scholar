@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import text
 
 from transit_scholar.db.engine import SessionLocal
 from transit_scholar.db.models import Paper, Workspace, WorkspacePaperMembership
@@ -26,8 +27,28 @@ def test_library_delete_and_restore_delegate_to_existing_workflows(session, monk
     product = TransitScholarProduct(session, runtime_factory=None)
     expected_delete = object()
     expected_restore = object()
-    monkeypatch.setattr(facade, "soft_delete_paper", lambda paper_id: expected_delete)
-    monkeypatch.setattr(facade, "restore_paper", lambda paper_id: expected_restore)
+    def delete(paper_id, *, session_factory, data_root):
+        assert data_root == product.data_root
+        assert session_factory is product.session_factory
+        return expected_delete
+
+    def restore(paper_id, *, session_factory, data_root):
+        assert data_root == product.data_root
+        assert session_factory is product.session_factory
+        return expected_restore
+
+    monkeypatch.setattr(facade, "soft_delete_paper", delete)
+    monkeypatch.setattr(facade, "restore_paper", restore)
 
     assert product.soft_delete_library_paper("unused-paper") is expected_delete
     assert product.restore_library_paper("unused-paper") is expected_restore
+
+
+def test_layer1_factory_creates_owned_sessions_without_closing_product(session):
+    product = TransitScholarProduct(session, runtime_factory=None)
+    with product.session_factory() as first, product.session_factory() as second:
+        assert first is not second
+        assert first is not session
+        assert first.get_bind() is session.get_bind()
+    assert product.session is session
+    assert session.execute(text("SELECT 1")).scalar_one() == 1

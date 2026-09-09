@@ -110,7 +110,7 @@ def update_metadata(paper_id: str, payload: MetadataUpdateRequest, product=Depen
     return _action(product.update_paper_metadata(paper_id, payload.supplied_fields()))
 
 
-@router.post("/papers/{paper_id}/reconcile")
+@router.post("/papers/{paper_id}/reconcile", response_model=SecondLayerResponse)
 def reconcile(paper_id: str, product=Depends(get_product)):
     result = product.reconcile_paper(paper_id)
     if result.error_code == "PAPER_NOT_FOUND":
@@ -124,7 +124,10 @@ def metadata_candidates(paper_id: str, product=Depends(get_product)):
 
 
 def _enrichment(result):
-    return EnrichmentResponse.model_validate({"paper_id": result.paper_id, "doi": result.doi, "metadata_enrichment_status": result.status, "providers": [p.__dict__ for p in result.providers], "resolved": result.resolved, "error_code": result.error_code, "error_message": result.error_message})
+    providers = []
+    for provider in result.providers:
+        providers.append({k: getattr(provider, k) for k in ("provider_name", "status", "title", "authors", "year", "doi", "error_code", "error_message") if hasattr(provider, k)})
+    return EnrichmentResponse.model_validate({"paper_id": result.paper_id, "doi": result.doi, "metadata_enrichment_status": result.status, "providers": providers, "resolved": result.resolved, "error_code": result.error_code, "error_message": result.error_message})
 
 
 @router.get("/papers/{paper_id}/enrichment", response_model=EnrichmentResponse)

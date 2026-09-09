@@ -96,7 +96,7 @@ def _pair_key(a: str, b: str) -> tuple[str, str]:
 
 
 def detect_duplicate_candidates(
-    paper_id: str, *, create_relations: bool = True
+    paper_id: str, *, create_relations: bool = True, session_factory=SessionLocal
 ) -> DuplicateDetectionResult:
     """Generate candidate relations for ``paper_id`` against every other
     non-deleted paper in the database.
@@ -112,7 +112,7 @@ def detect_duplicate_candidates(
         error_message=None,
     )
     try:
-        with SessionLocal() as session:
+        with session_factory() as session:
             paper = session.get(Paper, paper_id)
             if paper is None:
                 result.error_code = PAPER_NOT_FOUND
@@ -272,6 +272,7 @@ def resolve_duplicate(
     decision: str,
     *,
     actor_type: str = "local_user",
+    session_factory=SessionLocal,
 ) -> DuplicateResolutionResult:
     """Apply a manual decision to a pending relation."""
     result = DuplicateResolutionResult(
@@ -288,7 +289,7 @@ def resolve_duplicate(
         return result
 
     try:
-        with SessionLocal() as session:
+        with session_factory() as session:
             rel = session.get(PaperRelation, relation_id)
             if rel is None:
                 result.error_code = RELATION_NOT_FOUND
@@ -372,6 +373,7 @@ def update_paper_metadata(
     fields: dict[str, object],
     *,
     actor_type: str = "local_user",
+    session_factory=SessionLocal,
 ) -> PaperActionResult:
     """Update whitelisted metadata fields, syncing normalised columns.
 
@@ -417,7 +419,7 @@ def update_paper_metadata(
         fields["authors"] = names
 
     try:
-        with SessionLocal() as session:
+        with session_factory() as session:
             paper = session.get(Paper, paper_id)
             if paper is None:
                 result.error_code = PAPER_NOT_FOUND
@@ -641,7 +643,9 @@ def soft_delete_paper(
     paper_id: str,
     *,
     actor_type: str = "local_user",
+    session_factory=SessionLocal,
     move_files: bool = True,
+    data_root=None,
 ) -> PaperActionResult:
     """Soft-delete a paper: set status, stamp deleted_at, optionally move files to trash."""
     result = PaperActionResult(
@@ -653,7 +657,7 @@ def soft_delete_paper(
         error_message=None,
     )
     try:
-        with SessionLocal() as session:
+        with session_factory() as session:
             paper = session.get(Paper, paper_id)
             if paper is None:
                 result.error_code = PAPER_NOT_FOUND
@@ -672,7 +676,7 @@ def soft_delete_paper(
             if move_files:
                 for pf in files:
                     if pf.relative_path:
-                        disk = Path(settings.data_root) / pf.relative_path
+                        disk = Path(data_root or settings.data_root) / pf.relative_path
                         if not disk.is_file():
                             result.error_code = FILE_NOT_FOUND
                             result.error_message = f"File missing on disk: {disk}"
@@ -692,9 +696,9 @@ def soft_delete_paper(
                 for pf in files:
                     pf.deleted_at = _now()
                     if move_files and pf.relative_path:
-                        src = Path(settings.data_root) / pf.relative_path
+                        src = Path(data_root or settings.data_root) / pf.relative_path
                         new_rel = f"library/trash/{pf.id}/source.pdf"
-                        dst = Path(settings.data_root) / new_rel
+                        dst = Path(data_root or settings.data_root) / new_rel
                         dst.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(src), str(dst))
                         pf.relative_path = new_rel
@@ -751,7 +755,9 @@ def restore_paper(
     paper_id: str,
     *,
     actor_type: str = "local_user",
+    session_factory=SessionLocal,
     move_files: bool = True,
+    data_root=None,
 ) -> PaperActionResult:
     """Restore a deleted (or archived) paper to active, moving files back if present."""
     result = PaperActionResult(
@@ -763,7 +769,7 @@ def restore_paper(
         error_message=None,
     )
     try:
-        with SessionLocal() as session:
+        with session_factory() as session:
             paper = session.get(Paper, paper_id)
             if paper is None:
                 result.error_code = PAPER_NOT_FOUND
@@ -782,7 +788,7 @@ def restore_paper(
             if move_files:
                 for pf in files:
                     if pf.relative_path and pf.relative_path.startswith("library/trash/"):
-                        disk = Path(settings.data_root) / pf.relative_path
+                        disk = Path(data_root or settings.data_root) / pf.relative_path
                         if not disk.is_file():
                             result.error_code = FILE_NOT_FOUND
                             result.error_message = f"Trash file missing on disk: {disk}"
@@ -807,9 +813,9 @@ def restore_paper(
                         and pf.relative_path
                         and pf.relative_path.startswith("library/trash/")
                     ):
-                        src = Path(settings.data_root) / pf.relative_path
+                        src = Path(data_root or settings.data_root) / pf.relative_path
                         new_rel = f"library/originals/{pf.id}/source.pdf"
-                        dst = Path(settings.data_root) / new_rel
+                        dst = Path(data_root or settings.data_root) / new_rel
                         dst.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(src), str(dst))
                         pf.relative_path = new_rel

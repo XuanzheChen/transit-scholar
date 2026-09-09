@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
 
 from transit_scholar.config import settings
 from transit_scholar.db.models import PaperFile, Workspace, WorkspacePaperMembership, AgentRun
@@ -48,13 +49,15 @@ class RegisteredPaperFile:
 
 
 class TransitScholarProduct:
-    def __init__(self, session, runtime_factory, *, goal_resolver=None, data_root=None, schema_catalog=None):
+    def __init__(self, session, runtime_factory, *, goal_resolver=None, data_root=None, schema_catalog=None, settings_obj=None, session_factory=None):
         self.session = session
-        self.data_root = data_root
+        self.session_factory = session_factory or sessionmaker(bind=session.get_bind(), autoflush=False, expire_on_commit=False)
+        self.settings = settings_obj or settings
+        self.data_root = Path(data_root or self.settings.data_root)
         self.conversations = ConversationService(session)
         self.research = ResearchService(session, runtime_factory, conversations=self.conversations, goal_resolver=goal_resolver)
         self.projector = ProductStateProjector(session, runtime_factory)
-        self.schema_catalog = schema_catalog or SchemaCatalog(data_root)
+        self.schema_catalog = schema_catalog or SchemaCatalog(self.data_root)
 
     def describe_schema(self, definition):
         return self.schema_catalog.describe(definition)
@@ -95,7 +98,7 @@ class TransitScholarProduct:
     def delete_workspace(self, workspace_id):
         self._guard_workspace_mutation(workspace_id)
         from transit_scholar.layer3.workspace import WorkspaceService
-        return WorkspaceService(self.session).delete(workspace_id, data_root=settings.data_root).workspace
+        return WorkspaceService(self.session).delete(workspace_id, data_root=self.data_root).workspace
 
     def list_workspace_papers(self, workspace_id):
         from transit_scholar.layer3.workspace import WorkspaceService
@@ -123,14 +126,14 @@ class TransitScholarProduct:
     def workspace_schema_readiness(self, workspace_id, paper_id=None):
         from transit_scholar.layer3.schema import WorkspaceSchemaService
         result = WorkspaceSchemaService(
-            self.session, data_root=self.data_root or settings.data_root
+            self.session, data_root=self.data_root
         ).paper_schema_readiness(workspace_id, [paper_id] if paper_id else None)
         return result
 
     def materialize_workspace_schema(self, workspace_id, paper_id, **options):
         from transit_scholar.layer3.schema import WorkspaceSchemaService
         return WorkspaceSchemaService(
-            self.session, data_root=self.data_root or settings.data_root
+            self.session, data_root=self.data_root
         ).materialize(workspace_id, paper_id, **options)
 
     def _workspace_wiki(self):
@@ -244,40 +247,40 @@ class TransitScholarProduct:
         return self.projector.run_timeline(agent_run_id, after_sequence)
 
     def import_paper(self, upload_path: str | Path):
-        return run_import_pipeline(upload_path, session_factory=lambda: self.session)
+        return run_import_pipeline(upload_path, session_factory=self.session_factory, data_root=self.data_root, settings_obj=self.settings)
 
     def list_library_papers(self, **filters):
-        return list_papers(session_factory=lambda: self.session, **filters)
+        return list_papers(session_factory=self.session_factory, **filters)
 
     def read_paper(self, paper_id: str):
-        return get_paper(paper_id, session_factory=lambda: self.session)
+        return get_paper(paper_id, session_factory=self.session_factory)
 
     def read_second_layer_input(self, paper_id: str):
-        return get_second_layer_input(paper_id, session_factory=lambda: self.session, data_root=self.data_root)
+        return get_second_layer_input(paper_id, session_factory=self.session_factory, data_root=self.data_root)
 
     def reconcile_paper(self, paper_id: str):
-        return reconcile_paper(paper_id)
+        return reconcile_paper(paper_id, session_factory=self.session_factory, data_root=self.data_root)
 
     def update_paper_metadata(self, paper_id: str, fields: dict[str, object]):
-        return update_paper_metadata(paper_id, fields)
+        return update_paper_metadata(paper_id, fields, session_factory=self.session_factory)
 
     def metadata_candidates(self, paper_id: str):
-        return list_metadata_candidates(paper_id=paper_id, session_factory=lambda: self.session)
+        return list_metadata_candidates(paper_id=paper_id, session_factory=self.session_factory)
 
     def enrichment(self, paper_id: str):
-        return collect_provider_results(paper_id)
+        return collect_provider_results(paper_id, session_factory=self.session_factory)
 
     def refresh_enrichment(self, paper_id: str):
-        return refresh_enrichment(paper_id)
+        return refresh_enrichment(paper_id, session_factory=self.session_factory)
 
     def duplicate_relations(self, paper_id: str):
-        return list_duplicate_candidates(paper_id, status=None, session_factory=lambda: self.session)
+        return list_duplicate_candidates(paper_id, status=None, session_factory=self.session_factory)
 
     def resolve_duplicate_relation(self, relation_id: str, decision: str):
-        return resolve_duplicate(relation_id, decision)
+        return resolve_duplicate(relation_id, decision, session_factory=self.session_factory)
 
     def bibliography_citations(self, paper_id: str):
-        return list_citation_records(paper_id)
+        return list_citation_records(paper_id, session_factory=self.session_factory)
 
     def soft_delete_library_paper(self, paper_id: str):
         active_memberships = self.session.execute(
@@ -290,10 +293,10 @@ class TransitScholarProduct:
         ).scalars().all()
         if active_memberships:
             raise PaperInUseError(paper_id, list(active_memberships))
-        return soft_delete_paper(paper_id)
+        return soft_delete_paper(paper_id, session_factory=self.session_factory, data_root=self.data_root)
 
     def restore_library_paper(self, paper_id: str):
-        return restore_paper(paper_id)
+        return restore_paper(paper_id, session_factory=self.session_factory, data_root=self.data_root)
 
     def list_registered_paper_files(self, paper_id: str) -> list[dict[str, object]]:
         rows = self.session.execute(
@@ -318,7 +321,7 @@ class TransitScholarProduct:
         row = self.session.get(PaperFile, file_id)
         if row is None or row.deleted_at is not None or not row.paper_id or not row.relative_path:
             return None
-        root = settings.data_root.resolve()
+        root = self.data_root.resolve()
         path = (root / row.relative_path).resolve()
         if root not in path.parents or not path.is_file():
             return None

@@ -31,7 +31,7 @@ PDF_MAGIC = b"%PDF-"
 CHUNK_SIZE = 1 << 16  # 64 KiB
 
 
-def validate_source_file(file_path: Path) -> int:
+def validate_source_file(file_path: Path, *, settings_obj=None) -> int:
     """Validate the source file and return its size in bytes.
 
     Raises ``IngestionError`` with a stable error code on any failure.
@@ -44,7 +44,8 @@ def validate_source_file(file_path: Path) -> int:
     size = file_path.stat().st_size
     if size == 0:
         raise IngestionError(EMPTY_FILE, f"File is empty: {file_path}")
-    if size > settings.max_file_size_bytes:
+    cfg = settings_obj or settings
+    if size > cfg.max_file_size_bytes:
         raise IngestionError(
             FILE_TOO_LARGE,
             f"File too large: {size} bytes (limit {settings.max_file_size_bytes})",
@@ -65,12 +66,12 @@ def validate_source_file(file_path: Path) -> int:
     return size
 
 
-def copy_to_temporary(source: Path, job_id: str) -> Path:
+def copy_to_temporary(source: Path, job_id: str, *, settings_obj=None) -> Path:
     """Copy the source file to ``temporary/<job_id>/source.pdf``.
 
     Returns the path of the temporary copy.
     """
-    dest_dir = settings.temporary_dir / job_id
+    dest_dir = (settings_obj or settings).temporary_dir / job_id
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / "source.pdf"
@@ -99,7 +100,7 @@ def compute_sha256(file_path: Path) -> str:
     return sha.hexdigest()
 
 
-def move_to_originals(temp_file: Path, file_id: str) -> Path:
+def move_to_originals(temp_file: Path, file_id: str, *, settings_obj=None) -> Path:
     """Move a temporary file into ``originals/<file_id>/source.pdf``.
 
     Returns the final stored path. Caller must ensure the database
@@ -109,7 +110,7 @@ def move_to_originals(temp_file: Path, file_id: str) -> Path:
     and a later move failure as ``FINAL_MOVE_FAILED``; neither is a database
     error. Both failure paths leave the temporary copy untouched.
     """
-    dest_dir = settings.originals_dir / file_id
+    dest_dir = (settings_obj or settings).originals_dir / file_id
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:

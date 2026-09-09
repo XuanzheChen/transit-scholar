@@ -72,5 +72,6 @@ class ApiRuntimeContext:
         return TransitScholarProduct(
             self.session_factory(), self.runtime_factory,
             goal_resolver=self._goal_resolver(), data_root=self.settings.data_root,
-            schema_catalog=self.schema_catalog,
+            schema_catalog=self.schema_catalog, settings_obj=self.settings,
+            session_factory=self.session_factory,
         )

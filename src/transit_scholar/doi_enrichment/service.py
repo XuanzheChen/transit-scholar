@@ -123,6 +123,7 @@ def enrich_paper_by_doi(
     registry: ProviderRegistry | None = None,
     rate_limiter: SerialRateLimiter | None = None,
     force: bool = False,
+    session_factory=SessionLocal,
 ) -> EnrichmentJobResult:
     """Run (or reuse) DOI enrichment for a paper.
 
@@ -135,7 +136,7 @@ def enrich_paper_by_doi(
     if rate_limiter is None:
         rate_limiter = default_rate_limiter()
 
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper = session.get(Paper, paper_id)
         if paper is None:
             return EnrichmentJobResult(
@@ -163,6 +164,7 @@ def enrich_paper_by_doi(
         registry=registry,
         rate_limiter=rate_limiter,
         force=force,
+        session_factory=session_factory,
     )
 
 
@@ -171,6 +173,7 @@ def refresh_enrichment(
     *,
     registry: ProviderRegistry | None = None,
     rate_limiter: SerialRateLimiter | None = None,
+    session_factory=SessionLocal,
 ) -> EnrichmentJobResult:
     """Manually re-run enrichment, ignoring cached provider results."""
     return enrich_paper_by_doi(
@@ -178,6 +181,7 @@ def refresh_enrichment(
         registry=registry,
         rate_limiter=rate_limiter,
         force=True,
+        session_factory=session_factory,
     )
 
 
@@ -213,6 +217,7 @@ def _run_cascade(
     rate_limiter: SerialRateLimiter,
     *,
     force: bool,
+    session_factory=SessionLocal,
 ) -> EnrichmentJobResult:
     """Execute the provider cascade and merge results."""
     clients = registry.ordered_clients()
@@ -222,7 +227,7 @@ def _run_cascade(
     any_success = False
     any_fields = False
 
-    with SessionLocal() as session:
+    with session_factory() as session:
         job = session.get(DOIEnrichmentJob, job.id)
         for client in clients:
             result = _run_one_provider(
@@ -753,9 +758,11 @@ def _next_retry_at(attempt_count: int, retry_after: datetime | None) -> datetime
 
 def collect_provider_results(
     paper_id: str,
+    *,
+    session_factory=SessionLocal,
 ) -> EnrichmentJobResult | None:
     """Rebuild an EnrichmentJobResult from persisted records (for the API)."""
-    with SessionLocal() as session:
+    with session_factory() as session:
         job = session.execute(
             select(DOIEnrichmentJob).where(DOIEnrichmentJob.paper_id == paper_id)
         ).scalar_one_or_none()

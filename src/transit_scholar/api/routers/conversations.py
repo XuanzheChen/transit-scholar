@@ -29,9 +29,15 @@ def _summary(conversation) -> ConversationSummaryResponse:
         created_at=conversation.created_at,
     )
 
+def _public_assistant_response(response: object) -> dict | None:
+    if not isinstance(response, dict):
+        return None
+    allowed = ("answer_text", "answer", "citation_references", "citations")
+    return {key: response[key] for key in allowed if key in response}
+
 
 def _turn(turn, product=None) -> TurnResponse:
-    response = turn.final_assistant_response
+    response = _public_assistant_response(turn.final_assistant_response)
     return TurnResponse(
         turn_id=turn.id,
         conversation_id=turn.conversation_id,
@@ -98,7 +104,7 @@ def read_conversation(conversation_id: str, product=Depends(get_product)):
                 turn_id=turn["turn_id"], conversation_id=conversation_id,
                 sequence=turn["sequence"], user_message=turn["user_message"],
                 resolved_user_goal=turn["resolved_user_goal"], agent_run_id=turn["agent_run_id"],
-                status=turn["status"], assistant_response=turn["assistant_response"],
+                status=turn["status"], assistant_response=_public_assistant_response(turn["assistant_response"]),
                 final_answer=turn.get("final_answer"), answer_citations=turn.get("answer_citations", []),
                 error_message=turn["error_message"],
             )

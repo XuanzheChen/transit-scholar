@@ -57,7 +57,7 @@ def read_paper_metadata(paper_id: str) -> "PaperMetadata | None":
 
 
 def extract_metadata_candidates(
-    file_id: str, *, apply_selected: bool = True
+    file_id: str, *, apply_selected: bool = True, session_factory=SessionLocal, data_root=None
 ) -> MetadataExtractionResult:
     """Extract metadata candidates for an ingested paper file."""
     result = MetadataExtractionResult(
@@ -74,7 +74,7 @@ def extract_metadata_candidates(
     )
 
     # --- Step 1: locate the PaperFile --------------------------------------
-    with SessionLocal() as session:
+    with session_factory() as session:
         paper_file = session.get(PaperFile, file_id)
         if paper_file is None:
             result.error_code = RECORD_NOT_FOUND
@@ -90,7 +90,7 @@ def extract_metadata_candidates(
         result.paper_id = paper_id
 
     # --- Step 2: locate the PDF on disk ------------------------------------
-    pdf_path = Path(settings.data_root) / paper_file.relative_path
+    pdf_path = Path(data_root or settings.data_root) / paper_file.relative_path
     if not pdf_path.is_file():
         result.error_code = FILE_NOT_FOUND
         result.error_message = f"PDF not found on disk: {pdf_path}"
@@ -118,7 +118,7 @@ def extract_metadata_candidates(
 
     # --- Step 5-8: write candidates, update facts, conservative sync -------
     try:
-        with SessionLocal() as session:
+        with session_factory() as session:
             paper_file = session.get(PaperFile, file_id)
             paper = session.get(Paper, paper_id)
 

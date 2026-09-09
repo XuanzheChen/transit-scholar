@@ -12,6 +12,22 @@ class ApiError(Exception):
         self.code, self.message, self.details, self.status_code = code, message, details or {}, status_code
 
 
+def workspace_error_status(code: str) -> int:
+    """Shared public taxonomy for Workspace, Schema and Wiki domain errors."""
+    if code in {"workspace_not_found", "paper_not_found", "paper_not_member"}:
+        return 404
+    if code in {
+        "workspace_not_active", "workspace_busy", "workspace_changed",
+        "schema_binding_immutable", "schema_disabled", "schema_missing",
+        "schema_binding_mismatch", "wiki_unsupported", "wiki_missing",
+        "wiki_stale", "wiki_corrupt", "empty_membership",
+    }:
+        return 409
+    if code == "invalid_workspace_input":
+        return 422
+    return 500
+
+
 def install_error_handlers(app):
     @app.exception_handler(ApiError)
     async def api_error_handler(request: Request, exc: ApiError):

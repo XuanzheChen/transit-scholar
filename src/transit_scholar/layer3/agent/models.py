@@ -244,6 +244,9 @@ class RoleExecution(BaseModel):
     def start(self) -> None:
         self.status = "running"
         self.started_at = self.started_at or datetime.now(timezone.utc)
+        self.termination_reason = None
+        self.failure_message = None
+        self.ended_at = None
 
     def end(self, *, status: str, reason: str, failure_message: str | None = None) -> None:
         self.status = status

@@ -1,0 +1,29 @@
+{
+  "base_commit": "1259863a33a01e328d8253ac20f07ba701a82f61",
+  "evidence_scope": "Local execution against base commit plus working-tree changes; not GitHub CI evidence",
+  "source_digest_algorithm": "SHA256 of sorted JSON mapping relative Python paths to SHA256 of LF-normalized file bytes",
+  "source_tree_sha256": "77d951268c0955f0c8644696c7caa8e8ff929113da7df1139e3c0c3777f4da55",
+  "source_file_count": 465,
+  "gates": [
+    {
+      "passed": 135,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "passed": 142,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "passed": 146,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "smoke_calls": 21,
+  "smoke_harness_sha256": "667a1e78026e08ad4950cbc3e9f1dfdac6bcfa2440dfeaf7d1af5e0fdd19af39"
+}

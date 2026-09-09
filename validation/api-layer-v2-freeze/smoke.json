@@ -1,0 +1,114 @@
+{
+  "status": "passed",
+  "transport": "real loopback HTTP / uvicorn",
+  "runtime": "controlled fake; real Product, SQLite, LocalExecutionManager",
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/capabilities",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/papers/import",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "path": "/papers",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/papers/ca4e9c059db745e48f8f676a1df39de5",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/wiki/build",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/papers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/papers/ca4e9c059db745e48f8f676a1df39de5/schema/materialize",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/conversations",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/conversations/d0affa8e863249f88e7e5cb780202570/turns",
+      "status": 202
+    },
+    {
+      "method": "GET",
+      "path": "/runs/a57c598673514973a8a5d885a52c1f95",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/runs/a57c598673514973a8a5d885a52c1f95/timeline",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/runs/a57c598673514973a8a5d885a52c1f95/pause",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/runs/a57c598673514973a8a5d885a52c1f95",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/runs/a57c598673514973a8a5d885a52c1f95/resume",
+      "status": 503
+    },
+    {
+      "method": "POST",
+      "path": "/conversations/d0affa8e863249f88e7e5cb780202570/turns",
+      "status": 503
+    },
+    {
+      "method": "POST",
+      "path": "/runs/a57c598673514973a8a5d885a52c1f95/resume",
+      "status": 202
+    },
+    {
+      "method": "GET",
+      "path": "/runs/a57c598673514973a8a5d885a52c1f95",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/turns/24ef9d69e8994ccaae3c65ef59ab8f72",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/conversations/d0affa8e863249f88e7e5cb780202570",
+      "status": 200
+    }
+  ],
+  "shared_database_verified": true,
+  "shutdown_seconds": 0.1709999999984575
+}

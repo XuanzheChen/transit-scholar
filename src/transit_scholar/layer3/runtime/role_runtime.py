@@ -190,7 +190,7 @@ class RoleRuntime:
                     self._boundary(execution, "role.result", classification="decision_validated")
                     if self.is_pause_requested():
                         execution.end(status="paused", reason="pause_requested")
-                        self._boundary(execution, "role.pause", classification="decision_validated")
+                        self._boundary(execution, "role.pause", classification="decision_validated", reason="pause_requested")
                         break
                 actions = tuple(self._actions(output))
                 if action_planner is not None:
@@ -231,7 +231,7 @@ class RoleRuntime:
                     self._boundary(execution, "role.action", classification="action_committed")
                     if self.is_pause_requested():
                         execution.end(status="paused", reason="pause_requested")
-                        self._boundary(execution, "role.pause", classification="action_committed")
+                        self._boundary(execution, "role.pause", classification="action_committed", reason="pause_requested")
                         break
                 if execution.status != "running":
                     break
@@ -257,7 +257,8 @@ class RoleRuntime:
             "terminated": "role.termination",
             "paused": "role.pause",
         }[execution.status]
-        self._boundary(execution, terminal_event, classification=execution.termination_reason)
+        if execution.status != "paused":
+            self._boundary(execution, terminal_event, classification=execution.termination_reason)
         return self._result(execution)
 
     def _restore(self, role_execution_id: str) -> RoleExecution | None:

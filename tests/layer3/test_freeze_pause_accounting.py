@@ -28,6 +28,8 @@ def test_default_budget_pause_continuation(project_tmp_path, boundary, through_m
     requested = [False]
     committed = []
     policy_calls = []
+    events = []
+    resumed_snapshots = []
     class Policy:
         def decide(self, *args):
             policy_calls.append(True)
@@ -37,8 +39,13 @@ def test_default_budget_pause_continuation(project_tmp_path, boundary, through_m
             committed.append(action['id'])
             return {'committed': action['id']}
     class Trace:
+        def __init__(self, pause=True):
+            self.pause = pause
         def append_event(self, **kwargs):
-            if kwargs['payload'].get('classification') == boundary:
+            events.append(kwargs)
+            if kwargs['event_type'] == 'role.resume':
+                resumed_snapshots.append(store.load(kwargs['payload']['role_execution_id']))
+            if self.pause and kwargs['payload'].get('classification') == boundary:
                 requested[0] = True
     def runtime(trace=None):
         return RoleRuntime(registry, store, action_executor=Executor(), trace=trace, is_pause_requested=lambda: requested[0])
@@ -69,17 +76,29 @@ def test_default_budget_pause_continuation(project_tmp_path, boundary, through_m
         assert persisted.working_state.intermediate_artifacts[0]['result'] == {'committed': 'A'}
     requested[0] = False
     if through_main:
-        result = main(runtime()).resume_session(**kwargs)
+        result = main(runtime(Trace(False))).resume_session(**kwargs)
         assert result.usage.steps == 1
         assert result.usage.llm_calls == len(policy_calls) == 1
         assert result.usage.tool_calls == len(committed) == 2
         assert len(result.role_results) == 1
         assert result.role_results[0].role_execution_id == execution_id
     else:
-        result = runtime().execute(role, role_input, Policy(), role_context=context, role_execution_id=execution_id, **kwargs)
+        result = runtime(Trace(False)).execute(role, role_input, Policy(), role_context=context, role_execution_id=execution_id, **kwargs)
         assert result.role_execution_id == execution_id
         assert result.working_state.usage.tool_calls == 2
     assert result.status == 'completed'
     assert result.termination_reason == 'semantic_completion'
     assert len(policy_calls) == 1
     assert committed == ['A', 'B']
+
+    pauses = [event for event in events if event['event_type'] == 'role.pause']
+    assert len(pauses) == 1
+    assert pauses[0]['payload']['classification'] == boundary
+    assert pauses[0]['payload']['reason'] == 'pause_requested'
+    assert len(resumed_snapshots) == 1
+    resumed = resumed_snapshots[0]
+    assert resumed.status == 'running'
+    assert resumed.ended_at is None
+    assert resumed.termination_reason is None
+    assert resumed.failure_message is None
+    assert resumed.started_at == persisted.started_at

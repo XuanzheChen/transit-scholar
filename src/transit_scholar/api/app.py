@@ -54,7 +54,7 @@ def create_app(*, data_root: Path | str | None = None, runtime_context=None, exe
             base_wiki=True,
             agentic_wiki=True,
             semantic_wiki_search=True,
-            pdf_upload_max_bytes=product_settings.max_file_size_bytes,
+            pdf_upload_max_bytes=app.state.runtime_context.settings.max_file_size_bytes,
         )
 
     app.include_router(papers.router)

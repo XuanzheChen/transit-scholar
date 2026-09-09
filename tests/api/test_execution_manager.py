@@ -181,3 +181,48 @@ def test_shutdown_does_not_wait_indefinitely_for_uncooperative_run():
     assert manager.active_run_id is None
     assert manager.future("run-1") is None
     assert manager.closed
+
+def test_shutdown_with_outstanding_reservation_and_concurrent_admission():
+    from threading import Thread
+    manager = LocalExecutionManager(lambda: FakeProduct(Event(), Event()))
+    reservation = manager.reserve()
+    finished = Event()
+    def shutdown():
+        manager.shutdown(checkpoint_timeout=0.01)
+        finished.set()
+    worker = Thread(target=shutdown, daemon=True)
+    worker.start()
+    assert finished.wait(1), 'shutdown deadlocked with an outstanding reservation'
+    assert manager.closed
+    with pytest.raises(RunnerBusyError):
+        manager.reserve()
+    released = Event()
+    def release():
+        reservation.release()
+        released.set()
+    Thread(target=release, daemon=True).start()
+    assert released.wait(1), 'reservation release deadlocked after shutdown'
+    assert not manager.is_busy
+
+def test_closed_admission_rejected_while_shutdown_is_still_running(monkeypatch):
+    from threading import Thread
+    manager = LocalExecutionManager(lambda: FakeProduct(Event(), Event()))
+    entered = Event()
+    release = Event()
+    original = manager._executor.shutdown
+    def delayed_shutdown(*args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(manager._executor, 'shutdown', delayed_shutdown)
+    worker = Thread(target=manager.shutdown, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(1)
+        assert worker.is_alive() and manager.closed
+        with pytest.raises(RunnerBusyError):
+            manager.reserve()
+    finally:
+        release.set()
+        worker.join(2)
+    assert not worker.is_alive()

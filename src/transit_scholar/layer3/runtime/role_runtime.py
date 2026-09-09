@@ -338,7 +338,8 @@ class RoleRuntime:
         profile = execution.runtime_profile
         if self.is_cancelled():
             return "cancelled"
-        if state.current_step >= profile.max_steps:
+        # Decision budgets gate new decisions, not completion of durable output.
+        if not has_recovered_output and state.current_step >= profile.max_steps:
             return "max_steps"
         if not has_recovered_output and state.usage.llm_calls >= profile.max_llm_calls:
             return "max_llm_calls"

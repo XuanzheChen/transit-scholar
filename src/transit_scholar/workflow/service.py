@@ -268,7 +268,7 @@ def run_import_pipeline(file_path: str | Path, *, session_factory=SessionLocal, 
 
     # Honor the second-layer gate: pipeline status stays completed, but
     # second_layer_ready follows the independent gate verdict.
-    gate = get_second_layer_input(meta_result.paper_id, session_factory=session_factory)
+    gate = get_second_layer_input(meta_result.paper_id, session_factory=session_factory, data_root=data_root)
     second_layer_ready = gate.status == "ready"
     second_layer_blockers = list(gate.blockers)
     metadata_quality_flags = list(gate.metadata_quality_flags)

@@ -339,9 +339,13 @@ class MainResearchRuntime:
                     continue
                 break
 
+            if role_result.status == "paused":
+                # The Role store owns the incomplete snapshot. Account its
+                # cumulative usage once, when this same execution finishes.
+                status, reason = "paused", role_result.termination_reason or "pause_requested"
+                continue
             results.append(role_result)
-            if role_result.status != "paused":
-                state.current_role_execution_id = None
+            state.current_role_execution_id = None
             usage.steps += 1
             usage.llm_calls += role_result.working_state.usage.llm_calls
             usage.tool_calls += role_result.working_state.usage.tool_calls
@@ -351,9 +355,6 @@ class MainResearchRuntime:
                 role_status=role_result.status,
             )
             if role_result.status != "completed":
-                if role_result.status == "paused":
-                    status, reason = "paused", role_result.termination_reason or "pause_requested"
-                    continue
                 usage.failures += 1
                 failure_message = role_result.failure_message
                 status, reason = self._failure_outcome(usage)

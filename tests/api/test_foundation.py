@@ -90,3 +90,12 @@ def test_capabilities_advertise_agent_execution_with_configured_runtime(project_
         capabilities = client.get("/api/v1/capabilities").json()
 
     assert capabilities["pause_resume"] is True
+
+def test_injected_settings_drive_capabilities_and_upload_limit(project_tmp_path):
+    from transit_scholar.api.runtime_context import ApiRuntimeContext
+    from transit_scholar.config import Settings
+    context = ApiRuntimeContext(Settings(data_root=project_tmp_path, max_file_size_bytes=4))
+    with TestClient(create_app(runtime_context=context)) as client:
+        assert client.get('/api/v1/capabilities').json()['pdf_upload_max_bytes'] == 4
+        response = client.post('/api/v1/papers/import', files={'file': ('large.pdf', b'%PDF-too-large', 'application/pdf')})
+        assert response.status_code == 413

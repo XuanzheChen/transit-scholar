@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
@@ -23,12 +24,16 @@ from transit_scholar.product.errors import ProductPayloadTooLargeError
 router = APIRouter(prefix="/api/v1")
 
 
+def _timestamp(value):
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
 def _summary(row) -> PaperSummaryResponse:
     return PaperSummaryResponse.model_validate({
         "paper_id": row.paper_id, "title": row.title, "publication_year": row.publication_year,
         "venue": row.venue, "doi": row.doi, "arxiv_id": row.arxiv_id, "status": row.status,
-        "primary_file_id": row.primary_file_id, "created_at": row.created_at,
-        "updated_at": row.updated_at,
+        "primary_file_id": row.primary_file_id, "created_at": _timestamp(row.created_at),
+        "updated_at": _timestamp(row.updated_at),
     })
 
 
@@ -99,6 +104,8 @@ def paper_detail(paper_id: str, product=Depends(get_product)):
     if row is None:
         raise ApiError("NOT_FOUND", "Paper not found", {"paper_id": paper_id}, 404)
     data = {"paper_id": row.paper_id, "title": row.title, "publication_year": row.publication_year, "venue": row.venue, "doi": row.doi, "arxiv_id": row.arxiv_id, "status": row.status, "created_at": row.created_at, "updated_at": row.updated_at, "normalized_title": row.normalized_title, "abstract": row.abstract, "normalized_doi": row.normalized_doi, "authors": row.authors, "files": row.files, "duplicate_relations": row.duplicate_relations, "deleted_at": row.deleted_at}
+    for field in ("created_at", "updated_at", "deleted_at"):
+        data[field] = _timestamp(data[field])
     return PaperDetailResponse.model_validate(data)
 
 
@@ -113,7 +120,7 @@ def second_layer(paper_id: str, product=Depends(get_product)):
         "second_layer_ready": getattr(result, "second_layer_ready", result.status == "ready"),
         "second_layer_blockers": getattr(result, "second_layer_blockers", getattr(result, "blockers", [])),
         "error_code": getattr(result, "error_code", None),
-        "error_message": getattr(result, "error_message", None),
+        "error_message": _public_error_message(getattr(result, "error_code", None), getattr(result, "error_message", None)),
     })
 
 
@@ -127,7 +134,7 @@ def reconcile(paper_id: str, product=Depends(get_product)):
     result = product.reconcile_paper(paper_id)
     if result.error_code == "PAPER_NOT_FOUND":
         raise ApiError("NOT_FOUND", "Paper not found", {"paper_id": paper_id}, 404)
-    return {"paper_id": paper_id, "status": result.status, "second_layer_ready": result.second_layer_ready, "second_layer_blockers": result.second_layer_blockers, "error_code": result.error_code, "error_message": result.error_message}
+    return {"paper_id": paper_id, "status": result.status, "second_layer_ready": result.second_layer_ready, "second_layer_blockers": result.second_layer_blockers, "error_code": result.error_code, "error_message": _public_error_message(result.error_code, result.error_message)}
 
 
 @router.get("/papers/{paper_id}/metadata-candidates", response_model=list[MetadataCandidateResponse])
@@ -162,7 +169,7 @@ def enrichment_refresh(paper_id: str, product=Depends(get_product)):
 
 @router.get("/papers/{paper_id}/duplicate-relations", response_model=DuplicateRelationListResponse)
 def duplicate_relations(paper_id: str, product=Depends(get_product)):
-    return DuplicateRelationListResponse(items=[DuplicateRelationResponse.model_validate(item.__dict__) for item in product.duplicate_relations(paper_id)])
+    return DuplicateRelationListResponse(items=[DuplicateRelationResponse.model_validate({k: getattr(item, k) for k in DuplicateRelationResponse.model_fields}) for item in product.duplicate_relations(paper_id)])
 
 
 @router.post("/duplicate-relations/{relation_id}/resolve", response_model=DuplicateResolutionResponse)
@@ -170,8 +177,8 @@ def resolve_relation(relation_id: str, payload: DuplicateResolutionRequest, prod
     result = product.resolve_duplicate_relation(relation_id, payload.decision)
     if result.error_code:
         code, status_code = _result_error_mapping(result.error_code)
-        raise ApiError(code, result.error_message or "Duplicate resolution failed", {"relation_id": relation_id}, status_code)
-    return DuplicateResolutionResponse.model_validate(result.__dict__)
+        raise ApiError(code, _public_error_message(result.error_code, result.error_message) or "Duplicate resolution failed", {"relation_id": relation_id}, status_code)
+    return DuplicateResolutionResponse.model_validate({k: getattr(result, k) for k in DuplicateResolutionResponse.model_fields})
 
 
 @router.get("/papers/{paper_id}/citations", response_model=list[CitationResponse])

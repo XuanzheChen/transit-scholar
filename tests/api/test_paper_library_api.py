@@ -117,3 +117,28 @@ def test_citation_dto_accepts_structured_object_and_nullable_raw_text():
         )]
     ))
     assert response[0].structured_json["title"] == "Study"
+
+@pytest.mark.parametrize('endpoint', ['reconcile', 'second-layer', 'duplicate'])
+def test_endpoint_internal_result_sanitization(project_tmp_path, endpoint):
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from transit_scholar.api.dependencies import get_product
+    secret = r'SECRET_PROVIDER_DIAGNOSTIC password=abc C:\private\db.sqlite raw-pdf-parser'
+    result = SimpleNamespace(paper_id='paper', status='failed', second_layer_ready=False,
+        second_layer_blockers=[], error_code='DATABASE_WRITE_FAILED', error_message=secret)
+    product = SimpleNamespace(reconcile_paper=lambda _: result, read_second_layer_input=lambda _: result,
+        resolve_duplicate_relation=lambda *_: result)
+    app = create_app(data_root=project_tmp_path)
+    app.dependency_overrides[get_product] = lambda: product
+    with TestClient(app) as client:
+        if endpoint == 'duplicate':
+            response = client.post('/api/v1/duplicate-relations/relation/resolve', json={'decision': 'ignore'})
+            assert response.status_code == 500
+            assert response.json()['error']['message'] == 'Paper operation failed'
+        else:
+            response = (client.post if endpoint == 'reconcile' else client.get)(f'/api/v1/papers/paper/{endpoint}')
+            assert response.status_code == 200  # Frozen operation-result DTO mapping.
+            assert response.json() == dict(paper_id='paper', status='failed', second_layer_ready=False,
+                second_layer_blockers=[], error_code='DATABASE_WRITE_FAILED', error_message='Paper operation failed')
+        for value in ['SECRET_PROVIDER_DIAGNOSTIC', 'password=abc', 'private', 'raw-pdf-parser']:
+            assert value not in response.text

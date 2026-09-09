@@ -10,7 +10,8 @@ from transit_scholar.product.errors import ProductConflictError
 
 def _state(product, agent_run_id: str) -> RunStateResponse:
     try:
-        return RunStateResponse.model_validate(product.read_run_state(agent_run_id).__dict__)
+        current = product.read_run_state(agent_run_id)
+        return RunStateResponse.model_validate({k: getattr(current, k) for k in RunStateResponse.model_fields})
     except AgentRunNotFoundError as exc:
         raise ApiError("NOT_FOUND", "agent run not found", {"agent_run_id": agent_run_id}, 404) from exc
 
@@ -57,7 +58,7 @@ def resume_run(request: Request, agent_run_id: str, product=Depends(get_product)
         if not request.app.state.runtime_context.agent_runtime_available:
             raise ApiError("PROVIDER_UNAVAILABLE", "Agent runtime is unavailable", {}, 503)
         request.app.state.execution_manager.submit(agent_run_id, resume=True)
-        return RunStateResponse.model_validate(current.__dict__)
+        return RunStateResponse.model_validate({k: getattr(current, k) for k in RunStateResponse.model_fields})
     except RunnerBusyError as exc:
         raise ApiError("RUNNER_BUSY", "Another AgentRun is already executing", {}, 409) from exc
     except AgentRunNotFoundError as exc:

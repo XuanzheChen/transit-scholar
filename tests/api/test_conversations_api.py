@@ -296,7 +296,13 @@ def test_prepare_failure_sanitizes_raw_exception_from_public_reads(session, proj
     workspace = product.create_workspace("Sanitize")
     conversation = product.create_conversation(workspace.workspace_id)
     product.conversations.create_turn(conversation.id, "Earlier question", status="completed")
-    product.research.goal_resolver = lambda *_: (_ for _ in ()).throw(RuntimeError("SECRET_PROVIDER_DIAGNOSTIC raw-model-output C:\\private\\provider\\path"))
+    resolver_called = 0
+    def fail_resolver(*args):
+        nonlocal resolver_called
+        resolver_called += 1
+        raise RuntimeError("SECRET_PROVIDER_DIAGNOSTIC raw-model-output C:\\private\\provider\\path")
+    from types import SimpleNamespace
+    product.research.goal_resolver = SimpleNamespace(resolve=fail_resolver)
     manager = RecordingExecutionManager()
     app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
     app.dependency_overrides[get_product] = lambda: product
@@ -311,3 +317,6 @@ def test_prepare_failure_sanitizes_raw_exception_from_public_reads(session, proj
         assert "SECRET_PROVIDER_DIAGNOSTIC" not in read.text
         assert failed_turn["status"] == "failed"
         assert failed_turn["error_message"] == "Research execution failed"
+
+        assert resolver_called == 1
+        assert session.get(ConversationTurn, turn_id).error_message == "Research execution failed"

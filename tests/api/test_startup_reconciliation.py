@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from transit_scholar.api import create_app
+from test_conversations_api import AvailableContext
 from transit_scholar.api.dependencies import get_product
 from transit_scholar.db.models import AgentRun
 from transit_scholar.layer3.execution import AgentRunService
@@ -42,14 +43,11 @@ def test_startup_pauses_interrupted_run_without_execution_and_allows_resume(
     monkeypatch.setattr(product, "execute_run", execution_must_not_start)
     monkeypatch.setattr(product, "resume_run", execution_must_not_start)
 
-    app = create_app(data_root=project_tmp_path)
-    app.state.product_factory = lambda: product
     manager = RecordingManager(product)
-    app.state.execution_manager = manager
+    app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
     app.dependency_overrides[get_product] = lambda: product
 
     with TestClient(app) as client:
-        app.state.runtime_context.runtime_factory = object()
         session.expire_all()
         assert session.get(AgentRun, run.agent_run_id).status == "paused"
 

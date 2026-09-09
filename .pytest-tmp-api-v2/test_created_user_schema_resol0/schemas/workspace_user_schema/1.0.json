@@ -1,0 +1,27 @@
+{
+  "schema_id": "workspace_user_schema",
+  "version": "1.0",
+  "sections": [
+    {
+      "id": "overview",
+      "label": "Overview",
+      "fields": [
+        {
+          "id": "summary",
+          "label": "Summary",
+          "question": "What is the summary?",
+          "description": "",
+          "type": "string",
+          "options": null,
+          "constraints": {},
+          "evidence_required": false,
+          "allow_inference": true,
+          "output_guidance": null
+        }
+      ]
+    }
+  ],
+  "name": null,
+  "description": null,
+  "status_semantics": null
+}

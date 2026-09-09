@@ -72,7 +72,7 @@ def import_paper(file: UploadFile = File(...), product=Depends(get_product)):
         with target.open("wb") as output:
             while chunk := file.file.read(1024 * 1024):
                 total += len(chunk)
-                if total > settings.max_file_size_bytes:
+                if total > getattr(getattr(product, "settings", None), "max_file_size_bytes", settings.max_file_size_bytes):
                     raise ProductPayloadTooLargeError("PDF exceeds configured upload limit")
                 output.write(chunk)
         result = product.import_paper(target)
@@ -95,7 +95,14 @@ def second_layer(paper_id: str, product=Depends(get_product)):
     result = product.read_second_layer_input(paper_id)
     if result is None or getattr(result, "error_code", None) == "paper_not_found":
         raise ApiError("NOT_FOUND", "Paper not found", {"paper_id": paper_id}, 404)
-    return SecondLayerResponse.model_validate({k: getattr(result, k) for k in ("paper_id", "status", "second_layer_ready", "second_layer_blockers", "error_code", "error_message")})
+    return SecondLayerResponse.model_validate({
+        "paper_id": result.paper_id,
+        "status": result.status,
+        "second_layer_ready": getattr(result, "second_layer_ready", result.status == "ready"),
+        "second_layer_blockers": getattr(result, "second_layer_blockers", getattr(result, "blockers", [])),
+        "error_code": getattr(result, "error_code", None),
+        "error_message": getattr(result, "error_message", None),
+    })
 
 
 @router.patch("/papers/{paper_id}/metadata", response_model=PaperActionResponse)

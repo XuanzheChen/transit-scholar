@@ -20,6 +20,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.pytest-tmp-*/
 .egg-info/
 
 # Code graph runtime artifact

@@ -1,9 +1,9 @@
 """Structured Workspace Wiki API endpoints."""
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Request, Query
 
-from transit_scholar.api.dependencies import get_product
+from transit_scholar.api.dependencies import get_product, exclusive_workspace_mutation
 from transit_scholar.api.errors import ApiError, workspace_error_status, workspace_error_message
 from transit_scholar.product.facade import WorkspaceBusyError
 from transit_scholar.api.schemas.wiki import (
@@ -66,9 +66,10 @@ def wiki_status(workspace_id: str, product=Depends(get_product)):
 
 
 @router.post("/build", response_model=WikiBuildResponse)
-def build_wiki(workspace_id: str, product=Depends(get_product)):
+def build_wiki(request: Request, workspace_id: str, product=Depends(get_product)):
     try:
-        outcome = product.build_workspace_wiki(workspace_id)
+        with exclusive_workspace_mutation(request, product, workspace_id):
+            outcome = product.build_workspace_wiki(workspace_id)
         status = product.workspace_wiki_status(workspace_id)
         return WikiBuildResponse(
             workspace_id=workspace_id,

@@ -143,7 +143,11 @@ class RunResearchRuntime:
 
     def _execute(self, *, agent_run_id: str, user_goal: str | None = None, agent_run: Any | None = None) -> dict[str, Any]:
         run = agent_run or self._load_agent_run(agent_run_id, user_goal)
-        state, outcomes, plan = self._load(agent_run_id)
+        state, outcomes, plan, artifact = self._load(agent_run_id)
+        if state.status in {"completed", "cancelled", "terminated"}:
+            if state.status == "completed" and artifact is None:
+                raise ValueError("completed checkpoint has no final response")
+            return self._result(state, outcomes, plan, state.termination_reason, artifact=artifact, agent_run=run)
         if state.current_research_session_id:
             state, outcomes, plan = self._recover_current(run, state, outcomes, plan)
             if state.current_research_session_id:
@@ -564,19 +568,21 @@ class RunResearchRuntime:
             self.trace.append_event(**kwargs)
 
     def _load(self, run_id):
-        if not self.state_store: return RunOrchestrationState(agent_run_id=run_id, status="running"), [], None
+        if not self.state_store: return RunOrchestrationState(agent_run_id=run_id, status="running"), [], None, None
         if hasattr(self.state_store, "load"):
             raw = self.state_store.load(run_id)
         elif hasattr(self.state_store, "load_state"):
             raw = self.state_store.load_state(agent_run_id=run_id)
         else:
             raw = self.state_store.get(run_id)
-        if not raw: return RunOrchestrationState(agent_run_id=run_id, status="running"), [], None
+        if not raw: return RunOrchestrationState(agent_run_id=run_id, status="running"), [], None, None
         data = raw.model_dump(mode="python") if hasattr(raw, "model_dump") else raw
         state = RunOrchestrationState.model_validate(data.get("orchestration_state", data))
         outcomes = [SessionOutcome.model_validate(o) for o in data.get("session_outcomes", data.get("outcomes", []))]
         plan_data = data.get("research_plan")
-        return state, outcomes, ResearchPlan.model_validate(plan_data) if plan_data else None
+        artifact_data = data.get("final_response")
+        artifact = RunFinalResponseArtifact.model_validate(artifact_data) if artifact_data is not None else None
+        return state, outcomes, ResearchPlan.model_validate(plan_data) if plan_data else None, artifact
 
     def _commit_boundary(self):
         """Close the authoritative SQL lifecycle/trace transaction before return."""

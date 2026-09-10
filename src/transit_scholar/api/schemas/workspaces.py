@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class SchemaSelectionRequest(BaseModel):
-    schema_id: str = Field(min_length=1)
-    version: str = Field(min_length=1)
+    schema_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class WorkspaceCreateRequest(BaseModel):

@@ -34,3 +34,5 @@ def get_schema(schema_id: str, version: str, product=Depends(get_product)):
         return product.describe_schema(product.schema_catalog.resolve(schema_id, version))
     except SchemaNotFoundError as exc:
         raise ApiError("NOT_FOUND", "Schema not found", {"schema_id": schema_id, "version": version}, 404) from exc
+    except SchemaCatalogError as exc:
+        raise ApiError("SCHEMA_INVALID", "Schema definition is invalid", {}, 422) from exc

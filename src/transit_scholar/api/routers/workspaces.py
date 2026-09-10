@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
-from transit_scholar.api.dependencies import get_product
+from transit_scholar.api.dependencies import get_product, exclusive_workspace_mutation
 from transit_scholar.api.errors import ApiError, workspace_error_status, workspace_error_message
 from transit_scholar.api.schemas.workspaces import (
     PaperSchemaStateResponse, SchemaMaterializationResponse,
@@ -8,7 +8,7 @@ from transit_scholar.api.schemas.workspaces import (
     WorkspacePaperRequest, WorkspacePaperResponse, WorkspaceResponse,
     WorkspaceSchemaResponse,
 )
-from transit_scholar.layer2.schema_catalog import SchemaNotFoundError
+from transit_scholar.layer2.schema_catalog import SchemaNotFoundError, SchemaCatalogError
 from transit_scholar.layer3.schema.errors import SchemaDisabledError, WorkspaceSchemaError
 from transit_scholar.layer3.workspace.errors import WorkspaceError
 from transit_scholar.product.facade import WorkspaceBusyError
@@ -43,6 +43,8 @@ def create_workspace(payload: WorkspaceCreateRequest, product=Depends(get_produc
         return _workspace(product.create_workspace(payload.name, selection.schema_id if selection else None, selection.version if selection else None))
     except SchemaNotFoundError as exc:
         raise ApiError("NOT_FOUND", "Schema not found", {}, 404) from exc
+    except SchemaCatalogError as exc:
+        raise ApiError("SCHEMA_INVALID", "Schema definition is invalid", {}, 422) from exc
     except WorkspaceError as exc:
         _workspace_error(exc, "")
 
@@ -135,9 +137,10 @@ def paper_schema(workspace_id: str, paper_id: str, product=Depends(get_product))
 
 
 @router.post("/{workspace_id}/papers/{paper_id}/schema/materialize", response_model=SchemaMaterializationResponse)
-def materialize_schema(workspace_id: str, paper_id: str, product=Depends(get_product)):
+def materialize_schema(request: Request, workspace_id: str, paper_id: str, product=Depends(get_product)):
     try:
-        result = product.materialize_workspace_schema(workspace_id, paper_id)
+        with exclusive_workspace_mutation(request, product, workspace_id):
+            result = product.materialize_workspace_schema(workspace_id, paper_id)
         return SchemaMaterializationResponse(workspace_id=workspace_id, paper_id=paper_id, run_id=getattr(result, "run_id", None), status=result.run_manifest.status)
     except WorkspaceBusyError as exc:
         _busy(exc, workspace_id)

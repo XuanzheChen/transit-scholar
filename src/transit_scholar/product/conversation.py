@@ -121,7 +121,12 @@ class ConversationGoalResolver:
             return message
         if self.generator is None:
             raise ProductValidationError("goal generator is required when prior conversation turns are provided")
-        generated = self.generator(message, prior_turns)
+        from transit_scholar.layer2.schema_extraction.errors import LLMRequestError, LLMUnavailableError
+        from .errors import ProviderUnavailableError
+        try:
+            generated = self.generator(message, prior_turns)
+        except (LLMRequestError, LLMUnavailableError) as exc:
+            raise ProviderUnavailableError("Provider is temporarily unavailable") from exc
         if isinstance(generated, dict):
             generated = generated.get("resolved_user_goal")
         elif hasattr(generated, "resolved_user_goal"):

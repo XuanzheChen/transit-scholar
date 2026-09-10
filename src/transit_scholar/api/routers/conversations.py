@@ -16,6 +16,7 @@ from transit_scholar.product.errors import (
     ProductConflictError,
     ProductNotFoundError,
     ProductValidationError,
+    ProviderUnavailableError,
 )
 
 
@@ -148,6 +149,8 @@ def submit_turn(request: Request, conversation_id: str, payload: TurnCreateReque
         raise ApiError("VALIDATION_ERROR", "Conversation request is invalid", {"conversation_id": conversation_id}, 422) from exc
     except ProductConflictError as exc:
         raise ApiError("CONVERSATION_CONFLICT", "Conversation state does not permit this operation", {"conversation_id": conversation_id}, 409) from exc
+    except ProviderUnavailableError:
+        raise
     except Exception as exc:
         if prepared is not None:
             product.discard_prepared_message(prepared)

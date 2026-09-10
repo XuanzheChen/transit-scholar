@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query
 
 from transit_scholar.api.dependencies import get_product
-from transit_scholar.api.errors import ApiError, workspace_error_status
+from transit_scholar.api.errors import ApiError, workspace_error_status, workspace_error_message
 from transit_scholar.api.schemas.wiki import (
     AgenticWikiEntryListResponse, AgenticWikiEntryResponse,
     BaseWikiCapabilityResponse, BaseWikiStatusResponse, WikiBuildResponse,
@@ -27,10 +27,10 @@ def _wiki_error(exc: Exception, workspace_id: str) -> None:
     if isinstance(exc, WorkspaceError):
         code = getattr(exc, "code", "workspace_wiki_error")
         status_code = workspace_error_status(code)
-        message = str(exc) if status_code < 500 else "Wiki operation failed"
+        message = workspace_error_message(code, fallback="Wiki operation failed")
         raise ApiError(code.upper(), message, {"workspace_id": workspace_id}, status_code) from exc
     if isinstance(exc, WikiNotFoundError):
-        raise ApiError("NOT_FOUND", str(exc), {"workspace_id": workspace_id}, 404) from exc
+        raise ApiError("NOT_FOUND", "Wiki resource was not found", {"workspace_id": workspace_id}, 404) from exc
     if isinstance(exc, PermissionError):
         raise ApiError("NOT_FOUND", "Wiki resource was not found", {"workspace_id": workspace_id}, 404) from exc
     raise exc

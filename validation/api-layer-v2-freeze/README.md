@@ -1,142 +1,134 @@
-# API Layer v2 freeze validation — 2026-09-09
+# API Layer v2 freeze validation — public error and Schema read closure
 
 ## Scope and provenance
 
-Base: `1259863a33a01e328d8253ac20f07ba701a82f61` (`fix API Layer`).
-`git fetch origin master` confirmed HEAD and origin/master match before edits.
-Evidence covers this base plus the accompanying working-tree changes. This is
-local execution evidence, **not a claim that GitHub Actions/check runs passed**.
-No commit, push, or remote CI dispatch was performed.
+Base commit: `0679538b4014ddf3c20046f420b9502124b3a9aa`.
+A fresh fetch confirmed HEAD and origin/master match before edits.
+This report describes that base plus the accompanying working-tree changes.
+It supersedes the previous taxonomy-round evidence; it does not claim that the
+base commit itself contains these fixes or that GitHub CI ran.
 
-`summary.json` records a digest of the tested Python source/test tree. Each
-`gate-N.json` is derived from the actual pytest JUnit output and retains the
-command, timestamp, duration, individual test names and outcomes. Machine host
-names and absolute workspace paths are excluded from those records.
+The adjacent gate JSON files are derived from actual pytest JUnit output and
+record commands, timestamps, durations and individual testcase outcomes.
+`summary.json` identifies the base and the tested LF-normalized Python source
+and test tree digest. No commit or push was performed during this validation.
 
 ## A. Blocker closure
 
-- Closed: Workspace Schema disabled/missing/binding mismatch => HTTP 409.
-- Closed: Wiki unsupported/missing/stale/corrupt/empty membership => HTTP 409.
-- Closed: resource absence remains 404; inactive/busy Workspace remains 409.
-- Closed: semantic Workspace input => 422; unclassified domain error => sanitized 500.
-- Closed: Role resume clears terminal metadata and emits one pause trace event.
-- Verified: earlier default-profile Role continuation, Main usage accounting,
-  Paper sanitization, resume injection, Conversation sanitization and manager
-  lifecycle regressions remain green in the gates.
+- Closed: known Workspace/Schema/Wiki 4xx errors never expose exception text.
+  Public messages are selected from a code allowlist, including SCHEMA_MISSING.
+- Closed: no-schema Paper Schema GET checks Product membership before entering
+  bound-only Schema readiness: member => 200 disabled, nonmember/missing => 404.
+- Existing status taxonomy and machine codes are retained. Status-returning
+  read DTOs are not converted into exceptions.
+- No Schema Core, RoleRuntime, MainRuntime, ExecutionManager or PSC changes.
 
 ## B. Production changes
 
-| File | Change | Reason |
+| File | Change | Why |
 |---|---|---|
-| `src/transit_scholar/api/errors.py` | Shared Workspace/Schema/Wiki status mapping | Prevent router drift and accidental 400 state conflicts |
-| `src/transit_scholar/api/routers/workspaces.py` | Apply mapping; sanitize unknown 500 message | Preserve public error codes/envelope with correct status |
-| `src/transit_scholar/api/routers/wiki.py` | Apply mapping; sanitize unknown 500 message | Distinguish existing-but-unusable Wiki state from missing identity |
-| `src/transit_scholar/layer3/agent/models.py` | Clear ended_at, termination_reason, failure_message on start | Resumed running checkpoint must not retain paused terminal metadata |
-| `src/transit_scholar/layer3/runtime/role_runtime.py` | Keep only boundary-specific pause event; include reason | Avoid duplicate pause events while retaining durable checkpoint and trace context |
+| `src/transit_scholar/api/errors.py` | Code-to-public-message allowlist; fixed messages for typed Product exception handlers | A known 4xx status is not evidence that exception text is safe |
+| `src/transit_scholar/api/routers/workspaces.py` | Use public messages; check no-schema membership first | Prevent storage diagnostic leakage and make disabled read behavior reachable |
+| `src/transit_scholar/api/routers/wiki.py` | Project Workspace/Schema errors and WikiNotFoundError safely | Missing current.json and wrapped storage exceptions must remain internal |
+| `src/transit_scholar/api/routers/schemas.py` | Fixed catalog 404/409/422 messages | Apply the same rule to neighboring catalog exceptions |
+| `src/transit_scholar/api/routers/conversations.py` | Fixed exception-backed public messages | Do not leak arbitrary typed Product diagnostics |
+| `src/transit_scholar/api/routers/runs.py` | Fixed Run conflict message | Keep exception text out of 409 while retaining structured Run identity |
+| `src/transit_scholar/api/routers/papers.py` | Fixed PaperInUse message | Retain paper/workspace IDs in details without exposing exception text |
 
-No ExecutionManager production changes. Status-returning read DTOs (e.g. an
-unsupported Wiki overview) remain structured 200 responses; rejected operations
-use the new conflict mapping. Existing router-specific machine error codes are
-preserved rather than renamed.
+Lower-layer diagnostics are unchanged; original exceptions remain chained.
+Existing safe result-code projections and response shapes are retained.
 
-## C. Tests
+## C. Tests added/updated
 
-`tests/api/test_workspace_wiki_error_taxonomy.py` adds 27 cases:
+`tests/api/test_schema_read_boundaries.py` adds four real API regressions:
 
-- Schema materialize: three Schema conflicts, immutable binding, inactive state,
-  three absent-resource cases, semantic input, and unknown internal failure.
-- Wiki build and pages: all five Wiki state conflicts, absent/inactive Workspace,
-  and unknown internal failure.
-- Actual no-schema Workspace creation followed by Wiki build rejection.
+1. No-schema Workspace + imported member Paper => exact 200 disabled DTO.
+2. No-schema Workspace + imported nonmember Paper => 404 NOT_FOUND.
+3. No-schema Workspace + missing Paper => 404 NOT_FOUND.
+4. Create schema catalog entry and bound Workspace, import/add Paper, skip
+   materialization, then build Wiki => 409 SCHEMA_MISSING with fixed message.
+   The test first verifies the real lower-layer exception contains current.json
+   and SchemaCurrentNotFoundError, then proves the endpoint exposes neither,
+   including neither native nor slash-normalized project temp paths.
 
-Injected lower-layer failures assert one call, exact HTTP status and complete
-error envelope. Internal-error cases inject a secret/password/private path and
-assert sanitized output.
+`tests/api/test_workspace_wiki_error_taxonomy.py` now injects secrets/private
+paths for ALL statuses, not only 500. It additionally tests Schema errors
+propagating through Wiki build/read and catalog/storage 404/409/422 errors.
+Calls, exact envelopes, statuses and public messages are asserted.
 
-`tests/layer3/test_freeze_pause_accounting.py` strengthens all four existing
-boundary/direct-vs-Main cases: one pause trace with boundary and reason, clean
-persisted running metadata at role.resume, and preserved original started_at.
-Existing same-execution, one-provider-call, [A,B], default budget and usage
-assertions remain in place.
+`tests/api/test_error_mapping.py` checks typed Product errors with secret text
+across 404/409/422/413/503. `test_conversations_api.py` migrates an old assertion
+that required raw validation text to the fixed public message, with a call
+counter and secret injection.
 
-Targeted command:
+Initial targeted boundary selection: 49 passed, 0 failed/errors/skipped. This
+preceded the final broader exception-text cleanup; all affected tests were then
+included in the final three gates. An intermediate Gate 1 failure was a stale
+raw-validation-message assertion; it was migrated before final gate evidence.
 
-```powershell
-.venv/Scripts/python.exe -m pytest tests/api/test_workspace_wiki_error_taxonomy.py tests/api/test_workspace_api.py tests/api/test_wiki_api.py tests/layer3/test_freeze_pause_accounting.py tests/test_l3s5_trace_role_runtime.py tests/test_l3s5_recovery_role_runtime.py -q --basetemp=.pytest-tmp-api-freeze
-```
+## D. Gate results
 
-Result: **50 passed**, 0 failed/errors/skipped.
+Final results and full commands appear in gate-1.json, gate-2.json and gate-3.json.
+All use `.venv/Scripts/python.exe`, `-q`,
+`--basetemp=.pytest-tmp-api-freeze`, and a JUnit output under ignored `temp/`.
+These are the requested selections, not a claim that every repository-root test
+was executed. Existing Pydantic `schema` field-shadowing warning remains.
 
-## D. Gates
+| Gate | passed | failed | errors | skipped |
+|---|---:|---:|---:|---:|
+| 1 | 148 | 0 | 0 | 0 |
+| 2 | 155 | 0 | 0 | 0 |
+| 3 | 159 | 0 | 0 | 0 |
 
-| Gate | Selection | Passed | Failed | Errors | Skipped |
-|---|---|---:|---:|---:|---:|
-| 1 | tests/api tests/product | 135 | 0 | 0 | 0 |
-| 2 | tests/layer3 tests/product tests/api | 142 | 0 | 0 | 0 |
-| 3 | tests/api tests/product tests/layer1 tests/layer2 tests/layer3 | 146 | 0 | 0 | 0 |
 
-All use the repository `.venv/Scripts/python.exe`, `-q`, and
-`--basetemp=.pytest-tmp-api-freeze`; commands including JUnit destinations are
-in the JSON records. All gates report the existing Pydantic `schema` field
-shadowing warning. These are the requested gate selections, not a claim to have
-run every test at the repository root.
+## E. Real HTTP smoke
 
-## E. Real API smoke
+**29 real HTTP calls passed**; shutdown took **0.219 seconds**.
 
-See `smoke.json` for all **21** actual calls and status codes. Transport was a
-real Uvicorn server on an ephemeral 127.0.0.1 port with an HTTP client, not ASGI
-TestClient. SQLite, Product scopes, ingestion and LocalExecutionManager were
-real; a controlled fake runtime enabled deterministic pause/resume.
+Real Uvicorn on an ephemeral 127.0.0.1 port, with an HTTP client, actual SQLite,
+Product scopes, ingestion and LocalExecutionManager; controlled fake runtime
+for deterministic pause/resume. The local temporary harness is
+`temp/api_freeze_smoke.py`; its hash is in summary.json.
 
 - Startup, health and capabilities succeeded.
-- Real generated PDF import => 201; Paper list/detail => 200.
+- PDF import => 201; Paper list/detail => 200.
 - Workspace create => 201; add Paper => 200; Conversation create => 201.
-- No-schema Wiki build => 409 WIKI_UNSUPPORTED.
-- No-schema Schema materialize => 409 SCHEMA_DISABLED.
-- Prompt => 202; Run/Timeline reads => 200; pause => 200 then paused.
-- Unavailable runtime: Prompt and resume => 503 PROVIDER_UNAVAILABLE.
-- Available resume => 202, then the same Run completed.
-- Turn and Conversation reads => 200.
-- Paper, Workspace and Conversation rows were verified in the same owned DB.
-- Responses were checked for local temp-root/internal-diagnostic leakage.
-- Shutdown completed in approximately 0.171 seconds; closed=true, busy=false.
+- No-schema Wiki build and Schema materialize => 409.
+- NEW: no-schema member Schema GET => 200 disabled.
+- NEW: no-schema nonmember and missing-Paper Schema GET => 404.
+- NEW: create bound Workspace, add Paper without Schema materialization,
+  Wiki build => 409 SCHEMA_MISSING, fixed public message, no current.json,
+  SchemaCurrentNotFoundError or temporary-root diagnostic.
+- Prompt => 202; Run/Timeline => 200; pause => 200 then paused.
+- Unavailable runtime Prompt/resume => 503 PROVIDER_UNAVAILABLE.
+- Available resume => 202 then same Run completed; Turn/Conversation reads => 200.
+- Paper, Workspace and Conversation rows verified in the same owned database.
+- Responses checked for local path/internal diagnostic leakage.
+- Shutdown completed with manager closed=true and busy=false.
 
-The temporary harness is `temp/api_freeze_smoke.py` (hash recorded in summary).
-It was run after all three gates; it does not contact an external model provider.
+## F. Static risk audit / remaining P2
 
-## F. Risk audit and remaining P2 work
+Final API search has no `str(exc)` or `__dict__` passthrough. This is not a claim
+that all repository occurrences must be removed: lower layers keep diagnostics,
+and expected Paper business-result messages retain their existing projection.
 
-- Role pause continuation and usage: default max_steps=1/max_llm_calls=1 cases
-  remain green, no repeated provider/action or cumulative usage double count.
-- Global SessionLocal: formal Paper/Wiki composition regressions remain green;
-  legacy fallback declarations remain. No DB composition changes in this patch.
-- Global settings: DOI provider/network settings ownership remains P2; current
-  capabilities do not promise per-instance DOI network control.
-- PDF staging still uses CWD-relative temp/api_uploads: P2, not changed in this
-  bounded taxonomy round; an unwritable startup directory remains a limitation.
-- Paper detail authors/duplicate_relations retain broad nested dict DTO types:
-  P2. Their current lower-layer producer constructs explicit fields; this
-  round does not redesign them.
-- Raw exceptions: unknown Workspace/Wiki domain errors now return generic 500
-  text; existing Paper/Conversation sanitization regressions remain green.
-- Resume state: unavailable guard preserves paused state/checkpoint; resumed
-  Role terminal metadata is now cleared before persisting role.resume.
-- Shutdown ownership: reservation, admission race, uncooperative Future and
-  submission failure regressions all remain green; actual smoke shutdown bounded.
-- Startup Alembic/global settings alignment remains an existing limitation for
-  concurrent multi-app initialization; no such concurrency claim is made here.
-- No live external-provider integration or remote CI run is claimed.
+Default-profile Role continuation, accounting, resume metadata, single pause
+trace, runtime-unavailable admission and manager lifecycle remain unchanged and
+covered by the green gates. No new global SessionLocal/data-root fallback was
+introduced; existing composition/ownership tests remain in the gate selections.
 
-Final searches reviewed SessionLocal, settings roots, __dict__, str(exc),
-error_message, assistant_response, pause callbacks, current_role_execution_id,
-max_steps, usage.llm_calls and usage.tool_calls in formal API/runtime paths.
-`git diff --check` passed. Test databases/runtime artifacts remain under ignored
-temp paths; `.pytest-tmp-*/` stays ignored. Only intended source/tests and this
-validation evidence are included in the working-tree change set.
+Remaining P2 debt is unchanged: DOI provider/network global settings ownership;
+CWD-relative PDF staging; broad nested Paper authors/duplicate_relations DTOs.
+Startup Alembic/global-root alignment is not validated for concurrent multi-app
+initialization. Smoke does not call a real external model/provider.
+
+`git diff --check` passed. Test DBs, generated PDFs/runtime state and temporary
+scripts remain ignored, and `.pytest-tmp-*/` coverage is unchanged. The intended
+change set consists of API source, regressions and these validation records.
+GitHub check-run status is separate from this local evidence and is not claimed.
 
 ## G. Final status
 
-**API Layer v2 freeze candidate ready** based on local implementation, all
-required gates and real HTTP smoke. Remaining items above are explicit P2 debt.
-The evidence must travel with the source changes for repository-side review;
-GitHub CI status is a separate, unverified signal.
+**API Layer v2 freeze candidate ready** for final review, based on the tested
+working tree, all three green gates and real HTTP smoke. Remaining items are
+the explicitly listed P2 debt; no remote CI success is claimed.

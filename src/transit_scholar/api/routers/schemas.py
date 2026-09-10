@@ -23,9 +23,9 @@ def create_schema(payload: SchemaDraftRequest, product=Depends(get_product)):
     try:
         return product.describe_schema(product.schema_catalog.create(payload.model_dump()))
     except SchemaVersionExistsError as exc:
-        raise ApiError("SCHEMA_VERSION_EXISTS", str(exc), {}, 409) from exc
+        raise ApiError("SCHEMA_VERSION_EXISTS", "Schema version already exists", {}, 409) from exc
     except SchemaCatalogError as exc:
-        raise ApiError("SCHEMA_INVALID", str(exc), {}, 422) from exc
+        raise ApiError("SCHEMA_INVALID", "Schema definition is invalid", {}, 422) from exc
 
 
 @router.get("/schemas/{schema_id}/versions/{version}", response_model=SchemaResponse)
@@ -33,4 +33,4 @@ def get_schema(schema_id: str, version: str, product=Depends(get_product)):
     try:
         return product.describe_schema(product.schema_catalog.resolve(schema_id, version))
     except SchemaNotFoundError as exc:
-        raise ApiError("NOT_FOUND", str(exc), {"schema_id": schema_id, "version": version}, 404) from exc
+        raise ApiError("NOT_FOUND", "Schema not found", {"schema_id": schema_id, "version": version}, 404) from exc

@@ -80,7 +80,7 @@ def list_conversations(workspace_id: str, product=Depends(get_product)):
     try:
         return ConversationListResponse(items=[_summary(row) for row in product.list_conversations(workspace_id)])
     except ProductNotFoundError as exc:
-        raise ApiError("NOT_FOUND", str(exc), {"workspace_id": workspace_id}, 404) from exc
+        raise ApiError("NOT_FOUND", "Workspace not found", {"workspace_id": workspace_id}, 404) from exc
 
 
 @router.post(
@@ -92,9 +92,9 @@ def create_conversation(workspace_id: str, payload: ConversationCreateRequest, p
     try:
         return _summary(product.create_conversation(workspace_id, payload.title))
     except ProductNotFoundError as exc:
-        raise ApiError("NOT_FOUND", str(exc), {"workspace_id": workspace_id}, 404) from exc
+        raise ApiError("NOT_FOUND", "Workspace not found", {"workspace_id": workspace_id}, 404) from exc
     except ProductConflictError as exc:
-        raise ApiError("WORKSPACE_NOT_AVAILABLE", str(exc), {"workspace_id": workspace_id}, 409) from exc
+        raise ApiError("WORKSPACE_NOT_AVAILABLE", "Workspace is not available", {"workspace_id": workspace_id}, 409) from exc
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
@@ -102,7 +102,7 @@ def read_conversation(conversation_id: str, product=Depends(get_product)):
     try:
         view = product.read_conversation(conversation_id)
     except ProductNotFoundError as exc:
-        raise ApiError("NOT_FOUND", str(exc), {"conversation_id": conversation_id}, 404) from exc
+        raise ApiError("NOT_FOUND", "Conversation not found", {"conversation_id": conversation_id}, 404) from exc
     conversation = product.get_conversation(conversation_id)
     return ConversationResponse(
         **_summary(conversation).model_dump(),
@@ -140,11 +140,11 @@ def submit_turn(request: Request, conversation_id: str, payload: TurnCreateReque
         manager.submit_reserved(reservation, prepared.agent_run_id)
         scheduled = True
     except ProductNotFoundError as exc:
-        raise ApiError("NOT_FOUND", str(exc), {"conversation_id": conversation_id}, 404) from exc
+        raise ApiError("NOT_FOUND", "Conversation not found", {"conversation_id": conversation_id}, 404) from exc
     except ProductValidationError as exc:
-        raise ApiError("VALIDATION_ERROR", str(exc), {"conversation_id": conversation_id}, 422) from exc
+        raise ApiError("VALIDATION_ERROR", "Conversation request is invalid", {"conversation_id": conversation_id}, 422) from exc
     except ProductConflictError as exc:
-        raise ApiError("CONVERSATION_CONFLICT", str(exc), {"conversation_id": conversation_id}, 409) from exc
+        raise ApiError("CONVERSATION_CONFLICT", "Conversation state does not permit this operation", {"conversation_id": conversation_id}, 409) from exc
     except Exception as exc:
         if prepared is not None:
             product.discard_prepared_message(prepared)

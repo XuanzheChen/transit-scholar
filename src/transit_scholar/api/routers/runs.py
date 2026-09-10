@@ -46,7 +46,7 @@ def pause_run(agent_run_id: str, product=Depends(get_product)):
     except AgentRunNotFoundError as exc:
         raise ApiError("NOT_FOUND", "agent run not found", {"agent_run_id": agent_run_id}, 404) from exc
     except ProductConflictError as exc:
-        raise ApiError("RUN_STATE_CONFLICT", str(exc), {"agent_run_id": agent_run_id}, 409) from exc
+        raise ApiError("RUN_STATE_CONFLICT", "Run state does not permit this operation", {"agent_run_id": agent_run_id}, 409) from exc
 
 
 @router.post("/{agent_run_id}/resume", response_model=RunStateResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -64,4 +64,4 @@ def resume_run(request: Request, agent_run_id: str, product=Depends(get_product)
     except AgentRunNotFoundError as exc:
         raise ApiError("NOT_FOUND", "agent run not found", {"agent_run_id": agent_run_id}, 404) from exc
     except ProductConflictError as exc:
-        raise ApiError("RUN_STATE_CONFLICT", str(exc), {"agent_run_id": agent_run_id}, 409) from exc
+        raise ApiError("RUN_STATE_CONFLICT", "Run state does not permit this operation", {"agent_run_id": agent_run_id}, 409) from exc

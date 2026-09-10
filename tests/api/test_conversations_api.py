@@ -250,8 +250,10 @@ def test_prompt_preparation_validation_uses_stable_error_envelope(session, proje
     app = create_app(data_root=project_tmp_path, runtime_context=AvailableContext(project_tmp_path), execution_manager=manager)
     app.dependency_overrides[get_product] = lambda: product
 
+    rejected = []
     def reject(_conversation_id, _message):
-        raise ProductValidationError("goal generator is required")
+        rejected.append(True)
+        raise ProductValidationError("SECRET password=abc private/current.json")
 
     monkeypatch.setattr(product, "prepare_message", reject)
     with TestClient(app) as client:
@@ -260,10 +262,12 @@ def test_prompt_preparation_validation_uses_stable_error_envelope(session, proje
             json={"message": "Follow up"},
         )
 
+    assert rejected == [True]
+    assert "SECRET" not in response.text
     assert response.status_code == 422
     assert response.json()["error"] == {
         "code": "VALIDATION_ERROR",
-        "message": "goal generator is required",
+        "message": "Conversation request is invalid",
         "details": {"conversation_id": conversation.id},
     }
 

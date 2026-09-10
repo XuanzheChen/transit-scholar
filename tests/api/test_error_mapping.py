@@ -14,19 +14,19 @@ def test_typed_product_errors_use_stable_http_envelopes(project_tmp_path):
     app = create_app(data_root=project_tmp_path)
 
     def raise_not_found():
-        raise ProductNotFoundError("missing resource")
+        raise ProductNotFoundError("SECRET password=abc private/current.json")
 
     def raise_conflict():
-        raise ProductConflictError("conflicting state")
+        raise ProductConflictError("SECRET password=abc private/current.json")
 
     def raise_validation():
-        raise ProductValidationError("invalid product command")
+        raise ProductValidationError("SECRET password=abc private/current.json")
 
     def raise_too_large():
-        raise ProductPayloadTooLargeError("input too large")
+        raise ProductPayloadTooLargeError("SECRET password=abc private/current.json")
 
     def raise_provider_unavailable():
-        raise ProviderUnavailableError("provider diagnostic must remain private")
+        raise ProviderUnavailableError("SECRET password=abc private/current.json")
 
     app.add_api_route("/typed/not-found", raise_not_found)
     app.add_api_route("/typed/conflict", raise_conflict)
@@ -48,6 +48,8 @@ def test_typed_product_errors_use_stable_http_envelopes(project_tmp_path):
         (404, 409, 422, 413, 503),
         ("NOT_FOUND", "CONFLICT", "VALIDATION_ERROR", "UPLOAD_TOO_LARGE", "PROVIDER_UNAVAILABLE"),
     ):
+        for diagnostic in ("SECRET", "password=abc", "private/current.json"):
+            assert diagnostic not in response.text
         assert response.status_code == status_code
         assert response.json()["error"]["code"] == code
         assert set(response.json()["error"]) == {"code", "message", "details"}

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 
 from transit_scholar.api.dependencies import get_product
-from transit_scholar.api.errors import ApiError, workspace_error_status
+from transit_scholar.api.errors import ApiError, workspace_error_status, workspace_error_message
 from transit_scholar.api.schemas.workspaces import (
     PaperSchemaStateResponse, SchemaMaterializationResponse,
     WorkspaceCreateRequest, WorkspaceListResponse, WorkspacePaperListResponse,
@@ -23,7 +23,7 @@ def _workspace(record):
 def _workspace_error(exc: WorkspaceError, workspace_id: str):
     code = "NOT_FOUND" if exc.code == "workspace_not_found" else exc.code.upper()
     status_code = workspace_error_status(exc.code)
-    message = str(exc) if status_code < 500 else "Workspace operation failed"
+    message = workspace_error_message(exc.code)
     raise ApiError(code, message, {"workspace_id": workspace_id}, status_code) from exc
 
 
@@ -42,7 +42,7 @@ def create_workspace(payload: WorkspaceCreateRequest, product=Depends(get_produc
         selection = payload.schema
         return _workspace(product.create_workspace(payload.name, selection.schema_id if selection else None, selection.version if selection else None))
     except SchemaNotFoundError as exc:
-        raise ApiError("NOT_FOUND", str(exc), {}, 404) from exc
+        raise ApiError("NOT_FOUND", "Schema not found", {}, 404) from exc
     except WorkspaceError as exc:
         _workspace_error(exc, "")
 
@@ -123,11 +123,12 @@ def workspace_schema(workspace_id: str, product=Depends(get_product)):
 def paper_schema(workspace_id: str, paper_id: str, product=Depends(get_product)):
     try:
         record = product.get_workspace(workspace_id)
-        readiness = product.workspace_schema_readiness(workspace_id, paper_id)[paper_id]
         if record.schema_mode == "none":
-            if getattr(readiness, "error_code", None) in {"paper_not_found", "paper_not_member"}:
+            memberships = product.list_workspace_papers(workspace_id)
+            if not any(member.paper_id == paper_id for member in memberships):
                 raise ApiError("NOT_FOUND", "Paper not found or not a workspace member", {"paper_id": paper_id}, 404)
             return PaperSchemaStateResponse(workspace_id=workspace_id, paper_id=paper_id, status="disabled", error_code="schema_disabled")
+        readiness = product.workspace_schema_readiness(workspace_id, paper_id)[paper_id]
         return PaperSchemaStateResponse(workspace_id=workspace_id, paper_id=paper_id, **readiness.model_dump())
     except WorkspaceError as exc:
         _workspace_error(exc, workspace_id)

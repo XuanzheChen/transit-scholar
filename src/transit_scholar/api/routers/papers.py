@@ -207,7 +207,7 @@ def delete_paper(paper_id: str, product=Depends(get_product)):
     try:
         return _action(product.soft_delete_library_paper(paper_id))
     except PaperInUseError as exc:
-        raise ApiError("PAPER_IN_USE", str(exc), {"paper_id": exc.paper_id, "workspace_ids": exc.workspace_ids}, 409) from exc
+        raise ApiError("PAPER_IN_USE", "Paper is used by active workspaces", {"paper_id": exc.paper_id, "workspace_ids": exc.workspace_ids}, 409) from exc
 
 
 @router.post("/papers/{paper_id}/restore", response_model=PaperActionResponse)

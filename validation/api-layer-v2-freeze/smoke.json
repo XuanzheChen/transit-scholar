@@ -25,7 +25,7 @@
     },
     {
       "method": "GET",
-      "path": "/papers/ca4e9c059db745e48f8f676a1df39de5",
+      "path": "/papers/a0d00fa0a6cc45739f412fc52d1f6195",
       "status": 200
     },
     {
@@ -35,80 +35,120 @@
     },
     {
       "method": "POST",
-      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/wiki/build",
+      "path": "/workspaces/161543b5fbe3404d953d2d9f37590d51/wiki/build",
       "status": 409
     },
     {
       "method": "POST",
-      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/papers",
+      "path": "/workspaces/161543b5fbe3404d953d2d9f37590d51/papers",
       "status": 200
     },
     {
       "method": "POST",
-      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/papers/ca4e9c059db745e48f8f676a1df39de5/schema/materialize",
+      "path": "/workspaces/161543b5fbe3404d953d2d9f37590d51/papers/a0d00fa0a6cc45739f412fc52d1f6195/schema/materialize",
       "status": 409
     },
     {
+      "method": "GET",
+      "path": "/workspaces/161543b5fbe3404d953d2d9f37590d51/papers/a0d00fa0a6cc45739f412fc52d1f6195/schema",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/161543b5fbe3404d953d2d9f37590d51/papers/missing-paper/schema",
+      "status": 404
+    },
+    {
       "method": "POST",
-      "path": "/workspaces/fc5f2c7cf0864770b33bfd202e8ddedc/conversations",
+      "path": "/schemas",
       "status": 201
     },
     {
       "method": "POST",
-      "path": "/conversations/d0affa8e863249f88e7e5cb780202570/turns",
+      "path": "/workspaces",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fcdf2de6d8164ea3be5573d0792f5be3/papers",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fcdf2de6d8164ea3be5573d0792f5be3/wiki/build",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/cfba4b2b5b33400eac7520922b8a4cd3/papers/a0d00fa0a6cc45739f412fc52d1f6195/schema",
+      "status": 404
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/161543b5fbe3404d953d2d9f37590d51/conversations",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/conversations/767591acccb644fb9803c9fd61b6a8b1/turns",
       "status": 202
     },
     {
       "method": "GET",
-      "path": "/runs/a57c598673514973a8a5d885a52c1f95",
+      "path": "/runs/7cb8d747ce8f4ad58cdb7bf99c9a77ad",
       "status": 200
     },
     {
       "method": "GET",
-      "path": "/runs/a57c598673514973a8a5d885a52c1f95/timeline",
+      "path": "/runs/7cb8d747ce8f4ad58cdb7bf99c9a77ad/timeline",
       "status": 200
     },
     {
       "method": "POST",
-      "path": "/runs/a57c598673514973a8a5d885a52c1f95/pause",
+      "path": "/runs/7cb8d747ce8f4ad58cdb7bf99c9a77ad/pause",
       "status": 200
     },
     {
       "method": "GET",
-      "path": "/runs/a57c598673514973a8a5d885a52c1f95",
+      "path": "/runs/7cb8d747ce8f4ad58cdb7bf99c9a77ad",
       "status": 200
     },
     {
       "method": "POST",
-      "path": "/runs/a57c598673514973a8a5d885a52c1f95/resume",
+      "path": "/runs/7cb8d747ce8f4ad58cdb7bf99c9a77ad/resume",
       "status": 503
     },
     {
       "method": "POST",
-      "path": "/conversations/d0affa8e863249f88e7e5cb780202570/turns",
+      "path": "/conversations/767591acccb644fb9803c9fd61b6a8b1/turns",
       "status": 503
     },
     {
       "method": "POST",
-      "path": "/runs/a57c598673514973a8a5d885a52c1f95/resume",
+      "path": "/runs/7cb8d747ce8f4ad58cdb7bf99c9a77ad/resume",
       "status": 202
     },
     {
       "method": "GET",
-      "path": "/runs/a57c598673514973a8a5d885a52c1f95",
+      "path": "/runs/7cb8d747ce8f4ad58cdb7bf99c9a77ad",
       "status": 200
     },
     {
       "method": "GET",
-      "path": "/turns/24ef9d69e8994ccaae3c65ef59ab8f72",
+      "path": "/turns/1a8b85e1598a4a1dae6176aac14e3324",
       "status": 200
     },
     {
       "method": "GET",
-      "path": "/conversations/d0affa8e863249f88e7e5cb780202570",
+      "path": "/conversations/767591acccb644fb9803c9fd61b6a8b1",
       "status": 200
     }
   ],
   "shared_database_verified": true,
-  "shutdown_seconds": 0.1709999999984575
+  "shutdown_seconds": 0.2189999999999941
 }

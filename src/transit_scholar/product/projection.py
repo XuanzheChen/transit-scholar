@@ -5,7 +5,9 @@ import json
 from copy import deepcopy
 from sqlalchemy import select
 
-from transit_scholar.db.models import AgentTraceEvent, EvidenceRecord, Paper, ResearchSession
+from transit_scholar.db.models import (
+    AgentTraceEvent, EvidenceRecord, Paper, ResearchSession, ResearchQueryRecord, ClaimRecord,
+)
 from .errors import ProductNotFoundError, ProductValidationError
 from .research import ProductRunState
 
@@ -76,6 +78,7 @@ class ProductStateProjector:
                 for key in safe_keys
                 if key in payload and (value := _timeline_value(payload[key])) is not None
             }
+            data.update(self._timeline_artifacts(row, payload))
             kind = kind_map.get(row.event_type)
             if kind is None:
                 lowered = row.event_type.lower()
@@ -96,6 +99,63 @@ class ProductStateProjector:
                 "data": data,
             })
         return result
+
+    def _timeline_artifacts(self, event, payload: dict) -> dict:
+        """Use trace identities only as selectors for owned research records.
+
+        Never project text or nested diagnostics from an action result.
+        Missing/deleted/foreign identities simply contribute no artifact.
+        """
+        data = {}
+        session_id = event.research_session_id or payload.get("research_session_id")
+        if isinstance(session_id, str):
+            research = self.session.scalar(select(ResearchSession).where(
+                ResearchSession.id == session_id, ResearchSession.agent_run_id == event.agent_run_id,
+            ))
+            if research is not None:
+                data["research_question"] = research.research_question[:2000]
+        identifiers = {key: payload.get(key) for key in ("query_id", "evidence_id", "claim_id")}
+        if event.event_type == "runtime.action":
+            result = payload.get("action_result")
+            value = result.get("value") if isinstance(result, dict) else None
+            if isinstance(value, dict):
+                # The official runtime records typed ActionExecutionResult.
+                # Only fixed identity fields are interpreted from its value.
+                for key in identifiers:
+                    if key not in payload:
+                        identifiers[key] = value.get(key)
+                query = value.get("query")
+                if isinstance(query, dict) and identifiers["query_id"] is None:
+                    identifiers["query_id"] = query.get("query_id")
+        for key, model in (("query_id", ResearchQueryRecord), ("evidence_id", EvidenceRecord), ("claim_id", ClaimRecord)):
+            identity = identifiers[key]
+            if not isinstance(identity, str):
+                continue
+            statement = select(model).join(ResearchSession, model.research_session_id == ResearchSession.id).where(
+                model.id == identity, ResearchSession.agent_run_id == event.agent_run_id,
+            )
+            if event.research_session_id is not None:
+                statement = statement.where(model.research_session_id == event.research_session_id)
+            record = self.session.scalar(statement)
+            if record is None:
+                continue
+            data[key] = record.id
+            if key == "query_id":
+                data["query_text"] = record.query_text[:2000]
+            elif key == "claim_id":
+                data["statement"] = record.statement[:2000]
+                data["status"] = record.status
+            else:
+                locator = _json_object(record.locator_json)
+                paper_id = locator.get("paper_id")
+                # Resolve the identity, rather than copying a diagnostic path.
+                if isinstance(paper_id, str) and self.session.get(Paper, paper_id) is not None:
+                    data["paper_id"] = paper_id
+                pages = locator.get("pages")
+                if isinstance(pages, list):
+                    data["pages"] = [page for page in pages if type(page) is int and page >= 1][:100]
+                data["preview"] = record.text_snapshot[:500]
+        return data
 
     timeline = run_timeline
 
@@ -299,7 +359,7 @@ def _json_object(value: object) -> dict:
 
 def _citation_ids(final_response: object) -> list[str]:
     response = final_response if isinstance(final_response, dict) else {}
-    identifiers = response.get("citation_references")
+    identifiers = response.get("citation_refs", response.get("citation_references"))
     if not isinstance(identifiers, list):
         return []
     return list(dict.fromkeys(identifier for identifier in identifiers if isinstance(identifier, str) and identifier))

@@ -55,7 +55,7 @@ class TransitScholarProduct:
         self.settings = settings_obj or settings
         self.data_root = Path(data_root or self.settings.data_root)
         self.conversations = ConversationService(session)
-        self.research = ResearchService(session, runtime_factory, conversations=self.conversations, goal_resolver=goal_resolver)
+        self.research = ResearchService(session, runtime_factory, conversations=self.conversations, goal_resolver=goal_resolver, data_root=self.data_root)
         self.projector = ProductStateProjector(session, runtime_factory)
         self.schema_catalog = schema_catalog or SchemaCatalog(self.data_root)
 
@@ -132,6 +132,7 @@ class TransitScholarProduct:
         return result
 
     def materialize_workspace_schema(self, workspace_id, paper_id, **options):
+        self._guard_workspace_mutation(workspace_id)
         from transit_scholar.layer3.schema import WorkspaceSchemaService
         return WorkspaceSchemaService(
             self.session, data_root=self.data_root,
@@ -158,6 +159,7 @@ class TransitScholarProduct:
         return self._workspace_wiki().capability(workspace_id)
 
     def build_workspace_wiki(self, workspace_id):
+        self._guard_workspace_mutation(workspace_id)
         return self._workspace_wiki().build(workspace_id)
 
     def _read_workspace_wiki(self, workspace_id):
@@ -226,19 +228,7 @@ class TransitScholarProduct:
         return self.projector.answer_citations(agent_run_id, final_response)
 
     def reconcile_interrupted_runs(self, active_run_ids=()):
-        """Durably pause runs left running by a previous local process."""
-        active_run_ids = set(active_run_ids)
-        statement = select(AgentRun).where(AgentRun.status == "running")
-        if active_run_ids:
-            statement = statement.where(AgentRun.id.not_in(active_run_ids))
-
-        reconciled_ids = []
-        for run in self.session.execute(statement).scalars():
-            self.research.execution.update_agent_run_status(run.id, "paused")
-            reconciled_ids.append(run.id)
-        if reconciled_ids:
-            self.session.commit()
-        return reconciled_ids
+        return self.research.reconcile_interrupted_runs(active_run_ids)
 
     def list_turns(self, conversation_id):
         return self.conversations.list_turns(conversation_id)

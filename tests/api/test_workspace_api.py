@@ -101,6 +101,8 @@ def test_workspace_api_blocks_non_terminal_run_mutations(
         client.post(f"/api/v1/workspaces/{workspace.workspace_id}/papers", json={"paper_id": paper_id}),
         client.delete(f"/api/v1/workspaces/{workspace.workspace_id}/papers/{paper_id}"),
         client.post(f"/api/v1/workspaces/{workspace.workspace_id}/archive"),
+        client.post(f"/api/v1/workspaces/{workspace.workspace_id}/papers/{paper_id}/schema/materialize"),
+        client.post(f"/api/v1/workspaces/{workspace.workspace_id}/wiki/build"),
         client.delete(f"/api/v1/workspaces/{workspace.workspace_id}"),
     ):
         assert response.status_code == 409

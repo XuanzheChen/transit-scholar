@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from transit_scholar.api.schemas import AnswerEvidenceCitationResponse, CitationResponse
 from transit_scholar.db.models import (
@@ -7,7 +8,8 @@ from transit_scholar.db.models import (
 from transit_scholar.product.facade import TransitScholarProduct
 
 
-def test_completed_run_answer_citations_resolve_admitted_evidence(session):
+@pytest.mark.parametrize("field", ["citation_refs", "citation_references"])
+def test_completed_run_answer_citations_resolve_admitted_evidence(session, field):
     workspace = Workspace(id="ws-cite", name="Citation workspace", status="active", schema_mode="none", revision=1)
     paper = Paper(id="paper-cite", title="A Transit Study", status="active")
     run = AgentRun(id="run-cite", workspace_id=workspace.id, user_goal="Explain transit", status="completed", workspace_revision=1)
@@ -52,7 +54,8 @@ def test_completed_run_answer_citations_resolve_admitted_evidence(session):
     product = TransitScholarProduct(session, runtime_factory=None)
     citations = product.answer_citations(run.id, {
         "answer_text": "Transit answer",
-        "citation_references": [unrelated_evidence.id, evidence.id],
+        field: [unrelated_evidence.id, evidence.id, evidence.id, "missing"],
+        "source_refs": [unrelated_evidence.id],
     })
     assert citations == [{
         "evidence_id": evidence.id, "research_session_id": research_session.id,
@@ -91,3 +94,18 @@ def test_answer_citation_uses_persisted_paper_provenance_when_locator_is_sparse(
     )
     assert citations[0]["paper_id"] == paper.id
     assert citations[0]["parse_run_id"] == "parse-2"
+
+
+@pytest.mark.parametrize('response,expected', [
+    ({'citation_refs': ['canonical'], 'citation_references': ['legacy']}, ['canonical']),
+    ({'citation_refs': [], 'citation_references': ['legacy']}, []),
+    ({'citation_references': ['legacy']}, ['legacy']),
+    ({'source_refs': ['source-only']}, []),
+])
+def test_canonical_citation_precedence_without_source_fallback(response, expected):
+    from transit_scholar.product.projection import _citation_ids
+    from transit_scholar.api.routers.conversations import _public_assistant_response
+    assert _citation_ids(response) == expected
+    public = _public_assistant_response(response).model_dump()
+    assert (public.get('citation_references') or []) == expected
+    assert 'citation_refs' not in public

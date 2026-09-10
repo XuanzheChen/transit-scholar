@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+from pathlib import Path
 from typing import Any
 from sqlalchemy import select
 from transit_scholar.db.models import AgentRun, ConversationTurn
@@ -39,9 +41,10 @@ def _result_data(result: Any) -> dict[str, Any]:
 
 
 class ResearchService:
-    def __init__(self, session, runtime_factory, *, conversations=None, goal_resolver=None):
+    def __init__(self, session, runtime_factory, *, conversations=None, goal_resolver=None, data_root=None):
         self.session = session
         self.runtime_factory = runtime_factory
+        self.data_root = data_root
         self.execution = AgentRunService(session)
         self.conversations = conversations or ConversationService(session)
         self.goal_resolver = goal_resolver or ConversationGoalResolver()
@@ -71,7 +74,11 @@ class ResearchService:
             status = data.get("status")
             if hasattr(status, "value"):
                 status = status.value
-            if status in {"failed", "terminated", "cancelled"}:
+            self.session.expire_all()
+            current = self.execution.get_agent_run(agent_run_id)
+            if current.status in {"completed", "failed", "cancelled"}:
+                pass
+            elif status in {"failed", "terminated", "cancelled"}:
                 self.execution.update_agent_run_status(agent_run_id, "failed" if status == "terminated" else status)
             elif status == "completed":
                 # Runtime normally owns this transition; retain correctness
@@ -80,22 +87,36 @@ class ResearchService:
                 if current.status != "completed":
                     self.execution.update_agent_run_status(agent_run_id, "completed")
             self.session.commit()
-            # Keep direct/debug execution accessors lifecycle-safe as well:
-            # when a run is linked to a turn, project its terminal outcome to
-            # that same turn (never create a replacement record).
-            self._sync_linked_turn(agent_run_id, result)
-            return result
         except Exception:
-            self.execution.update_agent_run_status(agent_run_id, "failed")
-            self.session.commit()
-            self._sync_linked_turn(
-                agent_run_id,
-                {"status": "failed", "error_message": "Research execution failed"},
-            )
+            # A runtime scope may still own an SQL transaction. Release it
+            # before recovering the Product session or reading Core truth.
+            if scope is not None and hasattr(scope, "close"):
+                scope.close()
+                scope = None
+            self.session.rollback()
+            current = self.execution.get_agent_run(agent_run_id)
+            if current.status not in {"completed", "failed", "cancelled"}:
+                self.execution.update_agent_run_status(agent_run_id, "failed")
+                self.session.commit()
+                current = self.execution.get_agent_run(agent_run_id)
+            if current.status in {"failed", "cancelled"}:
+                self._try_sync_linked_turn(agent_run_id, {"status": current.status})
             raise
         finally:
             if scope is not None and hasattr(scope, "close"):
                 scope.close()
+        # Presentation persistence cannot reclassify the authoritative result.
+        self._try_sync_linked_turn(agent_run_id, result)
+        return result
+
+    def _try_sync_linked_turn(self, agent_run_id: str, result) -> None:
+        try:
+            self._sync_linked_turn(agent_run_id, result)
+        except Exception:
+            self.session.rollback()
+            logging.getLogger(__name__).warning(
+                "TURN_SYNC_FAILED: deferred conversation projection for run %s", agent_run_id
+            )
 
     def resume_run(self, agent_run_id: str):
         run = self.execution.get_agent_run(agent_run_id)
@@ -103,9 +124,7 @@ class ResearchService:
         control = getattr(self.runtime_factory, "run_control", None)
         if control is not None:
             control.clear_pause(agent_run_id)
-        result = self._execute(run, agent_run_id)
-        self._sync_linked_turn(agent_run_id, result)
-        return result
+        return self._execute(run, agent_run_id)
 
     def request_pause(self, agent_run_id: str):
         run = self.execution.get_agent_run(agent_run_id)
@@ -145,6 +164,84 @@ class ResearchService:
         elif status in {"failed", "terminated", "cancelled"}:
             self.conversations.update_turn(turn.id, status="failed", error_message="Research execution failed")
         self.session.commit()
+
+    def _load_completed_artifact(self, agent_run_id: str) -> dict:
+        """Read durable output without constructing or invoking a runtime."""
+        from .runtime import FileRunResearchStateStore
+        from transit_scholar.layer3.run_context import RunFinalResponseArtifact
+        store = getattr(self.runtime_factory, "state_store", None)
+        if store is None:
+            root = getattr(self.runtime_factory, "runtime_root", None)
+            if root is None:
+                from transit_scholar.config import settings
+                root = Path(self.data_root or settings.data_root) / "layer3" / "runs"
+            store = FileRunResearchStateStore(root)
+        if hasattr(store, "load"):
+            checkpoint = store.load(agent_run_id)
+        elif hasattr(store, "load_state"):
+            checkpoint = store.load_state(agent_run_id=agent_run_id)
+        else:
+            checkpoint = store.get(agent_run_id)
+        if not isinstance(checkpoint, dict):
+            raise ValueError("missing run checkpoint")
+        if checkpoint.get("orchestration_state", {}).get("agent_run_id") != agent_run_id:
+            raise ValueError("checkpoint ownership mismatch")
+        artifact = RunFinalResponseArtifact.model_validate(checkpoint.get("final_response"))
+        if artifact.status != "completed":
+            raise ValueError("checkpoint has no completed final response")
+        return artifact.model_dump(mode="json")
+
+    def reconcile_interrupted_runs(self, active_run_ids=()) -> list[str]:
+        """Startup-only repair; never schedule work or rewrite terminal Runs."""
+        active_run_ids = set(active_run_ids)
+        reconciled = []
+        runs = self.session.scalars(select(AgentRun).where(AgentRun.status == "running")).all()
+        for run in runs:
+            if run.id not in active_run_ids:
+                self.execution.update_agent_run_status(run.id, "paused")
+                reconciled.append(run.id)
+        orphans = self.session.execute(
+            select(AgentRun, ConversationTurn).join(
+                ConversationTurn, ConversationTurn.agent_run_id == AgentRun.id
+            ).where(AgentRun.status == "created", ConversationTurn.status == "preparing")
+        ).all()
+        for run, turn in orphans:
+            if run.id in active_run_ids:
+                continue
+            self.execution.update_agent_run_status(run.id, "failed")
+            self.conversations.update_turn(
+                turn.id, status="failed", error_message="Research admission was interrupted before execution."
+            )
+            reconciled.append(run.id)
+        self.session.commit()
+        pending = self.session.execute(
+            select(AgentRun, ConversationTurn).join(
+                ConversationTurn, ConversationTurn.agent_run_id == AgentRun.id
+            ).where(
+                AgentRun.status.in_(("completed", "failed", "cancelled")),
+                ConversationTurn.status.in_(("preparing", "running")),
+            )
+        ).all()
+        for run, turn in pending:
+            if run.id in active_run_ids:
+                continue
+            if run.status == "completed":
+                try:
+                    artifact = self._load_completed_artifact(run.id)
+                except Exception:
+                    self.conversations.update_turn(
+                        turn.id, status="failed",
+                        error_message="TURN_RECOVERY_FAILED: Durable final response is unavailable.",
+                    )
+                else:
+                    self.conversations.update_turn(
+                        turn.id, status="completed", final_assistant_response=artifact, error_message=None,
+                    )
+            else:
+                self.conversations.update_turn(turn.id, status="failed", error_message="Research execution failed")
+            reconciled.append(run.id)
+        self.session.commit()
+        return reconciled
 
     def _mark_linked_turn_running(self, agent_run_id: str) -> None:
         turn = self.session.scalar(

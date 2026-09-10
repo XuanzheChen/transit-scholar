@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 
 from transit_scholar.api.dependencies import get_product
 from transit_scholar.api.errors import ApiError, workspace_error_status, workspace_error_message
+from transit_scholar.product.facade import WorkspaceBusyError
 from transit_scholar.api.schemas.wiki import (
     AgenticWikiEntryListResponse, AgenticWikiEntryResponse,
     BaseWikiCapabilityResponse, BaseWikiStatusResponse, WikiBuildResponse,
@@ -75,6 +76,8 @@ def build_wiki(workspace_id: str, product=Depends(get_product)):
             fingerprint=outcome.fingerprint,
             build_revision=outcome.provenance.build_revision,
         )
+    except WorkspaceBusyError as exc:
+        raise ApiError("WORKSPACE_BUSY", "Workspace has a non-terminal AgentRun", {"workspace_id": workspace_id}, 409) from exc
     except WorkspaceWikiError as exc:
         _wiki_error(exc, workspace_id)
     except WorkspaceError as exc:

@@ -65,6 +65,8 @@ def test_command_status_contract(session, monkeypatch, command, status, allowed)
         assert _snapshot(turn) == before_turn
         return
 
+    sync_turn = Mock(wraps=service._sync_linked_turn)
+    monkeypatch.setattr(service, "_sync_linked_turn", sync_turn)
     result = {"status": "completed", "final_response": {"answer": "Done"}}
 
     def execute(**kwargs):
@@ -81,5 +83,6 @@ def test_command_status_contract(session, monkeypatch, command, status, allowed)
     factory.build_run_scope.assert_called_once_with(run.agent_run_id)
     runtime.execute.assert_called_once()
     scope.close.assert_called_once()
+    sync_turn.assert_called_once_with(run.agent_run_id, result)
     assert service.execution.get_agent_run(run.agent_run_id).status == "completed"
     assert service.conversations.get_turn(turn.id).final_assistant_response == result["final_response"]

@@ -40,6 +40,9 @@ def _public_assistant_response(response: object) -> PublicAssistantResponse | No
     for key in ("citation_references", "citations"):
         if isinstance(response.get(key), list):
             public[key] = [value for value in response[key] if isinstance(value, str)]
+    if "citation_refs" in response:
+        refs = response["citation_refs"]
+        public["citation_references"] = [value for value in refs if isinstance(value, str)] if isinstance(refs, list) else []
     return PublicAssistantResponse.model_validate(public)
 
 

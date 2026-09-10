@@ -4,7 +4,7 @@ status: Frozen
 
 API prefix: /api/v1
 
-commit SHA: 6d9970e14a7e84a5e8b0d5ab88511316779058c7
+tested implementation SHA: 6d9970e14a7e84a5e8b0d5ab88511316779058c7
 
 date: 2026-09-10
 
@@ -56,6 +56,10 @@ freeze invariants:
 
 DTO cleanup: removed src/transit_scholar/api/schemas.py after caller search and import-source verification; api/schemas/ is the sole DTO source.
 
-Record delivery: generated after the repair commit and retained as a working-tree artifact so commit SHA equals the final HEAD.
+freeze record: committed as a documentation-only descendant of the tested implementation.
+
+Initial record commit: 2b6286d7d57875b0b1bbf776c62bd6e4b1bdc3cb; added only API_FREEZE_RECORD.md. This wording correction is also documentation-only.
+
+No production or test code changed after the tested implementation SHA. The gate and smoke results above are local execution evidence for that implementation baseline, not remote CI results. Documentation-only descendants do not require rerunning those gates.
 
 Freeze definition: existing /api/v1 resource model, lifecycle semantics, error contract, and run-control semantics are frozen. Subsequent UI work permits backward-compatible extensions and explicit bug fixes only.

@@ -4,16 +4,16 @@ status: Frozen
 
 API prefix: /api/v1
 
-tested implementation SHA: 6d9970e14a7e84a5e8b0d5ab88511316779058c7
+tested implementation SHA: 0ff2a6ecd2fe7a442621df10505edf46f4994c7b
+
+starting master SHA: 1fb2effdd60514e54c6d07dbbfe2f328294ddeac
 
 date: 2026-09-10
-
-starting master SHA: 58a3fd49950c407833bffe912f63b429047357fe
 
 pytest gate 1: PASS
 ```text
 .venv\Scripts\python.exe -m pytest tests/api tests/product -q --basetemp=.pytest-tmp-api-v2
-158 passed
+171 passed
 0 failed
 0 errors
 ```
@@ -21,7 +21,7 @@ pytest gate 1: PASS
 pytest gate 2: PASS
 ```text
 .venv\Scripts\python.exe -m pytest tests/layer3 tests/product tests/api -q --basetemp=.pytest-tmp-api-v2
-165 passed
+178 passed
 0 failed
 0 errors
 ```
@@ -29,19 +29,25 @@ pytest gate 2: PASS
 pytest gate 3: PASS
 ```text
 .venv\Scripts\python.exe -m pytest tests/api tests/product tests/layer1 tests/layer2 tests/layer3 -q --basetemp=.pytest-tmp-api-v2
-169 passed
+182 passed
 0 failed
 0 errors
 ```
 
-additional directly affected regression suites: 84 passed + 32 passed; 0 failed; 0 errors
+Additional L3S7 lifecycle/provenance regressions: 6 passed, 0 failed, 0 errors.
+Each required gate reports the existing Pydantic WorkspaceCreateRequest.schema shadowing warning.
 
 real API smoke: PASS
-- Real localhost TCP / Uvicorn startup and shutdown.
+- Real localhost TCP / Uvicorn startup and shutdown; health and capabilities.
 - Paper PDF import/list/read; Schema foo/1.0 Workspace; Paper membership; foo/1.1 creation; old Workspace materialization and Wiki build.
-- Health/capabilities; Conversation; Prompt 202; Run and timeline reads; cooperative pause; same-execution resume; completed Turn and final answer.
+- Conversation; Prompt 202; Run and timeline reads; cooperative pause; same-execution resume; completed Turn and canonical answer citations.
 - LocalExecutionManager -> worker Product -> RuntimeFactory -> RunRuntime -> MainRuntime -> RoleRuntime.
 - Deterministic provider/tool injection; no external provider traffic.
+- Active-run external Schema/Wiki mutation rejected.
+- Startup repairs prepared-unscheduled admission without executing research.
+- Terminal Turn recovery with valid, missing and corrupt checkpoints; repeated startup is idempotent and terminal Run truth is unchanged.
+- Real SQL flush failure during Turn sync leaves completed Run intact and recoverable.
+- Authoritative timeline artifacts and same-run citations filter foreign/missing identities and raw diagnostics.
 
 freeze invariants:
 - Run pause crash-consistency verified
@@ -53,13 +59,22 @@ freeze invariants:
 - Schema 1.0 + later 1.1 lifecycle verified
 - materialization status non-null
 - Paper public errors sanitized
+- canonical citation_refs normalized to existing public citation_references; same-run admitted Evidence ownership retained; source_refs are not answer citations
+- prepared-unscheduled admission converges to failed Run and Turn without automatic execution
+- terminal Run / pending Turn startup recovery is idempotent and provider-independent
+- Product Turn sync failure cannot rewrite authoritative terminal Run outcome
+- external Schema materialization and Base Wiki build blocked during nonterminal Runs; Agent-owned L3S7 evolution preserved
+- meaningful Timeline artifacts resolved from authoritative same-run research records, never raw runtime diagnostic text
 
-DTO cleanup: removed src/transit_scholar/api/schemas.py after caller search and import-source verification; api/schemas/ is the sole DTO source.
+Evidence tests: tests/api/test_freeze_run_durability.py; tests/api/test_freeze_runtime_integration.py; tests/api/test_freeze_schema_lifecycle.py; tests/api/test_product_core_recovery.py; tests/api/test_research_artifact_timeline.py; tests/api/test_workspace_api.py; tests/product/test_answer_citation_projection.py; tests/product/test_research_command_guards.py.
 
-freeze record: committed as a documentation-only descendant of the tested implementation.
+DTO cleanup: src/transit_scholar/api/schemas.py was removed after zero-caller/import-source verification in the prior closure; api/schemas/ remains the sole DTO source.
+Local validation/, doc/, .agentic-sdlc/ and temporary smoke/log artifacts remain untracked; local files are preserved.
 
-Initial record commit: 2b6286d7d57875b0b1bbf776c62bd6e4b1bdc3cb; added only API_FREEZE_RECORD.md. This wording correction is also documentation-only.
+Previous freeze attempt / superseded evidence: implementation 6d9970e14a7e84a5e8b0d5ab88511316779058c7 recorded 158/165/169 passed and smoke PASS. Those historical results remain valid for that baseline but are superseded by this closure.
 
-No production or test code changed after the tested implementation SHA. The gate and smoke results above are local execution evidence for that implementation baseline, not remote CI results. Documentation-only descendants do not require rerunning those gates.
+This record is committed as a documentation-only descendant of the tested implementation SHA. No production or test code changed after that implementation was tested. Results are local execution evidence, not remote CI results. Documentation-only descendants do not require rerunning the gates.
 
-Freeze definition: existing /api/v1 resource model, lifecycle semantics, error contract, and run-control semantics are frozen. Subsequent UI work permits backward-compatible extensions and explicit bug fixes only.
+Remaining nonblocking debt: DOI global settings; CWD-relative PDF staging.
+
+Freeze definition: existing /api/v1 resource model, lifecycle semantics, error contract, and run-control semantics are frozen. Subsequent UI work permits backward-compatible extensions and explicit bug fixes only; no API redesign.

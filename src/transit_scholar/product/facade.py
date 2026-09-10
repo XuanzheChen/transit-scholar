@@ -126,21 +126,28 @@ class TransitScholarProduct:
     def workspace_schema_readiness(self, workspace_id, paper_id=None):
         from transit_scholar.layer3.schema import WorkspaceSchemaService
         result = WorkspaceSchemaService(
-            self.session, data_root=self.data_root
+            self.session, data_root=self.data_root,
+            schema_definition_resolver=self.schema_catalog.resolve,
         ).paper_schema_readiness(workspace_id, [paper_id] if paper_id else None)
         return result
 
     def materialize_workspace_schema(self, workspace_id, paper_id, **options):
         from transit_scholar.layer3.schema import WorkspaceSchemaService
         return WorkspaceSchemaService(
-            self.session, data_root=self.data_root
+            self.session, data_root=self.data_root,
+            schema_definition_resolver=self.schema_catalog.resolve,
         ).materialize(workspace_id, paper_id, **options)
 
     def _workspace_wiki(self):
         from transit_scholar.layer3.wiki import WorkspaceWikiService
         from transit_scholar.metadata.service import read_paper_metadata
+        from transit_scholar.layer3.schema import WorkspaceSchemaService
         return WorkspaceWikiService(
             self.session, data_root=self.data_root,
+            schemas=WorkspaceSchemaService(
+                self.session, data_root=self.data_root,
+                schema_definition_resolver=self.schema_catalog.resolve,
+            ),
             paper_metadata_loader=lambda paper_id: read_paper_metadata(paper_id, session_factory=self.session_factory),
         )
 

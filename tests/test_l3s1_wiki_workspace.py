@@ -1172,7 +1172,7 @@ def test_definition_change_after_capture_cannot_alter_current_build(
 
     state = {"swapped": False, "resolver_calls": 0}
 
-    def guarded_definition_resolver(schema_id):
+    def guarded_definition_resolver(schema_id, version=None):
         # The ONLY legitimate authoritative definition resolution is the
         # build's initial capture (count 1). Any later re-resolution proves
         # an independent authoritative reload (REQ-002 / C-002) and fails.
@@ -1182,7 +1182,7 @@ def test_definition_change_after_capture_cannot_alter_current_build(
                 "an authoritative SchemaDefinition was re-resolved after "
                 "capture (REQ-002/C-002)"
             )
-        return get_schema_definition(schema_id)
+        return get_schema_definition(schema_id, version=version)
 
     monkeypatch.setattr(
         schema_service_module, "get_schema_definition", guarded_definition_resolver

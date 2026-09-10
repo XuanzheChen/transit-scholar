@@ -108,11 +108,19 @@ class RuntimeFactory:
         execution = AgentRunService(session)
         run = execution.get_agent_run(agent_run_id)
         workspace_service = execution.workspaces
-        grounding = WorkspaceGroundingService(session, data_root=self.data_root, workspaces=workspace_service)
+        from transit_scholar.layer2.schema_catalog import SchemaCatalog
+        from transit_scholar.layer3.schema import WorkspaceSchemaService
+        schemas = WorkspaceSchemaService(
+            session, data_root=self.data_root, workspaces=workspace_service,
+            schema_definition_resolver=SchemaCatalog(self.data_root).resolve,
+        )
+        from transit_scholar.layer3.wiki import WorkspaceWikiService
+        wiki = WorkspaceWikiService(session, data_root=self.data_root, schemas=schemas)
+        grounding = WorkspaceGroundingService(session, data_root=self.data_root, workspaces=workspace_service, schemas=schemas, wiki=wiki)
         workspace = grounding.ground(run.workspace_id)
         gateway = self.knowledge or WorkspaceKnowledgeGateway(
             session, workspace_id=run.workspace_id, expected_revision=run.workspace_revision,
-            data_root=self.data_root, workspaces=workspace_service,
+            data_root=self.data_root, workspaces=workspace_service, schemas=schemas, wiki=wiki,
         )
         if self.knowledge_service is not None:
             knowledge = self.knowledge_service
@@ -228,6 +236,13 @@ class _CommitBeforeCheckpointStore:
 
     def save(self, agent_run_id: str, payload: Mapping[str, Any]) -> None:
         self._session.commit()
+        self.save_checkpoint(agent_run_id, payload)
+
+    def commit_boundary(self) -> None:
+        self._session.commit()
+
+    def save_checkpoint(self, agent_run_id: str, payload: Mapping[str, Any]) -> None:
+        """Publish continuation without committing a pending lifecycle transition."""
         if hasattr(self._delegate, "save"):
             self._delegate.save(agent_run_id, payload)
         elif hasattr(self._delegate, "save_state"):

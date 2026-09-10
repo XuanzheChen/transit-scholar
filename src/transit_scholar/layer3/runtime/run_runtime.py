@@ -129,11 +129,24 @@ class RunResearchRuntime:
         return links
 
     def execute(self, *, agent_run_id: str, user_goal: str | None = None, agent_run: Any | None = None) -> dict[str, Any]:
+        try:
+            return self._execute(agent_run_id=agent_run_id, user_goal=user_goal, agent_run=agent_run)
+        except Exception:
+            session = getattr(self.execution_service, "session", None)
+            if session is not None:
+                session.rollback()
+            if self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
+                self.execution_service.update_agent_run_status(agent_run_id, "failed")
+            self._event(agent_run_id, "run.failed", {"reason": "execution_failed"})
+            self._commit_boundary()
+            raise
+
+    def _execute(self, *, agent_run_id: str, user_goal: str | None = None, agent_run: Any | None = None) -> dict[str, Any]:
         run = agent_run or self._load_agent_run(agent_run_id, user_goal)
         state, outcomes, plan = self._load(agent_run_id)
         if state.current_research_session_id:
             state, outcomes, plan = self._recover_current(run, state, outcomes, plan)
-            if state.current_research_session_id and self.is_pause_requested():
+            if state.current_research_session_id:
                 return self._pause_result(state, outcomes, plan)
         state.status = "running"
         self._persist(state, outcomes, plan)
@@ -141,15 +154,7 @@ class RunResearchRuntime:
         while True:
             state.run_steps += 1
             if self.is_pause_requested():
-                state.status = "running"
-                state.termination_reason = "pause_requested"
-                self._persist(state, outcomes, plan)
-                if self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
-                    self.execution_service.update_agent_run_status(agent_run_id, "paused")
-                self._event(agent_run_id, "run.paused", {"reason": "pause_requested"})
-                return {"status": "paused", "termination_reason": "pause_requested", "outcomes": outcomes,
-                        "session_outcomes": outcomes, "research_plan": plan,
-                        "orchestration_state": state, "final_response": None}
+                return self._pause_result(state, outcomes, plan)
             reason = self._limit(state, outcomes)
             if reason: return self._result(state, outcomes, plan, reason)
             snapshot = self._build_snapshot(run, outcomes, plan, state)
@@ -233,12 +238,10 @@ class RunResearchRuntime:
                     raw = self._invoke_session("execute", agent_run_id=agent_run_id, research_session_id=sid, session_handoff=handoff)
                 else:
                     raw = self.session_runtime(session, handoff)
-                if self._session_paused(raw):
-                    return self._pause_result(state, outcomes, plan)
-                outcome = self._adapt_outcome(raw, sid, question)
+                outcome = None if self._session_paused(raw) else self._adapt_outcome(raw, sid, question)
             except Exception as exc:
                 outcome = SessionOutcome(research_session_id=sid, research_question=question, status="failed", failure_reason=str(exc))
-            if outcome.status == "paused":
+            if outcome is None or outcome.status == "paused":
                 return self._pause_result(state, outcomes, plan)
             outcomes.append(outcome); state.current_research_session_id = None; state.current_plan_item_id = None
             if outcome.status == "completed": state.completed_session_ids.append(sid)
@@ -291,11 +294,6 @@ class RunResearchRuntime:
         except Exception as exc:
             outcome = SessionOutcome(research_session_id=sid, research_question=question, status="failed", failure_reason=str(exc))
         if outcome.status == "paused":
-            state.status = "running"
-            state.termination_reason = "pause_requested"
-            self._persist(state, outcomes, plan)
-            if self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
-                self.execution_service.update_agent_run_status(state.agent_run_id, "paused")
             return state, outcomes, plan
         outcomes.append(outcome)
         if outcome.status == "completed":
@@ -311,9 +309,11 @@ class RunResearchRuntime:
         return state, outcomes, plan
 
     def _pause_result(self, state, outcomes, plan):
+        # Role continuation already exists. Publish Run continuation before
+        # committing Main state, session/run lifecycle and run.paused together.
         state.status = "running"
         state.termination_reason = "pause_requested"
-        self._persist(state, outcomes, plan)
+        self._persist(state, outcomes, plan, boundary=True)
         if self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
             self.execution_service.update_agent_run_status(state.agent_run_id, "paused")
         self._event(
@@ -322,6 +322,7 @@ class RunResearchRuntime:
             {"reason": "pause_requested", "research_session_id": state.current_research_session_id},
             state.current_research_session_id,
         )
+        self._commit_boundary()
         return {"status": "paused", "termination_reason": "pause_requested", "outcomes": outcomes,
                 "session_outcomes": outcomes, "research_plan": plan,
                 "orchestration_state": state, "final_response": None}
@@ -577,19 +578,36 @@ class RunResearchRuntime:
         plan_data = data.get("research_plan")
         return state, outcomes, ResearchPlan.model_validate(plan_data) if plan_data else None
 
-    def _persist(self, state, outcomes, plan):
+    def _commit_boundary(self):
+        """Close the authoritative SQL lifecycle/trace transaction before return."""
+        commit = getattr(self.state_store, "commit_boundary", None)
+        if commit is not None:
+            commit()
+        elif getattr(self.execution_service, "session", None) is not None:
+            self.execution_service.session.commit()
+
+    def _persist(self, state, outcomes, plan, *, boundary=False, artifact=None):
         if not self.state_store: return
         payload = {"orchestration_state": state.model_dump(mode="json"), "session_outcomes": [o.model_dump(mode="json") for o in outcomes], "research_plan": plan.model_dump(mode="json") if plan else None}
-        if hasattr(self.state_store, "save"): self.state_store.save(state.agent_run_id, payload)
+        if artifact is not None:
+            payload["final_response"] = artifact.model_dump(mode="json")
+        if boundary and hasattr(self.state_store, "save_checkpoint"):
+            self.state_store.save_checkpoint(state.agent_run_id, payload)
+        elif hasattr(self.state_store, "save"): self.state_store.save(state.agent_run_id, payload)
         elif hasattr(self.state_store, "save_state"):
             self.state_store.save_state(agent_run_id=state.agent_run_id, payload=payload)
         elif hasattr(self.state_store, "set"): self.state_store.set(state.agent_run_id, payload)
     def _result(self, state, outcomes, plan, reason, artifact=None, agent_run=None):
         state.status = "completed" if reason == "semantic_completion" else ("cancelled" if reason == "cancelled" else "terminated"); state.termination_reason = reason
+        self._persist(state, outcomes, plan, boundary=True, artifact=artifact)
         if state.status == "completed":
             self._complete_agent_run(agent_run, outcomes, artifact, reason)
-        self._persist(state, outcomes, plan)
+        elif self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
+            self.execution_service.update_agent_run_status(
+                state.agent_run_id, "cancelled" if state.status == "cancelled" else "failed"
+            )
         self._event(state.agent_run_id, "run.completed" if state.status == "completed" else "run.failed", {"reason": reason})
+        self._commit_boundary()
         return {"status": state.status, "termination_reason": reason, "outcomes": outcomes, "session_outcomes": outcomes, "research_plan": plan, "orchestration_state": state, "final_response": artifact}
 
     def _complete_agent_run(self, agent_run, outcomes, artifact, reason):

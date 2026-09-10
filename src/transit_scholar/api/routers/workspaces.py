@@ -138,7 +138,7 @@ def paper_schema(workspace_id: str, paper_id: str, product=Depends(get_product))
 def materialize_schema(workspace_id: str, paper_id: str, product=Depends(get_product)):
     try:
         result = product.materialize_workspace_schema(workspace_id, paper_id)
-        return SchemaMaterializationResponse(workspace_id=workspace_id, paper_id=paper_id, run_id=getattr(result, "run_id", None), status=getattr(result, "status", None))
+        return SchemaMaterializationResponse(workspace_id=workspace_id, paper_id=paper_id, run_id=getattr(result, "run_id", None), status=result.run_manifest.status)
     except WorkspaceSchemaError as exc:
         _workspace_error(exc, workspace_id)
     except WorkspaceError as exc:

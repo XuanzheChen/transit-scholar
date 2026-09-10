@@ -51,6 +51,7 @@ any run is captured and before L2S3 execution (REQ-003 / AC-002 / AC-003).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -175,10 +176,14 @@ class WorkspaceSchemaService:
         *,
         data_root: Path | str | None = None,
         workspaces: WorkspaceService | None = None,
+        schema_definition_resolver: Callable[[str, str], "SchemaDefinition"] | None = None,
     ) -> None:
         self.session = session
         self.data_root = data_root
         self.workspaces = workspaces or WorkspaceService(session)
+        self.schema_definition_resolver = schema_definition_resolver or (
+            lambda schema_id, version: get_schema_definition(schema_id, version=version)
+        )
 
     # ------------------------------------------------------------------
     # boundary resolution
@@ -234,8 +239,9 @@ class WorkspaceSchemaService:
         storage = self.layout(workspace_id).schema_storage()
         options = dict(l2s2_injections)
         options.setdefault("storage", storage)
-        binding = self.validate_binding(record)
-        return extract_schema(paper_id, binding.schema_id, **options)
+        definition = self.resolve_validated_definition(record)
+        options["definition"] = definition
+        return extract_schema(paper_id, record.schema_binding.schema_id, **options)
 
     # ------------------------------------------------------------------
     # reads (bound + member required; never fall back across Workspaces)
@@ -630,7 +636,7 @@ class WorkspaceSchemaService:
         binding = record.schema_binding
         assert binding is not None  # guaranteed by bound-mode callers
         try:
-            definition = get_schema_definition(binding.schema_id)
+            definition = self.schema_definition_resolver(binding.schema_id, binding.schema_version)
         except Exception as exc:  # noqa: BLE001 - any load failure is a mismatch
             raise SchemaBindingMismatchError(
                 f"workspace {record.workspace_id!r} schema binding mismatch: "

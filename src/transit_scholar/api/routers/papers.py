@@ -40,7 +40,7 @@ def _summary(row) -> PaperSummaryResponse:
 def _action(result) -> PaperActionResponse:
     if result.error_code:
         code, status_code = _result_error_mapping(result.error_code)
-        message = result.error_message if status_code < 500 else "Paper operation failed"
+        message = _public_error_message(result.error_code, result.error_message)
         raise ApiError(
             code,
             message or "Paper operation failed",
@@ -58,16 +58,22 @@ def _result_error_mapping(error_code: str) -> tuple[str, int]:
         return error_code, 409
     if error_code in {"INVALID_FIELDS", "INVALID_DECISION"}:
         return "VALIDATION_ERROR", 422
-    return error_code, 500
+    return "INTERNAL_ERROR", 500
 
 
 def _public_error_message(error_code: str | None, message: str | None) -> str | None:
     """Keep lower-layer diagnostic text out of the public paper contract."""
-    if not message:
+    if not error_code and not message:
         return None
-    if error_code and _result_error_mapping(error_code)[1] >= 500:
-        return "Paper operation failed"
-    return message
+    return {
+        "PAPER_NOT_FOUND": "Paper not found.",
+        "RELATION_NOT_FOUND": "Duplicate relation not found.",
+        "FILE_NOT_FOUND": "Registered paper file is unavailable.",
+        "INVALID_STATE": "Paper state does not permit this operation.",
+        "PAPER_IN_USE": "Paper is used by active workspaces.",
+        "INVALID_FIELDS": "Paper metadata fields are invalid.",
+        "INVALID_DECISION": "Duplicate resolution decision is invalid.",
+    }.get(error_code, "Paper operation failed")
 
 
 @router.get("/papers", response_model=PaperLibraryListResponse)

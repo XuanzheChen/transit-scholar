@@ -128,7 +128,7 @@ def test_workspace_api_dispatches_materialization_after_terminal_run(session, pr
 
     def materialize(workspace_id, paper_id):
         called.update(workspace_id=workspace_id, paper_id=paper_id)
-        return SimpleNamespace(run_id="schema-run", status="completed")
+        return SimpleNamespace(run_id="schema-run", run_manifest=SimpleNamespace(status="completed"))
 
     monkeypatch.setattr(product, "materialize_workspace_schema", materialize)
     response = client.post(

@@ -67,7 +67,10 @@ class FileRoleExecutionStore:
         self.root.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
         try:
-            temporary.write_text(execution.model_dump_json(indent=2) + "\n", encoding="utf-8")
+            with temporary.open("w", encoding="utf-8") as output:
+                output.write(execution.model_dump_json(indent=2) + "\n")
+                output.flush()
+                os.fsync(output.fileno())
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)

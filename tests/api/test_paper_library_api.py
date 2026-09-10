@@ -142,3 +142,21 @@ def test_endpoint_internal_result_sanitization(project_tmp_path, endpoint):
                 second_layer_blockers=[], error_code='DATABASE_WRITE_FAILED', error_message='Paper operation failed')
         for value in ['SECRET_PROVIDER_DIAGNOSTIC', 'password=abc', 'private', 'raw-pdf-parser']:
             assert value not in response.text
+
+
+def test_paper_4xx_diagnostic_is_replaced_by_fixed_public_message(project_tmp_path):
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from transit_scholar.api.dependencies import get_product
+    result = PaperActionResult(paper_id='paper', status='failed', updated_fields=[], audit_log_id=None, error_code='FILE_NOT_FOUND',
+                               error_message='/very/secret/local/path/paper.pdf')
+    app = create_app(data_root=project_tmp_path)
+    app.dependency_overrides[get_product] = lambda: SimpleNamespace(restore_library_paper=lambda _: result)
+    with TestClient(app) as client:
+        response = client.post('/api/v1/papers/paper/restore')
+    assert response.status_code == 404
+    assert response.json()['error'] == {
+        'code': 'NOT_FOUND', 'message': 'Registered paper file is unavailable.',
+        'details': {'paper_id': 'paper'},
+    }
+    assert 'secret' not in response.text

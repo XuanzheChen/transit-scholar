@@ -77,8 +77,8 @@ def list_schema_plugins() -> list[str]:
     return sorted(schema_ids)
 
 
-def get_schema_definition(schema_id: str) -> SchemaDefinition:
-    """Load and validate the plugin whose schema id matches ``schema_id``.
+def get_schema_definition(schema_id: str, version: str | None = None) -> SchemaDefinition:
+    """Load a definition by id, optionally restricted to an exact version.
 
     Raises ``SchemaPluginNotFoundError`` when no plugin matches (message
     contains the requested id) and ``InvalidSchemaDefinitionError`` when a
@@ -89,13 +89,20 @@ def get_schema_definition(schema_id: str) -> SchemaDefinition:
         if not (plugin_dir / "schema.yaml").is_file():
             continue
         definition = _load_definition(plugin_dir, plugin_dir.name)
-        if definition.schema_id == schema_id:
+        if definition.schema_id == schema_id and (version is None or definition.version == version):
             return definition
     # User schemas are stored as immutable version files by the unified
-    # catalog. Existing consumers resolve an id only, so select the latest
-    # available user version for backwards-compatible downstream use.
+    # catalog. Version-bound callers read only the named immutable artifact;
+    # legacy id-only callers retain latest-version lookup.
     from transit_scholar.config import settings
-    user_paths = sorted((settings.data_root / "schemas" / schema_id).glob("*.json"))
+    if Path(schema_id).name != schema_id or schema_id in {".", ".."}:
+        raise SchemaPluginNotFoundError("invalid schema identity")
+    if version is not None and (Path(version).name != version or version in {".", ".."}):
+        raise SchemaPluginNotFoundError("invalid schema version")
+    user_root = settings.data_root / "schemas" / schema_id
+    user_paths = ([user_root / f"{version}.json"] if version is not None
+                  else sorted(user_root.glob("*.json")))
+    user_paths = [path for path in user_paths if path.is_file()]
     if user_paths:
         try:
             import json

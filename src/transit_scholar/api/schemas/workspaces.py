@@ -65,4 +65,4 @@ class SchemaMaterializationResponse(BaseModel):
     workspace_id: str
     paper_id: str
     run_id: str | None = None
-    status: str | None = None
+    status: str

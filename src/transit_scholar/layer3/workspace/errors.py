@@ -42,6 +42,12 @@ class PaperNotMemberError(WorkspaceError):
     code = "paper_not_member"
 
 
+class PaperDeletedError(WorkspaceError):
+    """A globally deleted Paper cannot acquire Workspace membership."""
+
+    code = "invalid_state"
+
+
 class SchemaBindingImmutableError(WorkspaceError):
     """Schema mode/binding mutation is rejected in Layer3 Stage1 (AC-005)."""
 
@@ -84,6 +90,7 @@ __all__ = [
     "WorkspaceNotActiveError",
     "PaperNotFoundError",
     "PaperNotMemberError",
+    "PaperDeletedError",
     "SchemaBindingImmutableError",
     "WorkspaceChangedError",
     "InvalidWorkspaceInputError",

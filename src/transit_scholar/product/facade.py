@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
@@ -23,7 +24,10 @@ from .conversation import ConversationService
 from .projection import ProductStateProjector
 from .research import ResearchService
 from transit_scholar.layer2.schema_catalog import SchemaCatalog
-from .errors import ProductConflictError
+from .errors import ProductConflictError, ProviderUnavailableError
+
+
+_PAPER_MEMBERSHIP_MUTATION_LOCK = RLock()
 
 
 class PaperInUseError(ProductConflictError):
@@ -49,7 +53,18 @@ class RegisteredPaperFile:
 
 
 class TransitScholarProduct:
-    def __init__(self, session, runtime_factory, *, goal_resolver=None, data_root=None, schema_catalog=None, settings_obj=None, session_factory=None):
+    def __init__(
+        self,
+        session,
+        runtime_factory,
+        *,
+        goal_resolver=None,
+        data_root=None,
+        schema_catalog=None,
+        settings_obj=None,
+        session_factory=None,
+        paper_membership_mutation_lock=None,
+    ):
         self.session = session
         self.session_factory = session_factory or sessionmaker(bind=session.get_bind(), autoflush=False, expire_on_commit=False)
         self.settings = settings_obj or settings
@@ -58,6 +73,11 @@ class TransitScholarProduct:
         self.research = ResearchService(session, runtime_factory, conversations=self.conversations, goal_resolver=goal_resolver, data_root=self.data_root)
         self.projector = ProductStateProjector(session, runtime_factory)
         self.schema_catalog = schema_catalog or SchemaCatalog(self.data_root)
+        self._paper_membership_mutation_lock = (
+            paper_membership_mutation_lock
+            if paper_membership_mutation_lock is not None
+            else _PAPER_MEMBERSHIP_MUTATION_LOCK
+        )
 
     def describe_schema(self, definition):
         return self.schema_catalog.describe(definition)
@@ -106,18 +126,20 @@ class TransitScholarProduct:
         return memberships
 
     def add_workspace_paper(self, workspace_id, paper_id):
-        self._guard_workspace_mutation(workspace_id)
-        from transit_scholar.layer3.workspace import WorkspaceService
-        result = WorkspaceService(self.session).add_paper(workspace_id, paper_id)
-        self.session.commit()
-        return result
+        with self._paper_membership_mutation_lock:
+            self._guard_workspace_mutation(workspace_id)
+            from transit_scholar.layer3.workspace import WorkspaceService
+            result = WorkspaceService(self.session).add_paper(workspace_id, paper_id)
+            self.session.commit()
+            return result
 
     def remove_workspace_paper(self, workspace_id, paper_id):
-        self._guard_workspace_mutation(workspace_id)
-        from transit_scholar.layer3.workspace import WorkspaceService
-        result = WorkspaceService(self.session).remove_paper(workspace_id, paper_id)
-        self.session.commit()
-        return result
+        with self._paper_membership_mutation_lock:
+            self._guard_workspace_mutation(workspace_id)
+            from transit_scholar.layer3.workspace import WorkspaceService
+            result = WorkspaceService(self.session).remove_paper(workspace_id, paper_id)
+            self.session.commit()
+            return result
 
     def workspace_schema(self, workspace_id):
         from transit_scholar.layer3.workspace import WorkspaceService
@@ -133,11 +155,20 @@ class TransitScholarProduct:
 
     def materialize_workspace_schema(self, workspace_id, paper_id, **options):
         self._guard_workspace_mutation(workspace_id)
+        from transit_scholar.layer2.schema_extraction.errors import (
+            LLMRequestError,
+            LLMUnavailableError,
+        )
         from transit_scholar.layer3.schema import WorkspaceSchemaService
-        return WorkspaceSchemaService(
-            self.session, data_root=self.data_root,
-            schema_definition_resolver=self.schema_catalog.resolve,
-        ).materialize(workspace_id, paper_id, **options)
+        try:
+            return WorkspaceSchemaService(
+                self.session, data_root=self.data_root,
+                schema_definition_resolver=self.schema_catalog.resolve,
+            ).materialize(workspace_id, paper_id, **options)
+        except (LLMRequestError, LLMUnavailableError) as exc:
+            raise ProviderUnavailableError(
+                "Provider is temporarily unavailable"
+            ) from exc
 
     def _workspace_wiki(self):
         from transit_scholar.layer3.wiki import WorkspaceWikiService
@@ -160,7 +191,17 @@ class TransitScholarProduct:
 
     def build_workspace_wiki(self, workspace_id):
         self._guard_workspace_mutation(workspace_id)
-        return self._workspace_wiki().build(workspace_id)
+        from transit_scholar.layer2.retrieval.providers import UnavailableError
+        from transit_scholar.layer2.schema_extraction.errors import (
+            LLMRequestError,
+            LLMUnavailableError,
+        )
+        try:
+            return self._workspace_wiki().build(workspace_id)
+        except (LLMRequestError, LLMUnavailableError, UnavailableError) as exc:
+            raise ProviderUnavailableError(
+                "Provider is temporarily unavailable"
+            ) from exc
 
     def _read_workspace_wiki(self, workspace_id):
         from transit_scholar.layer3.wiki.errors import (
@@ -282,17 +323,22 @@ class TransitScholarProduct:
         return list_citation_records(paper_id, session_factory=self.session_factory)
 
     def soft_delete_library_paper(self, paper_id: str):
-        active_memberships = self.session.execute(
-            select(WorkspacePaperMembership.workspace_id)
-            .join(Workspace, Workspace.id == WorkspacePaperMembership.workspace_id)
-            .where(
-                WorkspacePaperMembership.paper_id == paper_id,
-                Workspace.status == "active",
+        with self._paper_membership_mutation_lock:
+            active_memberships = self.session.execute(
+                select(WorkspacePaperMembership.workspace_id)
+                .join(Workspace, Workspace.id == WorkspacePaperMembership.workspace_id)
+                .where(
+                    WorkspacePaperMembership.paper_id == paper_id,
+                    Workspace.status == "active",
+                )
+            ).scalars().all()
+            if active_memberships:
+                raise PaperInUseError(paper_id, list(active_memberships))
+            return soft_delete_paper(
+                paper_id,
+                session_factory=self.session_factory,
+                data_root=self.data_root,
             )
-        ).scalars().all()
-        if active_memberships:
-            raise PaperInUseError(paper_id, list(active_memberships))
-        return soft_delete_paper(paper_id, session_factory=self.session_factory, data_root=self.data_root)
 
     def restore_library_paper(self, paper_id: str):
         return restore_paper(paper_id, session_factory=self.session_factory, data_root=self.data_root)

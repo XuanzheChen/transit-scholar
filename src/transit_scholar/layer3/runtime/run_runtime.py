@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import inspect
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from transit_scholar.layer3.run_context import (
 
 
 _CAPABILITY_UNSET = object()
+_LOGGER = logging.getLogger(__name__)
 _RUNTIME_CAPABILITIES = (
     "requires_authoritative_session",
     "requires_execution_service",
@@ -606,14 +608,21 @@ class RunResearchRuntime:
     def _result(self, state, outcomes, plan, reason, artifact=None, agent_run=None):
         state.status = "completed" if reason == "semantic_completion" else ("cancelled" if reason == "cancelled" else "terminated"); state.termination_reason = reason
         self._persist(state, outcomes, plan, boundary=True, artifact=artifact)
+        completed_run = agent_run
         if state.status == "completed":
-            self._complete_agent_run(agent_run, outcomes, artifact, reason)
+            completed_run = self._complete_agent_run(
+                agent_run, outcomes, artifact, reason
+            )
         elif self.execution_service is not None and hasattr(self.execution_service, "update_agent_run_status"):
             self.execution_service.update_agent_run_status(
                 state.agent_run_id, "cancelled" if state.status == "cancelled" else "failed"
             )
         self._event(state.agent_run_id, "run.completed" if state.status == "completed" else "run.failed", {"reason": reason})
         self._commit_boundary()
+        if state.status == "completed":
+            self._attempt_l3s7_completion(
+                completed_run, outcomes, artifact, reason
+            )
         return {"status": state.status, "termination_reason": reason, "outcomes": outcomes, "session_outcomes": outcomes, "research_plan": plan, "orchestration_state": state, "final_response": artifact}
 
     def _complete_agent_run(self, agent_run, outcomes, artifact, reason):
@@ -637,37 +646,81 @@ class RunResearchRuntime:
                         agent_run = updated_run
                 else:
                     agent_run = updated_run
+        return agent_run
+
+    def _attempt_l3s7_completion(self, agent_run, outcomes, artifact, reason):
+        """Run auxiliary memory evolution after Research Truth is committed.
+
+        The completed terminal checkpoint, AgentRun transition and
+        ``run.completed`` trace are authoritative.  L3S7 may enrich memory and
+        Agentic Wiki state, but failure in that auxiliary lifecycle cannot
+        reclassify a successfully synthesized answer.
+        """
         if self.l3s7_lifecycle is None:
             return
-        queries, evidence, claims = [], [], []
-        claim_evidence_links = None
-        if self.ledger_service is not None:
-            for outcome in outcomes:
-                session_id = outcome.research_session_id
-                if hasattr(self.ledger_service, "list_queries"):
-                    queries.extend(self.ledger_service.list_queries(research_session_id=session_id))
-                if hasattr(self.ledger_service, "list_evidence"):
-                    evidence.extend(self.ledger_service.list_evidence(research_session_id=session_id))
-                session_claims = []
-                if hasattr(self.ledger_service, "list_claims"):
-                    session_claims = self.ledger_service.list_claims(research_session_id=session_id)
-                    claims.extend(session_claims)
-                if hasattr(self.ledger_service, "get_claim_evidence"):
-                    if claim_evidence_links is None:
-                        claim_evidence_links = []
-                    claim_evidence_links.extend(
-                        self._collect_claim_evidence_links(session_id, session_claims)
-                    )
-        final_outcome = getattr(artifact, "answer_text", None) or reason
-        self.l3s7_lifecycle.complete_agent_run(
-            agent_run=agent_run,
-            research_sessions=[
-                {"research_session_id": outcome.research_session_id}
-                for outcome in outcomes
-            ],
-            queries=queries,
-            evidence=evidence,
-            claims=claims,
-            claim_evidence_links=claim_evidence_links,
-            final_outcome=final_outcome,
-        )
+        try:
+            queries, evidence, claims = [], [], []
+            claim_evidence_links = None
+            if self.ledger_service is not None:
+                for outcome in outcomes:
+                    session_id = outcome.research_session_id
+                    if hasattr(self.ledger_service, "list_queries"):
+                        queries.extend(self.ledger_service.list_queries(research_session_id=session_id))
+                    if hasattr(self.ledger_service, "list_evidence"):
+                        evidence.extend(self.ledger_service.list_evidence(research_session_id=session_id))
+                    session_claims = []
+                    if hasattr(self.ledger_service, "list_claims"):
+                        session_claims = self.ledger_service.list_claims(research_session_id=session_id)
+                        claims.extend(session_claims)
+                    if hasattr(self.ledger_service, "get_claim_evidence"):
+                        if claim_evidence_links is None:
+                            claim_evidence_links = []
+                        claim_evidence_links.extend(
+                            self._collect_claim_evidence_links(session_id, session_claims)
+                        )
+            final_outcome = getattr(artifact, "answer_text", None) or reason
+            self.l3s7_lifecycle.complete_agent_run(
+                agent_run=agent_run,
+                research_sessions=[
+                    {"research_session_id": outcome.research_session_id}
+                    for outcome in outcomes
+                ],
+                queries=queries,
+                evidence=evidence,
+                claims=claims,
+                claim_evidence_links=claim_evidence_links,
+                final_outcome=final_outcome,
+            )
+            # Preserve successful SQL-backed lifecycle effects without sharing
+            # their failure boundary with the already committed Run outcome.
+            self._commit_boundary()
+        except Exception as exc:  # noqa: BLE001 - explicitly best effort
+            session = getattr(self.execution_service, "session", None)
+            if session is not None:
+                try:
+                    session.rollback()
+                except Exception:  # noqa: BLE001 - completion stays authoritative
+                    pass
+            run_id = (
+                agent_run.get("agent_run_id")
+                if isinstance(agent_run, dict)
+                else getattr(agent_run, "agent_run_id", "unknown")
+            )
+            try:
+                self._event(
+                    run_id,
+                    "run.lifecycle.warning",
+                    {"code": "l3s7_auxiliary_failure"},
+                )
+                self._commit_boundary()
+            except Exception:  # noqa: BLE001 - warning persistence is best effort
+                if session is not None:
+                    try:
+                        session.rollback()
+                    except Exception:  # noqa: BLE001
+                        pass
+            _LOGGER.warning(
+                "L3S7_AUXILIARY_FAILURE: AgentRun %s remains completed (%s)",
+                run_id,
+                type(exc).__name__,
+            )

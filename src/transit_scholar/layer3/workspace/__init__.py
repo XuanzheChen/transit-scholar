@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from .errors import (
     InvalidWorkspaceInputError,
+    PaperDeletedError,
     PaperNotFoundError,
     PaperNotMemberError,
     SchemaBindingImmutableError,
@@ -77,6 +78,7 @@ __all__ = [
     "WorkspaceNotActiveError",
     "PaperNotFoundError",
     "PaperNotMemberError",
+    "PaperDeletedError",
     "SchemaBindingImmutableError",
     "WorkspaceChangedError",
     "InvalidWorkspaceInputError",

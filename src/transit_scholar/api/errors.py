@@ -18,6 +18,7 @@ def workspace_error_status(code: str) -> int:
         return 404
     if code in {
         "workspace_not_active", "workspace_busy", "workspace_changed",
+        "invalid_state",
         "schema_binding_immutable", "schema_disabled", "schema_missing",
         "schema_binding_mismatch", "wiki_unsupported", "wiki_missing",
         "wiki_stale", "wiki_corrupt", "empty_membership",
@@ -34,6 +35,7 @@ def workspace_error_message(code: str, *, fallback: str = "Workspace operation f
         "workspace_not_found": "Workspace not found",
         "paper_not_found": "Paper not found",
         "paper_not_member": "Paper is not a workspace member",
+        "invalid_state": "Paper state does not permit workspace membership",
         "workspace_not_active": "Workspace is not active",
         "workspace_busy": "Workspace has a non-terminal AgentRun",
         "workspace_changed": "Workspace has changed; reload before retrying",

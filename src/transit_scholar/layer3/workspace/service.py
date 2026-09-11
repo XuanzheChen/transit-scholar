@@ -50,6 +50,7 @@ from transit_scholar.db.models import Paper, Workspace, WorkspacePaperMembership
 
 from .errors import (
     InvalidWorkspaceInputError,
+    PaperDeletedError,
     PaperNotFoundError,
     PaperNotMemberError,
     SchemaBindingImmutableError,
@@ -195,6 +196,10 @@ class WorkspaceService:
         if paper is None:
             raise PaperNotFoundError(
                 f"global paper {paper_id!r} does not exist; cannot add membership"
+            )
+        if paper.status == "deleted":
+            raise PaperDeletedError(
+                f"global paper {paper_id!r} is deleted; cannot add membership"
             )
         membership = self.session.execute(
             select(WorkspacePaperMembership).where(

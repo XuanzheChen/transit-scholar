@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from transit_scholar.layer2.schema_extraction.errors import (
+    LLMCapabilityError,
+    LLMRequestError,
+)
 from transit_scholar.layer3.planning import (
     ResearchPlan,
     RunDecision,
@@ -15,6 +20,14 @@ from transit_scholar.layer3.run_context import (
     RunCoordinatorContext,
     RunCoordinatorContextProjector,
 )
+
+#: Transient provider failures at the run-coordination boundary are retried
+#: here, mirroring how role decisions already tolerate them (the production role
+#: policy raises ``ProviderRetryableError`` and the role runtime retries it).
+#: Without this tolerance the run-level decision is the single place where one
+#: stalled, reset, or 5xx provider call aborts an otherwise healthy AgentRun.
+_PROVIDER_RETRY_LIMIT = 2
+_PROVIDER_RETRY_BACKOFF_SECONDS = 1.0
 
 
 class SemanticRunCoordinationPolicy:
@@ -46,10 +59,7 @@ class SemanticRunCoordinationPolicy:
         if self.semantic_decider is not None:
             decider = self.semantic_decider
             context = self.context_projector.project(snapshot)
-            if hasattr(decider, "decide"):
-                raw = decider.decide(context)
-            else:
-                raw = decider(context)
+            raw = self._decide_with_provider_retry(decider, context)
             return RunDecision.model_validate(raw)
         if snapshot.research_plan is not None:
             plan = ResearchPlan.model_validate(snapshot.research_plan)
@@ -63,6 +73,28 @@ class SemanticRunCoordinationPolicy:
         if not snapshot.session_outcomes:
             return RunDecision(mode="direct_session", proposed_questions=[snapshot.user_goal])
         return RunDecision(mode="complete", completion_reason="research_sufficient")
+
+    @staticmethod
+    def _decide_with_provider_retry(decider: Any, context: RunCoordinatorContext) -> Any:
+        """Ask the injected decision maker, tolerating transient provider noise.
+
+        A capability rejection (the provider explicitly refusing the requested
+        structured-output format) is a contract fact and surfaces immediately.
+        Everything else that is an ``LLMRequestError`` — a stall past the
+        configured timeout, a reset connection, or a 5xx envelope — is retried
+        within the same bounded budget the role runtime uses.
+        """
+        attempts = 0
+        while True:
+            try:
+                if hasattr(decider, "decide"):
+                    return decider.decide(context)
+                return decider(context)
+            except LLMRequestError as error:
+                if isinstance(error, LLMCapabilityError) or attempts >= _PROVIDER_RETRY_LIMIT:
+                    raise
+                attempts += 1
+                time.sleep(_PROVIDER_RETRY_BACKOFF_SECONDS * (2 ** (attempts - 1)))
 
 
 SemanticRunCoordinatorPolicy = SemanticRunCoordinationPolicy

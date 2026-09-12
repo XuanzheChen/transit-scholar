@@ -17,6 +17,12 @@ from transit_scholar.layer3.run_context import (
 
 _CAPABILITY_UNSET = object()
 _LOGGER = logging.getLogger(__name__)
+#: A run-level decision that breaks the plan-sequencing contract is re-asked this
+#: many times before the frozen rejection applies. The configured real provider
+#: occasionally proposes its first plan through ``plan_item_updates`` (an update
+#: with no plan to update yet) — a decision-shape slip that a second ask usually
+#: corrects, never a reason to accept an invalid decision.
+_DECISION_REPAIR_LIMIT = 2
 _RUNTIME_CAPABILITIES = (
     "requires_authoritative_session",
     "requires_execution_service",
@@ -164,7 +170,7 @@ class RunResearchRuntime:
             reason = self._limit(state, outcomes)
             if reason: return self._result(state, outcomes, plan, reason)
             snapshot = self._build_snapshot(run, outcomes, plan, state)
-            decision = self._validate(self.coordinator(snapshot))
+            decision = self._coordinate(agent_run_id, snapshot, plan)
             self._event(agent_run_id, "run.coordination", {"mode": decision.mode})
             if decision.mode == "complete":
                 self._event(agent_run_id, "run.synthesis.started", {})
@@ -350,6 +356,66 @@ class RunResearchRuntime:
 
     @staticmethod
     def _validate(value): return value if isinstance(value, RunDecision) else RunDecision.model_validate(value)
+
+    @staticmethod
+    def _plan_sequencing_error(decision: RunDecision, plan: ResearchPlan | None) -> str | None:
+        """Return why a semantic decision cannot be applied without data loss.
+
+        Plan mutations are executed only by the ``planned_research`` branch.
+        Accepting them on another mode would silently discard the model's
+        requested state transition.  Likewise, a direct session needs one
+        explicit focused question; falling back to the run goal can repeat work
+        forever while an existing plan remains pending.
+        """
+        if decision.mode != "planned_research" and (
+            decision.plan_item_updates or decision.abandon_item_ids
+        ):
+            return f"{decision.mode} cannot carry plan mutations"
+        if decision.mode == "direct_session":
+            if len(decision.proposed_questions) != 1:
+                return "direct_session requires exactly one proposed question"
+            if plan is not None and any(item.status == "pending" for item in plan.items):
+                return "direct_session cannot bypass pending research-plan items"
+            return None
+        if decision.mode == "complete":
+            if plan is not None and any(
+                item.status in {"pending", "running"} for item in plan.items
+            ):
+                return "complete requires every research-plan item to be terminal"
+            return None
+        if decision.plan_item_updates and plan is None:
+            return "plan_item_updates require an existing research plan"
+        if plan is not None:
+            known_item_ids = {item.item_id for item in plan.items}
+            unknown_item_ids = {
+                update.item_id
+                for update in decision.plan_item_updates
+                if update.item_id not in known_item_ids
+            }
+            if unknown_item_ids:
+                return f"unknown plan item update IDs: {sorted(unknown_item_ids)}"
+        return None
+
+    def _coordinate(self, agent_run_id, snapshot, plan) -> RunDecision:
+        """Ask for a run decision, re-asking a sequencing-invalid one.
+
+        The decision contract still rejects the invalid shape (the runtime is
+        unchanged about what it accepts); a bounded re-ask simply gives the
+        semantic provider another chance to express the same intent with the
+        correct fields, instead of aborting a multi-minute run on one slip.
+        """
+        attempts = 0
+        while True:
+            decision = self._validate(self.coordinator(snapshot))
+            if attempts >= _DECISION_REPAIR_LIMIT:
+                return decision
+            if self._plan_sequencing_error(decision, plan) is None:
+                return decision
+            attempts += 1
+            self._event(agent_run_id, "run.retry", {
+                "classification": "decision_repair",
+                "reason": self._plan_sequencing_error(decision, plan),
+            })
 
     def _build_snapshot(self, run, outcomes, plan, state):
         build_kwargs = {

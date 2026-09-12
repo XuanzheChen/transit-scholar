@@ -27,6 +27,12 @@ from transit_scholar.layer2.schema_extraction import (
 SENTINEL_KEY = "sk-e2e-test-redact-1234567890"
 
 
+@pytest.fixture
+def no_retry_backoff(monkeypatch):
+    """Retry backoff must never slow the deterministic suite down."""
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+
 class DummyOutput(BaseModel):
     """Minimal output schema used to probe the real provider boundary."""
 
@@ -230,6 +236,100 @@ def test_json_schema_mode_never_falls_back_on_capability_rejection():
     assert calls["n"] == 1
 
 
+def test_auto_falls_back_for_observed_opencode_go_unavailable_wording():
+    """T-010: the configured provider rejects ``json_schema`` with this body.
+
+    Observed against the go/zen OpenAI-compatible endpoint: HTTP 400 with a
+    null ``param`` and ``code="invalid_request_error"`` whose message reports
+    that the response_format type is unavailable. That is a capability
+    rejection, so ``auto`` must retry once in ``json_object`` mode with the
+    schema still supplied as prompt guidance.
+    """
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        if len(payloads) == 1:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": (
+                            "Error from provider (Console Go): Upstream request "
+                            "failed: [invalid_request_error] This response_format "
+                            "type is unavailable now"
+                        ),
+                        "type": "invalid_request_error",
+                        "param": None,
+                        "code": "invalid_request_error",
+                    }
+                },
+            )
+        return _json_response({"value": "ok", "status": "explicit"})
+
+    client = _client(handler, structured_output_mode="auto", max_retries=0)
+    result = client.generate_structured(
+        [{"role": "user", "content": "u"}], DummyOutput
+    )
+    assert result.value == "ok"
+    assert [payload["response_format"]["type"] for payload in payloads] == [
+        "json_schema",
+        "json_object",
+    ]
+    fallback = payloads[1]
+    # The fallback keeps the caller's messages and adds the output schema as
+    # JSON-object prompt guidance instead of sending an empty object.
+    assert fallback["messages"][0] == {"role": "user", "content": "u"}
+    guidance = fallback["messages"][-1]["content"]
+    assert "Pydantic-derived JSON Schema" in guidance
+    assert '"status"' in guidance
+    assert '"confidence"' in guidance
+
+
+def test_observed_unavailable_wording_without_format_target_is_not_capability():
+    """An unavailable message about another request field stays a real error."""
+
+    def handler(request):
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "This model is unavailable now",
+                    "param": "model",
+                    "code": "invalid_request_error",
+                }
+            },
+        )
+
+    client = _client(handler, structured_output_mode="auto", max_retries=0)
+    with pytest.raises(LLMRequestError):
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+
+
+def test_json_schema_mode_never_falls_back_for_observed_unavailable_wording():
+    """``json_schema`` mode must surface the provider rejection verbatim."""
+
+    def handler(request):
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": (
+                        "[invalid_request_error] This response_format type is "
+                        "unavailable now"
+                    ),
+                    "param": "response_format.type",
+                    "code": "invalid_request_error",
+                }
+            },
+        )
+
+    client = _client(handler, structured_output_mode="json_schema", max_retries=0)
+    with pytest.raises(LLMCapabilityError) as excinfo:
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert excinfo.value.error_code == "llm_structured_output_unsupported"
+
+
 # ---------------------------------------------------------------------------
 # failure paths (FR-002): explicit errors, never not_found
 # ---------------------------------------------------------------------------
@@ -387,7 +487,7 @@ def test_http_500_retried_then_explicit_error():
     assert calls["n"] == 3  # 1 + max_retries
 
 
-def test_timeout_raises_explicit_request_error():
+def test_timeout_raises_explicit_request_error(no_retry_backoff):
     def handler(request):
         raise httpx.ReadTimeout("timed out", request=request)
 
@@ -396,6 +496,41 @@ def test_timeout_raises_explicit_request_error():
         client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
     assert excinfo.value.error_code == "llm_request_failed"
     assert excinfo.value.status_code is None
+
+
+def test_transient_timeout_is_retried_within_the_configured_budget(no_retry_backoff):
+    """A single stalled request must not fail the caller (observed provider behaviour)."""
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ReadTimeout("timed out", request=request)
+        return _json_response({"value": "ok", "status": "explicit"})
+
+    client = _client(handler, max_retries=2)
+    out = client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert out.value == "ok"
+    assert calls["n"] == 3  # 1 initial + 2 retries
+
+
+def test_transient_timeout_exhausted_is_an_explicit_request_error(no_retry_backoff):
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    client = _client(handler, max_retries=1)
+    with pytest.raises(LLMRequestError) as excinfo:
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert excinfo.value.error_code == "llm_request_failed"
+    assert calls["n"] == 2  # 1 initial + max_retries
+    client = _client(handler, max_retries=0)
+    calls["n"] = 0
+    with pytest.raises(LLMRequestError):
+        client.generate_structured([{"role": "user", "content": "u"}], DummyOutput)
+    assert calls["n"] == 1  # no retry budget configured, no retry
 
 
 # ---------------------------------------------------------------------------

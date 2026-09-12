@@ -337,6 +337,18 @@ def _strip_code_fence(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+class _TransientLLMRequestError(LLMRequestError):
+    """Transport-level failure that is worth retrying (FR-002/FR-003).
+
+    Observed with the configured real provider: a single request can stall past
+    ``timeout_seconds`` while the provider stays healthy for every other call.
+    Such a failure is transient transport noise, exactly like a 429/5xx, and
+    must be retried inside the configured ``max_retries`` budget instead of
+    failing a whole AgentRun. It stays an ``LLMRequestError`` (same
+    ``error_code``) so callers keep their existing contract.
+    """
+
+
 class OpenAICompatibleLLMClient:
     """Real OpenAI-compatible ``chat/completions`` provider (FR-002/FR-003).
 
@@ -437,6 +449,14 @@ class OpenAICompatibleLLMClient:
             client = httpx.Client(timeout=timeout)
         try:
             return client.post(url, headers=headers, json=payload)
+        except httpx.TransportError as exc:
+            raise _TransientLLMRequestError(
+                self._redact(
+                    f"LLM request failed: {type(exc).__name__}; "
+                    "the configured provider is unreachable or timed out "
+                    f"(timeout={self.config.timeout_seconds}s)"
+                )
+            ) from exc
         except httpx.HTTPError as exc:
             raise LLMRequestError(
                 self._redact(
@@ -540,8 +560,10 @@ class OpenAICompatibleLLMClient:
             {
                 "role": "system",
                 "content": (
-                    "Return exactly one JSON object matching this Pydantic-derived "
-                    f"JSON Schema: {guidance}"
+                    "Return exactly one JSON object and nothing else. Use these "
+                    "exact property names, and only these properties, matching "
+                    "this Pydantic-derived JSON Schema: "
+                    f"{guidance}"
                 ),
             },
         ]
@@ -587,20 +609,31 @@ class OpenAICompatibleLLMClient:
             return False
         error = self._error_payload(response)
         message = str(error.get("message", "")).lower()
-        parameter = str(error.get("param", "")).lower()
-        code = str(error.get("code", "")).lower()
+        parameter = str(error.get("param") or "").lower()
+        code = str(error.get("code") or "").lower()
         explicitly_unsupported = any(
             marker in message
-            for marker in ("not supported", "unsupported", "does not support")
+            for marker in (
+                "not supported",
+                "unsupported",
+                "does not support",
+                "unavailable",
+                "not available",
+                "not implemented",
+            )
         )
-        message_targets_schema_format = (
-            "json_schema" in message
-            and parameter in {
-                "response_format",
-                "response_format.type",
-                "response_format.json_schema",
-            }
-        )
+        # Provider-neutral: the rejection must point at the structured-output
+        # response format, either through the error parameter or through the
+        # message text. Providers word this differently (some name
+        # ``json_schema``, others only the ``response_format`` parameter or a
+        # generic "this response_format type is unavailable now").
+        message_targets_schema_format = any(
+            marker in message for marker in ("json_schema", "response_format")
+        ) or parameter in {
+            "response_format",
+            "response_format.type",
+            "response_format.json_schema",
+        }
         explicit_capability_code = code in {
             "json_schema_not_supported",
             "unsupported_response_format",
@@ -617,7 +650,16 @@ class OpenAICompatibleLLMClient:
         payload: dict[str, Any],
     ) -> Any:
         for attempt in range(self.config.max_retries + 1):
-            response = self._send_once(url, headers, payload)
+            try:
+                response = self._send_once(url, headers, payload)
+            except _TransientLLMRequestError:
+                # A stalled or briefly unreachable provider is retried within the
+                # configured budget, mirroring the 429/5xx handling below. A
+                # single provider hiccup must not fail a multi-minute AgentRun.
+                if attempt < self.config.max_retries:
+                    time.sleep(0.5 * (2 ** attempt))
+                    continue
+                raise
             if response.status_code == 200:
                 return response
             retryable = response.status_code == 429 or response.status_code >= 500
@@ -638,11 +680,20 @@ class OpenAICompatibleLLMClient:
             status_code=response.status_code,
         )
 
-    def _generate_raw_json(self, messages, metadata=None):
+    def _generate_raw_json(self, messages, output_schema, metadata=None):
+        """Return an unvalidated raw JSON object for callers that own validation.
+
+        The caller still owns strict validation (this mode exists for
+        boundaries that re-validate the raw object themselves), but the request
+        must still carry the expected schema as prompt guidance: a schema-less
+        raw-JSON request makes the provider guess field names and fail the
+        caller's own validation.
+        """
+        schema = self._schema(output_schema)
         response = self._request(
             url=self._endpoint_url(),
             headers={"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"},
-            payload={"model": self.config.model, "messages": self._messages_for_mode(messages, "json_object", {}), "response_format": {"type": "json_object"}},
+            payload={"model": self.config.model, "messages": self._messages_for_mode(messages, "json_object", schema), "response_format": {"type": "json_object"}},
         )
         if response.status_code != 200:
             self._raise_request_error(response)
@@ -658,7 +709,7 @@ class OpenAICompatibleLLMClient:
         metadata: dict[str, Any] | None = None,
     ) -> BaseModel:
         if (metadata or {}).get("raw_json_object"):
-            return self._generate_raw_json(messages, metadata)
+            return self._generate_raw_json(messages, output_schema, metadata)
         url = self._endpoint_url()
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",

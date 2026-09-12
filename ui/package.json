@@ -1,0 +1,40 @@
+{
+  "name": "transit-scholar-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "TransitScholar local Web UI (React + TypeScript + Vite)",
+  "scripts": {
+    "dev": "vite --configLoader native",
+    "build": "tsc -b && vite build --configLoader native",
+    "typecheck": "tsc -b",
+    "preview": "vite preview --configLoader native",
+    "smoke:states": "node scripts/smoke-backend-states.mjs",
+    "smoke:workspace-library": "node scripts/smoke-workspace-library.mjs",
+    "smoke:library-management": "node scripts/smoke-library-management.mjs",
+    "smoke:wiki": "node scripts/smoke-wiki.mjs",
+    "smoke:workspace-knowledge": "node scripts/smoke-workspace-knowledge.mjs",
+    "smoke:schemas": "node scripts/smoke-schemas.mjs",
+    "smoke:research": "node scripts/smoke-research-flow.mjs",
+    "smoke:research-live": "node scripts/smoke-research-live.mjs",
+    "smoke:core-flow": "node scripts/smoke-core-flow-live.mjs",
+    "smoke:product-e2e": "node scripts/smoke-product-e2e-live.mjs",
+    "smoke:ux": "node scripts/smoke-ux-polish.mjs",
+    "verify": "npm run build && npm run smoke:states && npm run smoke:research && npm run smoke:ux && npm run smoke:library-management && npm run smoke:workspace-knowledge && npm run smoke:schemas",
+    "lint": "oxlint"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^30.0.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

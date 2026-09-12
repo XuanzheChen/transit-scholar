@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from transit_scholar.layer3.planner import RetrievalCapabilities, RetrievalContext
-from transit_scholar.layer3.planning import ResearchPlanItem, RunDecision
+from transit_scholar.layer3.planning import ResearchPlan, ResearchPlanItem, RunDecision
 from transit_scholar.layer3.prompts.builtin_roles import (
     CLAIM_REASONING_PROMPT,
     EVIDENCE_REASONING_PROMPT,
@@ -195,6 +195,61 @@ def test_insisting_on_invalid_plan_updates_still_raises_value_error():
         runtime.execute(agent_run_id="run-t010-insisting", user_goal="goal")
 
 
+@pytest.mark.parametrize(
+    ("decision", "message"),
+    [
+        (
+            RunDecision(mode="complete", completion_reason="premature"),
+            "complete requires every research-plan item to be terminal",
+        ),
+        (
+            RunDecision(mode="direct_session", proposed_questions=["bypass"]),
+            "direct_session cannot bypass pending research-plan items",
+        ),
+        (
+            RunDecision(
+                mode="complete",
+                completion_reason="premature",
+                abandon_item_ids=["item-pending"],
+            ),
+            "complete cannot carry plan mutations",
+        ),
+    ],
+)
+def test_exhausted_invalid_decision_repair_fails_closed(decision, message):
+    """The final invalid decision is rejected after every repair ask."""
+    calls = {"n": 0}
+
+    def coordinator(_snapshot):
+        calls["n"] += 1
+        return decision
+
+    runtime = RunResearchRuntime(
+        session_runtime=lambda session, handoff: {
+            "status": "completed",
+            "final_response": "session answer",
+        },
+        coordinator=coordinator,
+        synthesis=RunFinalSynthesisRole(),
+        config=RunRuntimeConfig(),
+    )
+    plan = ResearchPlan(
+        plan_id="plan-t010",
+        agent_run_id="run-t010-fail-closed",
+        items=[
+            ResearchPlanItem(
+                item_id="item-pending",
+                research_question="What remains?",
+                order=0,
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        runtime._coordinate("run-t010-fail-closed", object(), plan)
+    assert calls["n"] == 3
+
+
 def test_existing_pending_plan_reasks_direct_session_then_runs_pending_item():
     """A semantic decision cannot bypass and strand an authoritative plan."""
     result = _runtime(
@@ -303,6 +358,34 @@ def test_run_coordination_gives_up_after_the_provider_retry_budget(monkeypatch):
     with pytest.raises(LLMRequestError):
         policy._decide_with_provider_retry(AlwaysFailing(), object())
     assert calls["n"] == _PROVIDER_RETRY_LIMIT + 1
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_run_coordination_does_not_retry_permanent_http_errors(
+    monkeypatch, status_code
+):
+    from transit_scholar.layer2.schema_extraction.errors import LLMRequestError
+    from transit_scholar.layer3.roles.run_coordinator import (
+        SemanticRunCoordinationPolicy,
+    )
+
+    calls = {"n": 0}
+
+    class PermanentlyFailing:
+        def decide(self, context):
+            calls["n"] += 1
+            raise LLMRequestError(
+                f"LLM provider returned HTTP {status_code}",
+                status_code=status_code,
+            )
+
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    decider = PermanentlyFailing()
+    policy = SemanticRunCoordinationPolicy(semantic_decider=decider)
+
+    with pytest.raises(LLMRequestError):
+        policy._decide_with_provider_retry(decider, object())
+    assert calls["n"] == 1
 
 
 def test_run_coordination_surfaces_capability_rejections_immediately(monkeypatch):

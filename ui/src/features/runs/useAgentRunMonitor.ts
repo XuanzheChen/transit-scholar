@@ -58,6 +58,7 @@ export function useAgentRunMonitor(
   const [attempt, setAttempt] = useState(0)
 
   const cursorRef = useRef(0)
+  const requestGenerationRef = useRef(0)
   const trackedRunRef = useRef<string | null>(null)
   const settledRef = useRef(false)
   const notifiedRef = useRef(false)
@@ -84,11 +85,15 @@ export function useAgentRunMonitor(
     let active = true
     const controller = new AbortController()
     const currentRunId = runId
+    requestGenerationRef.current += 1
 
     async function tick(): Promise<void> {
+      const requestGeneration = ++requestGenerationRef.current
+      const isCurrentRequest = () =>
+        active && requestGeneration === requestGenerationRef.current
       try {
         const state = await api.runs.read(currentRunId, { signal: controller.signal })
-        if (!active) {
+        if (!isCurrentRequest()) {
           return
         }
         setRun(state)
@@ -98,7 +103,7 @@ export function useAgentRunMonitor(
         const timeline = await api.runs.timeline(currentRunId, cursorRef.current, {
           signal: controller.signal,
         })
-        if (!active) {
+        if (!isCurrentRequest()) {
           return
         }
         if (timeline.events.length > 0) {
@@ -120,7 +125,7 @@ export function useAgentRunMonitor(
           }
         }
       } catch (cause) {
-        if (!active || controller.signal.aborted) {
+        if (!isCurrentRequest() || controller.signal.aborted) {
           return
         }
         setError(cause)
@@ -147,9 +152,16 @@ export function useAgentRunMonitor(
   }, [runId, enabled, poll, attempt])
 
   const applyState = useCallback((state: RunState) => {
+    // Pause/resume responses are newer authoritative API observations than any
+    // poll already in flight. Invalidate those requests before applying them.
+    requestGenerationRef.current += 1
     setRun(state)
     setStatus('ready')
     setError(null)
+    if (isTerminalRunStatus(state.status)) {
+      settledRef.current = true
+      setSettled(true)
+    }
   }, [])
 
   const refresh = useCallback(() => {

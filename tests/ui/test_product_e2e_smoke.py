@@ -148,6 +148,15 @@ ROLE_PROMPT_PREFIXES = {
 _REAL_CREATE_CONNECTION = socket.create_connection
 
 
+def _require_ac016_prerequisite(condition: bool, message: str) -> None:
+    """Fail closed for the formal gate while retaining ordinary suite skips."""
+    if condition:
+        return
+    if os.environ.get("TRANSIT_SCHOLAR_AC016_FORMAL", "").strip() == "1":
+        pytest.fail(f"AC-016 prerequisite failure: {message}", pytrace=False)
+    pytest.skip(message)
+
+
 # --------------------------------------------------------------- static gate
 
 
@@ -174,6 +183,16 @@ def test_product_e2e_smoke_is_wired_into_the_frontend_scripts():
     scripts = _package()["scripts"]
     assert "smoke:product-e2e" in scripts
     assert "smoke-product-e2e-live.mjs" in scripts["smoke:product-e2e"]
+
+
+def test_formal_ac016_gate_is_fail_closed_and_has_one_entry_point():
+    runner = REPO_ROOT / "scripts" / "run_ac016_acceptance.py"
+    assert runner.is_file(), "the formal AC-016 runner is missing"
+    body = runner.read_text(encoding="utf-8")
+    assert 'TRANSIT_SCHOLAR_AC016_FORMAL' in body
+    assert 'test_real_product_smoke_runs_end_to_end_through_the_built_ui' in body
+    gate = Path(__file__).read_text(encoding="utf-8")
+    assert "AC-016 prerequisite failure" in gate
 
 
 def test_product_e2e_smoke_uses_a_real_pdf_and_real_library_import():
@@ -215,6 +234,14 @@ def test_provider_routing_bridge_only_adds_the_routing_header():
     assert "client.request(" in body
     for fabricated in ("canned", "FakeLLM", "stub_response"):
         assert fabricated not in body, f"the bridge fabricates model output: {fabricated}"
+
+
+def test_provider_routing_bridge_has_one_authoritative_serve_loop():
+    body = BRIDGE_SCRIPT.read_text(encoding="utf-8")
+    main_body = body.split("def main(", 1)[1]
+    assert "thread.join()" in main_body
+    assert "server.serve_forever()" not in main_body
+    assert "target=server.serve_forever" in body
 
 
 # ------------------------------------------------------------------ fixtures
@@ -294,11 +321,13 @@ def configured_provider(monkeypatch):
     model = dotenv.get("TRANSIT_SCHOLAR_LLM_MODEL", "")
     base_url = dotenv.get("TRANSIT_SCHOLAR_LLM_BASE_URL", "")
     api_key = dotenv.get("TRANSIT_SCHOLAR_LLM_API_KEY", "")
-    if provider != "openai_compatible" or not (model and base_url and api_key):
-        pytest.skip(
+    _require_ac016_prerequisite(
+        provider == "openai_compatible" and bool(model and base_url and api_key),
+        (
             "the configured real LLM provider is not available "
             "(TRANSIT_SCHOLAR_LLM_PROVIDER/MODEL/BASE_URL/API_KEY)"
-        )
+        ),
+    )
     for name, value in dotenv.items():
         if name.startswith("TRANSIT_SCHOLAR_LLM_"):
             monkeypatch.setenv(name, value)
@@ -604,6 +633,23 @@ def _diagnostics(context, log_path: Path, prepare_ready: Path, manager, result_p
 # ---------------------------------------------------------------- live gate
 
 
+@pytest.fixture
+def ac016_prerequisites():
+    forced_missing = os.environ.get("TRANSIT_SCHOLAR_AC016_FORCE_MISSING", "").strip()
+    _require_ac016_prerequisite(
+        not forced_missing,
+        f"deliberately unavailable prerequisite: {forced_missing}",
+    )
+    node = shutil.which("node")
+    _require_ac016_prerequisite(node is not None, "Node.js is required to drive the built frontend")
+    _require_ac016_prerequisite(
+        (UI_DIST / "index.html").is_file(),
+        "run `npm run build` in ui/ before the real product smoke",
+    )
+    _require_ac016_prerequisite(PDF_FIXTURE.is_file(), f"missing PDF fixture {PDF_FIXTURE}")
+    return node
+
+
 class _RecordingExecutionManager(LocalExecutionManager):
     """The production execution manager that keeps worker exceptions.
 
@@ -625,15 +671,9 @@ class _RecordingExecutionManager(LocalExecutionManager):
 
 
 def test_real_product_smoke_runs_end_to_end_through_the_built_ui(
-    product_root, llm_bridge, configured_provider
+    ac016_prerequisites, product_root, llm_bridge, configured_provider
 ):
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("Node.js is required to drive the built frontend")
-    if not (UI_DIST / "index.html").is_file():
-        pytest.skip("run `npm run build` in ui/ before the real product smoke")
-    if not PDF_FIXTURE.is_file():
-        pytest.skip(f"missing PDF fixture {PDF_FIXTURE}")
+    node = ac016_prerequisites
 
     import uvicorn
 

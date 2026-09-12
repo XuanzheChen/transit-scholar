@@ -80,9 +80,9 @@ class SemanticRunCoordinationPolicy:
 
         A capability rejection (the provider explicitly refusing the requested
         structured-output format) is a contract fact and surfaces immediately.
-        Everything else that is an ``LLMRequestError`` — a stall past the
-        configured timeout, a reset connection, or a 5xx envelope — is retried
-        within the same bounded budget the role runtime uses.
+        Transport failures without an HTTP status, HTTP 429, and 5xx envelopes
+        are retried within the same bounded budget the role runtime uses.
+        Permanent HTTP failures surface immediately.
         """
         attempts = 0
         while True:
@@ -91,7 +91,17 @@ class SemanticRunCoordinationPolicy:
                     return decider.decide(context)
                 return decider(context)
             except LLMRequestError as error:
-                if isinstance(error, LLMCapabilityError) or attempts >= _PROVIDER_RETRY_LIMIT:
+                status_code = error.status_code
+                retryable = (
+                    status_code is None
+                    or status_code == 429
+                    or 500 <= status_code < 600
+                )
+                if (
+                    isinstance(error, LLMCapabilityError)
+                    or not retryable
+                    or attempts >= _PROVIDER_RETRY_LIMIT
+                ):
                     raise
                 attempts += 1
                 time.sleep(_PROVIDER_RETRY_BACKOFF_SECONDS * (2 ** (attempts - 1)))

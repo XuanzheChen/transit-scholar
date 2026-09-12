@@ -107,6 +107,9 @@ const backend = {
   turnSubmissions: 0,
   conversationTitle: null,
   deferredAnswerReads: 0,
+  deferNextRunRead: false,
+  deferredRunReadPending: false,
+  releaseDeferredRunRead: null,
 }
 
 function runState() {
@@ -296,7 +299,19 @@ function fetchShim(input, init = {}) {
   }
   if (route === `GET /api/v1/runs/${RUN_ID}`) {
     revealNextEvent()
-    return jsonResponse(runState())
+    const response = jsonResponse(runState())
+    if (backend.deferNextRunRead) {
+      backend.deferNextRunRead = false
+      backend.deferredRunReadPending = true
+      return new Promise((resolve) => {
+        backend.releaseDeferredRunRead = () => {
+          backend.deferredRunReadPending = false
+          backend.releaseDeferredRunRead = null
+          resolve(response)
+        }
+      })
+    }
+    return response
   }
   if (route === `GET /api/v1/runs/${RUN_ID}/timeline`) {
     const after = Number(url.searchParams.get('after_sequence') ?? '0')
@@ -549,6 +564,13 @@ try {
 
   /* ------------------------------------------------------- 4. pause/resume */
 
+  // Hold one polling response while it still reports `running`. The newer
+  // pause response must win even when this older response arrives afterward.
+  backend.deferNextRunRead = true
+  await waitFor(
+    'an in-flight stale Run poll',
+    () => backend.deferredRunReadPending,
+  )
   dom2.clickTestId('research-primary-control')
   await waitFor(
     'the primary control to show the Pausing state',
@@ -564,6 +586,12 @@ try {
   if (backend.pauseCalls.length !== 1 || backend.pauseCalls[0] !== RUN_ID) {
     fail(`pause did not target the active run: ${JSON.stringify(backend.pauseCalls)}`)
   }
+  backend.releaseDeferredRunRead?.()
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  if (dom2.requireTestId('research-primary-control').getAttribute('data-control') !== 'pausing') {
+    fail('an older Run poll overwrote the newer pause response')
+  }
+  pass('an out-of-order stale Run poll could not overwrite the newer API state')
   pass('pause entered a visible pausing state for the active run')
 
   // The cooperative pause reaches a safe point: the API now reports paused.

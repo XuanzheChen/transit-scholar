@@ -407,14 +407,15 @@ class RunResearchRuntime:
         attempts = 0
         while True:
             decision = self._validate(self.coordinator(snapshot))
+            sequencing_error = self._plan_sequencing_error(decision, plan)
+            if sequencing_error is None:
+                return decision
             if attempts >= _DECISION_REPAIR_LIMIT:
-                return decision
-            if self._plan_sequencing_error(decision, plan) is None:
-                return decision
+                raise ValueError(sequencing_error)
             attempts += 1
             self._event(agent_run_id, "run.retry", {
                 "classification": "decision_repair",
-                "reason": self._plan_sequencing_error(decision, plan),
+                "reason": sequencing_error,
             })
 
     def _build_snapshot(self, run, outcomes, plan, state):

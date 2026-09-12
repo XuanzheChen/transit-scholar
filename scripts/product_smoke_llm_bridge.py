@@ -266,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         name, _, value = item.partition("=")
         extra.append((name.strip(), value.strip()))
 
-    server, _thread = start_bridge(
+    server, thread = start_bridge(
         target=args.target,
         local_base_path=args.local_base_path,
         port=args.port,
@@ -280,9 +280,12 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.write(f"LLM_BRIDGE_PORT={port}\n")
     sys.stdout.flush()
     try:
-        server.serve_forever()
+        # ``start_bridge`` owns the sole serve loop in its background thread.
+        # The command-line process only waits for that authoritative loop.
+        thread.join()
     except KeyboardInterrupt:
-        pass
+        server.shutdown()
+        thread.join()
     finally:
         server.server_close()
     return 0

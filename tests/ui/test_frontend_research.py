@@ -105,6 +105,11 @@ def test_run_monitoring_polls_status_and_incremental_timeline():
     # Polling stops on a terminal API status.
     assert "isTerminalRunStatus(state.status)" in monitor
     assert "settledRef.current = true" in monitor
+    # Every poll owns a generation, and direct pause/resume API responses
+    # invalidate older in-flight generations before applying their state.
+    assert "requestGenerationRef" in monitor
+    assert "requestGeneration === requestGenerationRef.current" in monitor
+    assert "requestGenerationRef.current += 1" in monitor
 
     view = _read(RESEARCH_VIEW)
     assert "useAgentRunMonitor(" in view
@@ -253,6 +258,8 @@ def test_research_smoke_harnesses_are_available():
         "citation-reference-1",
         "citation-detail-dialog",
         "open-citation-pdf",
+        "deferredRunReadPending",
+        "an out-of-order stale Run poll could not overwrite",
     ):
         assert marker in body, f"deterministic research smoke does not exercise {marker}"
 

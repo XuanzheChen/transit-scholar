@@ -19,6 +19,7 @@
     "smoke:research-live": "node scripts/smoke-research-live.mjs",
     "smoke:core-flow": "node scripts/smoke-core-flow-live.mjs",
     "smoke:product-e2e": "node scripts/smoke-product-e2e-live.mjs",
+    "accept:ac016": "../.venv/Scripts/python.exe ../scripts/run_ac016_acceptance.py",
     "smoke:ux": "node scripts/smoke-ux-polish.mjs",
     "verify": "npm run build && npm run smoke:states && npm run smoke:research && npm run smoke:ux && npm run smoke:library-management && npm run smoke:workspace-knowledge && npm run smoke:schemas",
     "lint": "oxlint"

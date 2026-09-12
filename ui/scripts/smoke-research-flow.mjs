@@ -37,6 +37,7 @@ const PAPER_ID = 'paper-smoke'
 const FILE_ID = 'file-smoke'
 const FINAL_ANSWER = 'The intervention reduces delay across both retrieved sources.'
 const SETTLE_TIMEOUT_MS = 20000
+const RUN_POLL_STARVATION_WINDOW_MS = 1800
 
 function fail(message) {
   process.stderr.write(`FAIL: ${message}\n`)
@@ -110,6 +111,7 @@ const backend = {
   deferNextRunRead: false,
   deferredRunReadPending: false,
   releaseDeferredRunRead: null,
+  runReadRequests: 0,
 }
 
 function runState() {
@@ -298,6 +300,7 @@ function fetchShim(input, init = {}) {
     return jsonResponse({ turn_id: 'turn-1', agent_run_id: RUN_ID }, 202)
   }
   if (route === `GET /api/v1/runs/${RUN_ID}`) {
+    backend.runReadRequests += 1
     revealNextEvent()
     const response = jsonResponse(runState())
     if (backend.deferNextRunRead) {
@@ -566,11 +569,17 @@ try {
 
   // Hold one polling response while it still reports `running`. The newer
   // pause response must win even when this older response arrives afterward.
+  const runReadsBeforeSlowPoll = backend.runReadRequests
   backend.deferNextRunRead = true
   await waitFor(
     'an in-flight stale Run poll',
     () => backend.deferredRunReadPending,
   )
+  await new Promise((resolve) => setTimeout(resolve, RUN_POLL_STARVATION_WINDOW_MS))
+  if (backend.runReadRequests !== runReadsBeforeSlowPoll + 1) {
+    fail('slow Run polling started overlapping requests instead of remaining single-in-flight')
+  }
+  pass('a slow Run poll remained single-in-flight and could still complete')
   dom2.clickTestId('research-primary-control')
   await waitFor(
     'the primary control to show the Pausing state',

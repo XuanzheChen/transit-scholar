@@ -86,6 +86,15 @@ export function useAgentRunMonitor(
     const controller = new AbortController()
     const currentRunId = runId
     requestGenerationRef.current += 1
+    let timer: number | undefined
+
+    function scheduleNext(): void {
+      if (active && poll && !settledRef.current) {
+        timer = window.setTimeout(() => {
+          void tick()
+        }, RUN_POLL_INTERVAL_MS)
+      }
+    }
 
     async function tick(): Promise<void> {
       const requestGeneration = ++requestGenerationRef.current
@@ -99,6 +108,15 @@ export function useAgentRunMonitor(
         setRun(state)
         setError(null)
         setStatus('ready')
+
+        if (isTerminalRunStatus(state.status)) {
+          settledRef.current = true
+          setSettled(true)
+          if (!notifiedRef.current) {
+            notifiedRef.current = true
+            onSettledRef.current?.(currentRunId)
+          }
+        }
 
         const timeline = await api.runs.timeline(currentRunId, cursorRef.current, {
           signal: controller.signal,
@@ -116,37 +134,24 @@ export function useAgentRunMonitor(
           })
         }
 
-        if (isTerminalRunStatus(state.status)) {
-          settledRef.current = true
-          setSettled(true)
-          if (!notifiedRef.current) {
-            notifiedRef.current = true
-            onSettledRef.current?.(currentRunId)
-          }
-        }
       } catch (cause) {
         if (!isCurrentRequest() || controller.signal.aborted) {
           return
         }
         setError(cause)
         setStatus((previous) => (previous === 'ready' ? 'ready' : 'error'))
+      } finally {
+        scheduleNext()
       }
     }
 
     void tick()
-    const timer = poll
-      ? window.setInterval(() => {
-          if (!settledRef.current) {
-            void tick()
-          }
-        }, RUN_POLL_INTERVAL_MS)
-      : undefined
 
     return () => {
       active = false
       controller.abort()
       if (timer !== undefined) {
-        window.clearInterval(timer)
+        window.clearTimeout(timer)
       }
     }
   }, [runId, enabled, poll, attempt])

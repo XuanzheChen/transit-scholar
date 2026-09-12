@@ -97,7 +97,8 @@ def test_run_monitoring_polls_status_and_incremental_timeline():
     assert "api.runs.timeline(" in monitor
     # Polling interval inside the recommended 500-1000 ms window.
     assert "RUN_POLL_INTERVAL_MS = 800" in monitor
-    assert "window.setInterval" in monitor
+    assert "window.setTimeout" in monitor
+    assert "window.setInterval" not in monitor
     # Incremental Timeline fetch through the API sequence cursor.
     assert "cursorRef" in monitor
     assert "timeline.next_sequence" in monitor
@@ -259,6 +260,7 @@ def test_research_smoke_harnesses_are_available():
         "citation-detail-dialog",
         "open-citation-pdf",
         "deferredRunReadPending",
+        "a slow Run poll remained single-in-flight",
         "an out-of-order stale Run poll could not overwrite",
     ):
         assert marker in body, f"deterministic research smoke does not exercise {marker}"

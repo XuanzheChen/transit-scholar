@@ -250,6 +250,50 @@ def test_exhausted_invalid_decision_repair_fails_closed(decision, message):
     assert calls["n"] == 3
 
 
+@pytest.mark.parametrize(
+    ("with_plan", "message"),
+    [
+        (False, "abandon_item_ids require an existing research plan"),
+        (True, "unknown abandon item IDs: \\['ghost'\\]"),
+    ],
+)
+def test_exhausted_unknown_abandon_item_repair_fails_closed(with_plan, message):
+    """Unknown abandon mutations are never accepted or silently discarded."""
+    calls = {"n": 0}
+    decision = RunDecision(mode="planned_research", abandon_item_ids=["ghost"])
+
+    def coordinator(_snapshot):
+        calls["n"] += 1
+        return decision
+
+    runtime = RunResearchRuntime(
+        session_runtime=lambda session, handoff: {
+            "status": "completed",
+            "final_response": "session answer",
+        },
+        coordinator=coordinator,
+        synthesis=RunFinalSynthesisRole(),
+        config=RunRuntimeConfig(),
+    )
+    plan = None
+    if with_plan:
+        plan = ResearchPlan(
+            plan_id="plan-t010-abandon",
+            agent_run_id="run-t010-abandon",
+            items=[
+                ResearchPlanItem(
+                    item_id="known",
+                    research_question="Known question",
+                    order=0,
+                )
+            ],
+        )
+
+    with pytest.raises(ValueError, match=message):
+        runtime._coordinate("run-t010-abandon", object(), plan)
+    assert calls["n"] == 3
+
+
 def test_existing_pending_plan_reasks_direct_session_then_runs_pending_item():
     """A semantic decision cannot bypass and strand an authoritative plan."""
     result = _runtime(

@@ -385,6 +385,8 @@ class RunResearchRuntime:
             return None
         if decision.plan_item_updates and plan is None:
             return "plan_item_updates require an existing research plan"
+        if decision.abandon_item_ids and plan is None:
+            return "abandon_item_ids require an existing research plan"
         if plan is not None:
             known_item_ids = {item.item_id for item in plan.items}
             unknown_item_ids = {
@@ -394,6 +396,12 @@ class RunResearchRuntime:
             }
             if unknown_item_ids:
                 return f"unknown plan item update IDs: {sorted(unknown_item_ids)}"
+            unknown_abandon_item_ids = set(decision.abandon_item_ids) - known_item_ids
+            if unknown_abandon_item_ids:
+                return (
+                    "unknown abandon item IDs: "
+                    f"{sorted(unknown_abandon_item_ids)}"
+                )
         return None
 
     def _coordinate(self, agent_run_id, snapshot, plan) -> RunDecision:
